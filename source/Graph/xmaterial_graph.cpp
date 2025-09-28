@@ -1,11 +1,9 @@
 #ifdef EDITOR
-    #include "dependencies/xmaterial_compiler/source/graph/xmaterial_graph.h"
-    #include "imgui.h"
-    #include "imgui_node_editor.h"
-#else
-    #include "source/graph/xmaterial_graph.h"
+    #include "dependencies/imgui/imgui.h"
+    #include "dependencies/imgui-node-editor/imgui_node_editor.h"
 #endif
 
+#include "source/graph/xmaterial_graph.h"
 #include "dependencies/xproperty/source/examples/xcore_sprop_serializer/xcore_sprop_serializer.h"
 
 namespace xmaterial_compiler

@@ -3,6 +3,7 @@
 #pragma once
 #include "source/Graph/xmaterial_graph.h"
 #include "dependencies/xresource_pipeline_v2/source/xresource_pipeline.h"
+#include "dependencies/xresource_guid/source/xresource_guid.h"
 
 namespace xmaterial_compiler
 {
@@ -10,6 +11,8 @@ namespace xmaterial_compiler
     { OK
     , FAILURE
     };
+
+    constexpr static auto type_guid_v = xresource::type_guid("Material");
 
     struct instance : xresource_pipeline::compiler::base
     {
