@@ -6,6 +6,7 @@
 #include "dependencies/xstrtool/source/xstrtool.h"
 #include <fstream>
 #include <cerrno>   // for errno
+#include <iostream>
 
 
 #pragma comment(lib, "../../dependencies/shaderc/lib/shaderc_combined.lib")
@@ -285,6 +286,8 @@ namespace xmaterial_compiler
                 if (T.m_bValid)
                 {
                     std::ofstream outFile(T.m_DataPath, std::ios::binary);
+                    //std::wcout << T.m_DataPath << L"\n";
+
                     if (!outFile) 
                     {
                         std::array< char, 256 > buf;

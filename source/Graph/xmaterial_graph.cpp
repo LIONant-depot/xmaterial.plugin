@@ -216,7 +216,7 @@ namespace xmaterial_compiler
         TextFile.Record("Info"
             , [&](xerr& Error)
             {
-                true
+                false
                 || (Error = TextFile.Field("nNodes", nNodeCount))
                 || (Error = TextFile.Field("nConnections", nConnectionsCount));
             });
@@ -238,7 +238,7 @@ namespace xmaterial_compiler
             TextFile.Record("Node"
                 , [&](xerr& Error)
                 {
-                    true
+                    false
                     || (Error = TextFile.Field("Guid", Guid.m_Value))
                     || (Error = TextFile.Field("PrefabGuid", PrefabGuid.m_Value));
                 });

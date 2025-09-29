@@ -10,6 +10,6 @@
   "PipelinePlugin/TypeGUID/Value"            ;u64    #C59E01444175409E
   "PipelinePlugin/Icon"                      ;string "\xEE\xAE\x9F"        
   "PipelinePlugin/Details/RunAfter[]"        ;s64    0                
-  "PipelinePlugin/Details/CompilationScript" ;wstring "Build\\CreateAndBuildProject.bat"
-  "PipelinePlugin/Details/DebugCompiler"     ;wstring "Build\\xmaterial_compiler.vs2022\\Debug\\xmaterial_compiler.exe"               
-  "PipelinePlugin/Details/ReleaseCompiler"   ;wstring "Build\\xmaterial_compiler.vs2022\\Release\\xmaterial_compiler.exe"               
+  "PipelinePlugin/Details/CompilationScript" ;wstring "Cache\\Plugins\\xmaterial.plugin\\Build\\CreateAndBuildProject.bat"
+  "PipelinePlugin/Details/DebugCompiler"     ;wstring "Cache\\Plugins\\xmaterial.plugin\\Build\\xmaterial_compiler.vs2022\\Debug\\xmaterial_compiler.exe"               
+  "PipelinePlugin/Details/ReleaseCompiler"   ;wstring "Cache\\Plugins\\xmaterial.plugin\\Build\\xmaterial_compiler.vs2022\\Release\\xmaterial_compiler.exe"               
