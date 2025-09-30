@@ -8,6 +8,7 @@
 #include <cerrno>   // for errno
 #include <iostream>
 
+#include "source/xmaterial_data_file.h"
 
 #pragma comment(lib, "../../dependencies/shaderc/lib/shaderc_combined.lib")
 
@@ -234,7 +235,7 @@ namespace xmaterial_compiler
             const auto& shaderString = GenerateGLSL(m_graph);
 
             // Print the generated shader
-            printf(shaderString.c_str());
+            LogMessage( xresource_pipeline::msg_type::INFO, shaderString);
 
             //
             // Generate the sprv shader
@@ -273,7 +274,17 @@ namespace xmaterial_compiler
             // Export the compiled material
             //
             std::vector<uint32_t> spirv(result.cbegin(), result.cend());
-            printf("Shader compiled successfully! SPIR-V size: %zu words.\n", spirv.size() );
+            LogMessage(xresource_pipeline::msg_type::INFO, std::format("Shader compiled successfully! SPIR-V size: {} words.\n", spirv.size()) );
+
+
+            //
+            // Create the actual material
+            //
+            xmaterial::data_file MaterialDataFile;
+
+            MaterialDataFile.m_pShader          = spirv.data();
+            MaterialDataFile.m_ShaderSize       = static_cast<std::uint32_t>(spirv.size());
+            MaterialDataFile.m_Flags.m_bAlpha   = false;
 
             //
             // Serialize Final xBitmap
@@ -285,27 +296,9 @@ namespace xmaterial_compiler
 
                 if (T.m_bValid)
                 {
-                    std::ofstream outFile(T.m_DataPath, std::ios::binary);
-                    //std::wcout << T.m_DataPath << L"\n";
-
-                    if (!outFile) 
-                    {
-                        std::array< char, 256 > buf;
-                        if ( !strerror_s(buf.data(), buf.size(), errno)) std::format_to_n(buf.data(), buf.size(), "Failed to get additional details");
-                        xerr::LogMessage<state::FAILURE>( std::format("Error opening the resource file {} - {}", xstrtool::To(T.m_DataPath), buf.data()) );
-                        return xerr::create_f<state, "Error opening the resource file for saving">();
-                    }
-
-                    outFile.write(reinterpret_cast<const char*>(spirv.data()), spirv.size() * sizeof(uint32_t));
-                    if (!outFile)
-                    {
-                        std::array< char, 256 > buf;
-                        if (!strerror_s(buf.data(), buf.size(), errno)) std::format_to_n(buf.data(), buf.size(), "Failed to get additional details");
-                        xerr::LogMessage<state::FAILURE>(std::format("Error writing the file resource file - {} - {}", xstrtool::To(T.m_DataPath), buf.data()));
-                        return xerr::create_f<state, "Error writing the resource file">();
-                    }
-
-                    outFile.close();
+                    xserializer::stream Stream;
+                    if ( auto Err = Stream.Save(T.m_DataPath, MaterialDataFile, xserializer::compression_level::HIGH); Err )
+                        return Err;
                 }
             }
             displayProgressBar("Serializing", 1);
