@@ -52,9 +52,9 @@ namespace xmaterial_compiler
         const pin*          FindPinConst            (const node& n, pin_guid pid, bool& isInput, int& idxOut, int& subOut) const;
         void                CreateGraph             (graph& g);
 
-        std::unordered_map<node_guid, std::unique_ptr<node>>                m_PrefabNodes;//right click option like sampler node etc
-        std::unordered_map<node_guid, std::unique_ptr<node>>                m_InstanceNodes;
-        std::unordered_map<connection_guid, std::unique_ptr<connection>>    m_Connections;
+        std::unordered_map<node_guid, std::unique_ptr<node>>                m_PrefabNodes;      // right click option like sampler node etc
+        std::map<node_guid, std::unique_ptr<node>>                          m_InstanceNodes;    // Keep certain maps as simple maps so it will save the information in the same order
+        std::map<connection_guid, std::unique_ptr<connection>>              m_Connections;      // Keep certain maps as simple maps so it will save the information in the same order
         std::unordered_map<type_guid, std::unique_ptr<sType>>               m_type;
         std::unordered_map<pin_guid, node_guid>                             m_PinToNode;
         shader_details                                                      m_shaderDetail;
