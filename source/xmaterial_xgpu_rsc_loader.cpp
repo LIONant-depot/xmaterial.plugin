@@ -2,11 +2,12 @@
 #include "xmaterial_xgpu_rsc_loader.h"
 #include "xmaterial_runtime.h"
 #include "dependencies/xserializer/source/xserializer.h"
+#include "dependencies/xresource_guid/source/bridges/xresource_xproperty_bridge.h"
 
 //
 // We will register the loader
 //
-inline static auto s_MaterialLoaderRegistration = xresource::loader_registration<xrsc::material_type_guid_v>{};
+inline static auto s_MaterialRegistrations = xresource::common_registrations<xrsc::material_type_guid_v>{};
 
 //------------------------------------------------------------------
 
