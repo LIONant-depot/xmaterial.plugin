@@ -2,8 +2,12 @@
 #define XMATERIAL_GRAPH_NODE_H
 #pragma once
 
-#include "xmaterial_graph_node_guid.h"
+#ifdef EDITOR
+    #include "source/Examples/E10_TextureResourcePipeline/E10_AssetMgr.h"
+#endif
 
+#include "xmaterial_graph_node_guid.h"
+#include "source/xtexture_xgpu_rsc_loader.h"
 
 struct any_friend : xproperty::any
 {
@@ -12,15 +16,17 @@ struct any_friend : xproperty::any
     , FLOAT
     , INT
     , STRING
+    , TEXTURE_RESOURCE
     , UNKNOWN 
     };
 
     inline static constexpr auto type_enum_v = std::array
-    { xproperty::settings::enum_item{ "NONE",   type::NONE      }
-    , xproperty::settings::enum_item{ "FLOAT",  type::FLOAT     }
-    , xproperty::settings::enum_item{ "INT",    type::INT       }
-    , xproperty::settings::enum_item{ "STRING", type::STRING    }
-    , xproperty::settings::enum_item{ "UNKNOWN",type::UNKNOWN   }
+    { xproperty::settings::enum_item{ "NONE",               type::NONE              }
+    , xproperty::settings::enum_item{ "FLOAT",              type::FLOAT             }
+    , xproperty::settings::enum_item{ "INT",                type::INT               }
+    , xproperty::settings::enum_item{ "STRING",             type::STRING            }
+    , xproperty::settings::enum_item{ "TEXTURE_RESOURCE",   type::TEXTURE_RESOURCE  }
+    , xproperty::settings::enum_item{ "UNKNOWN",            type::UNKNOWN           }
     };
 
     public:
@@ -36,9 +42,10 @@ struct any_friend : xproperty::any
                 if (O.m_pType == nullptr) Enum = type::NONE;
                 else switch (O.m_pType->m_GUID)
                 {
-                case xproperty::settings::var_type<float>::guid_v: Enum = type::FLOAT; break;
-                case xproperty::settings::var_type<int>::guid_v:  Enum = type::INT; break;
-                case xproperty::settings::var_type<std::string>::guid_v:  Enum = type::STRING; break;
+                case xproperty::settings::var_type<float>::guid_v:                  Enum = type::FLOAT; break;
+                case xproperty::settings::var_type<int>::guid_v:                    Enum = type::INT; break;
+                case xproperty::settings::var_type<std::string>::guid_v:            Enum = type::STRING; break;
+                case xproperty::settings::var_type<xresource::full_guid>::guid_v:   Enum = type::TEXTURE_RESOURCE; break;
                 default: Enum = type::UNKNOWN; break;
                 }
             }
@@ -47,10 +54,11 @@ struct any_friend : xproperty::any
                 switch (Enum)
                 {
                 default:
-                case type::NONE:  O = {}; break;
-                case type::FLOAT: O.set<float>(0);  break;
-                case type::INT:   O.set<int>(0);  break;
-                case type::STRING: O.set<std::string>(""); break;
+                case type::NONE:                O = {};                             break;
+                case type::FLOAT:               O.set<float>(0);                    break;
+                case type::INT:                 O.set<int>(0);                      break;
+                case type::STRING:              O.set<std::string>("");             break;
+                case type::TEXTURE_RESOURCE:    O.set<xresource::full_guid>({});    break;
                 }
             }
         }
@@ -95,6 +103,20 @@ struct any_friend : xproperty::any
                 Flags.m_bShowReadOnly = false;
                 Flags.m_bDontShow = Any.m_pType == nullptr || Any.m_pType->m_GUID != xproperty::settings::var_type<std::string>::guid_v;
                 Flags.m_bDontSave = Any.m_pType == nullptr || Any.m_pType->m_GUID != xproperty::settings::var_type<std::string>::guid_v;
+                return Flags;
+            } >>
+        , obj_member < "TextureResource", +[](xproperty::any& Any, bool bRead, xresource::full_guid& FullGuid)
+            {
+                if (!Any.m_pType || Any.m_pType->m_GUID != xproperty::settings::var_type<int>::guid_v) return;
+                if (bRead) FullGuid = Any.get<xresource::full_guid>();
+                else       Any.set<xresource::full_guid>(FullGuid);
+            }
+            , member_dynamic_flags < +[](const xproperty::any& Any)
+            {
+                xproperty::flags::type Flags;
+                Flags.m_bShowReadOnly = false;
+                Flags.m_bDontShow = Any.m_pType == nullptr || Any.m_pType->m_GUID != xproperty::settings::var_type<std::uint64_t>::guid_v;
+                Flags.m_bDontSave = Any.m_pType == nullptr || Any.m_pType->m_GUID != xproperty::settings::var_type<std::uint64_t>::guid_v;
                 return Flags;
             } >>
         > ();
@@ -142,7 +164,7 @@ namespace xmaterial_compiler
         inline bool isInputNode         (void) const { return m_InputPins.empty() && !isCommentNode(); }
         inline bool isFunctionNode      (void) const { return !m_OutputPins.empty() && !m_InputPins.empty(); }
 
-        using custom_input_callback = void(node&, int& i, std::vector<std::string>&);
+        using custom_input_callback = void(node&, int& i, e10::library_mgr& LibraryMgr, xproperty::settings::context& Context);
         custom_input_callback* m_pCustomInput = nullptr;
 
         XPROPERTY_DEF//primitive type

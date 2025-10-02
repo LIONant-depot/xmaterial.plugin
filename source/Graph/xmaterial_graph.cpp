@@ -1,6 +1,7 @@
 #ifdef EDITOR
     #include "dependencies/imgui/imgui.h"
     #include "dependencies/imgui-node-editor/imgui_node_editor.h"
+    #include "source/Examples/E10_TextureResourcePipeline/E10_AssetMgr.h"
 #endif
 
 #include "source/graph/xmaterial_graph.h"
@@ -334,60 +335,60 @@ namespace xmaterial_compiler
         // 
         //float
         auto& typeFloat = g.CreateType(type_guid{ xresource::type_guid{"float"}.m_Value });
-        typeFloat.m_Name = "float";
-        typeFloat.m_CodeString = "float";
-        typeFloat.m_Color = FromRGB(240, 200, 50);
+        typeFloat.m_Name        = "float";
+        typeFloat.m_CodeString  = "float";
+        typeFloat.m_Color       = FromRGB(240, 200, 50);
 
         //vec2
         auto& typeVec2 = g.CreateType(type_guid{ xresource::type_guid{"Vector2"}.m_Value });
-        typeVec2.m_Name = "Vector2";
-        typeVec2.m_CodeString = "vec2";
-        typeVec2.m_Color = FromRGB(80, 180, 250);
+        typeVec2.m_Name         = "Vector2";
+        typeVec2.m_CodeString   = "vec2";
+        typeVec2.m_Color        = FromRGB(80, 180, 250);
         typeVec2.m_Sub.resize(2);
-        typeVec2.m_Sub[0].m_Name = "x";
-        typeVec2.m_Sub[0].m_TypeGUID = typeFloat.m_GUID;
-        typeVec2.m_Sub[1].m_Name = "y";
-        typeVec2.m_Sub[1].m_TypeGUID = typeFloat.m_GUID;
+        typeVec2.m_Sub[0].m_Name        = "x";
+        typeVec2.m_Sub[0].m_TypeGUID    = typeFloat.m_GUID;
+        typeVec2.m_Sub[1].m_Name        = "y";
+        typeVec2.m_Sub[1].m_TypeGUID    = typeFloat.m_GUID;
 
         //vec3
         auto& typeVec3 = g.CreateType(type_guid{ xresource::type_guid{"Vector3"}.m_Value });
-        typeVec3.m_Name = "Vector3";
-        typeVec3.m_CodeString = "vec3";
-        typeVec3.m_Color = FromRGB(80, 220, 120);
+        typeVec3.m_Name         = "Vector3";
+        typeVec3.m_CodeString   = "vec3";
+        typeVec3.m_Color        = FromRGB(80, 220, 120);
         typeVec3.m_Sub.resize(3);
-        typeVec3.m_Sub[0].m_Name = "x";
-        typeVec3.m_Sub[0].m_TypeGUID = typeFloat.m_GUID;
-        typeVec3.m_Sub[1].m_Name = "y";
-        typeVec3.m_Sub[1].m_TypeGUID = typeFloat.m_GUID;
-        typeVec3.m_Sub[2].m_Name = "z";
-        typeVec3.m_Sub[2].m_TypeGUID = typeFloat.m_GUID;
+        typeVec3.m_Sub[0].m_Name        = "x";
+        typeVec3.m_Sub[0].m_TypeGUID    = typeFloat.m_GUID;
+        typeVec3.m_Sub[1].m_Name        = "y";
+        typeVec3.m_Sub[1].m_TypeGUID    = typeFloat.m_GUID;
+        typeVec3.m_Sub[2].m_Name        = "z";
+        typeVec3.m_Sub[2].m_TypeGUID    = typeFloat.m_GUID;
 
         //vec4
         auto& typeVec4 = g.CreateType(type_guid{ xresource::type_guid{"Vector4"}.m_Value });
-        typeVec4.m_Name = "Vector4";
-        typeVec4.m_CodeString = "vec4";
-        typeVec4.m_Color = FromRGB(180, 80, 220);
+        typeVec4.m_Name         = "Vector4";
+        typeVec4.m_CodeString   = "vec4";
+        typeVec4.m_Color        = FromRGB(180, 80, 220);
         typeVec4.m_Sub.resize(4);
-        typeVec4.m_Sub[0].m_Name = "x";
-        typeVec4.m_Sub[0].m_TypeGUID = typeFloat.m_GUID;
-        typeVec4.m_Sub[1].m_Name = "y";
-        typeVec4.m_Sub[1].m_TypeGUID = typeFloat.m_GUID;
-        typeVec4.m_Sub[2].m_Name = "z";
-        typeVec4.m_Sub[2].m_TypeGUID = typeFloat.m_GUID;
-        typeVec4.m_Sub[3].m_Name = "w";
-        typeVec4.m_Sub[3].m_TypeGUID = typeFloat.m_GUID;
+        typeVec4.m_Sub[0].m_Name        = "x";
+        typeVec4.m_Sub[0].m_TypeGUID    = typeFloat.m_GUID;
+        typeVec4.m_Sub[1].m_Name        = "y";
+        typeVec4.m_Sub[1].m_TypeGUID    = typeFloat.m_GUID;
+        typeVec4.m_Sub[2].m_Name        = "z";
+        typeVec4.m_Sub[2].m_TypeGUID    = typeFloat.m_GUID;
+        typeVec4.m_Sub[3].m_Name        = "w";
+        typeVec4.m_Sub[3].m_TypeGUID    = typeFloat.m_GUID;
 
         // sampler2D
         auto& typeSampler2D = g.CreateType(type_guid{ xresource::type_guid{"Sampler2D"}.m_Value });
-        typeSampler2D.m_Name = "Sampler2D";
-        typeSampler2D.m_CodeString = "sampler2D";
-        typeSampler2D.m_Color = FromRGB(240, 80, 80);
+        typeSampler2D.m_Name        = "Sampler2D";
+        typeSampler2D.m_CodeString  = "sampler2D";
+        typeSampler2D.m_Color       = FromRGB(240, 80, 80);
 
         //string
         auto& typeTexture = g.CreateType(type_guid{ xresource::type_guid{"texture"}.m_Value });
-        typeTexture.m_Name = "Texture";
-        typeTexture.m_CodeString = "texture";
-        typeTexture.m_Color = FromRGB(200, 180, 80);
+        typeTexture.m_Name          = "Texture";
+        typeTexture.m_CodeString    = "texture";
+        typeTexture.m_Color         = FromRGB(200, 180, 80);
 
         //
         //-----Prefabs------
@@ -395,8 +396,8 @@ namespace xmaterial_compiler
         //const vec3
         {
             auto& Vec3ConstantPrefabs = g.CreatePrefabNode(node_guid{ xresource::type_guid{"Vec3 Const Node"}.m_Value });
-            Vec3ConstantPrefabs.m_Name = "Vec3 Const";
-            Vec3ConstantPrefabs.m_Code = "vec3 $var = vec3($input[0]_prop[0],$input[1]_prop[1],$input[2]_prop[2]);\n";
+            Vec3ConstantPrefabs.m_Name      = "Vec3 Const";
+            Vec3ConstantPrefabs.m_Code      = "vec3 $var = vec3($input[0]_prop[0],$input[1]_prop[1],$input[2]_prop[2]);\n";
             Vec3ConstantPrefabs.m_InputPins.resize(3);
 
             Vec3ConstantPrefabs.m_InputPins[0].m_Name       = "X(1)";
@@ -517,6 +518,7 @@ namespace xmaterial_compiler
 
             g.CompletePrefab(multiplyVec4);
         }
+
         //float multiplier
         {
             auto& multiplyFloat = g.CreatePrefabNode(node_guid{ xresource::type_guid{"MultiplyFloatPrefabs"}.m_Value });
@@ -555,6 +557,7 @@ namespace xmaterial_compiler
 
             g.CompletePrefab(texture);
         }
+
         //SamplerNode
         {
             auto& sampler = g.CreatePrefabNode(node_guid{ xresource::type_guid{"samplerPrefabs"}.m_Value });
@@ -571,10 +574,11 @@ namespace xmaterial_compiler
             sampler.m_InputPins[0].m_ParamIndex = static_cast<int>(sampler.m_Params.m_Properties.size());
             sampler.m_Params.m_Properties.push_back({ .m_Path= "texture", .m_Value= xproperty::any(std::string())});
 
+            sampler.m_pCustomInput = nullptr;
 
-            sampler.m_pCustomInput = [](node& Node, int& Index, std::vector<std::string>& textname)
+#ifdef EDITOR
+            sampler.m_pCustomInput = [](node& Node, int& Index, e10::library_mgr& LibraryMgr, xproperty::settings::context& Context )
                 {
-    #ifdef EDITOR
                     auto& prop = Node.m_Params.m_Properties[0];
                     std::string& texname = prop.m_Value.get<std::string>();
                     ImGui::SetCursorPosX(ImGui::GetCursorPosX() - 20.f);
@@ -596,6 +600,7 @@ namespace xmaterial_compiler
                     std::string popupId = "textures selection##" + std::to_string(Node.m_Guid.m_Value);
                     if (ImGui::BeginPopup(popupId.c_str()))
                     {
+                        /*
                         for (int n = 0; n < textname.size(); n++)
                         {
                             bool is_selected = (Index == n);
@@ -607,12 +612,13 @@ namespace xmaterial_compiler
                             if (is_selected)
                                 ImGui::SetItemDefaultFocus();
                         }
+                        */
                         ImGui::EndPopup();
                     }
                     ax::NodeEditor::Resume();
                     ImGui::PopStyleColor();
-    #endif
                 };
+#endif
 
             g.CompletePrefab(sampler);
         }
@@ -651,6 +657,7 @@ namespace xmaterial_compiler
 
             g.CompletePrefab(DotProduct);
         }
+
         //Float constructor
         {
             auto& FloatConstructor = g.CreatePrefabNode(node_guid{ xresource::type_guid{"FloatConstructPrefabs"}.m_Value });
@@ -668,6 +675,7 @@ namespace xmaterial_compiler
 
             g.CompletePrefab(FloatConstructor);
         }
+
         //Floor Func
         {
             auto& FloorFloat = g.CreatePrefabNode(node_guid{ xresource::type_guid{"FloorFloatPrefabs"}.m_Value });
