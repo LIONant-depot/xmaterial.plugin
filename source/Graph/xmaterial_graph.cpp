@@ -4,8 +4,9 @@
     #include "source/Examples/E10_TextureResourcePipeline/E10_AssetMgr.h"
 #endif
 
+#include "dependencies/xproperty/source/xcore/my_properties.h"
 #include "source/graph/xmaterial_graph.h"
-#include "dependencies/xproperty/source/examples/xcore_sprop_serializer/xcore_sprop_serializer.h"
+#include "dependencies/xproperty/source/sprop/property_sprop_xtextfile_serializer.h"
 
 namespace xmaterial_compiler
 {

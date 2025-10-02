@@ -2,7 +2,7 @@
 #define XMATERIA_GRAPH_NODE_GUID_H
 #pragma once
 
-#include "dependencies/xproperty/source/examples/imgui/my_properties.h"
+#include "dependencies/xproperty/source/xcore/my_properties.h"
 #include "dependencies/xmath/source/xmath.h"
 
 namespace xmaterial_compiler

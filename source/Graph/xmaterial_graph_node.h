@@ -4,10 +4,11 @@
 
 #ifdef EDITOR
     #include "source/Examples/E10_TextureResourcePipeline/E10_AssetMgr.h"
+    #include "plugins/xtexture.plugin/source/xtexture_xgpu_rsc_loader.h"
 #endif
 
 #include "xmaterial_graph_node_guid.h"
-#include "source/xtexture_xgpu_rsc_loader.h"
+#include "dependencies/xresource_guid/source/xresource_guid.h"
 
 struct any_friend : xproperty::any
 {
@@ -164,7 +165,11 @@ namespace xmaterial_compiler
         inline bool isInputNode         (void) const { return m_InputPins.empty() && !isCommentNode(); }
         inline bool isFunctionNode      (void) const { return !m_OutputPins.empty() && !m_InputPins.empty(); }
 
+#ifdef EDITOR
         using custom_input_callback = void(node&, int& i, e10::library_mgr& LibraryMgr, xproperty::settings::context& Context);
+#else
+        using custom_input_callback = void(void);
+#endif
         custom_input_callback* m_pCustomInput = nullptr;
 
         XPROPERTY_DEF//primitive type
