@@ -2,7 +2,7 @@
 #define XMATERIAL_GRAPH_H
 #pragma once
 
-#include "source/graph/xmaterial_graph_node.h"
+#include "xmaterial_graph_node.h"
 #include "dependencies/xresource_guid/source/xresource_guid.h"
 #include "dependencies/xerr/source/xerr.h"
 #include <unordered_map>

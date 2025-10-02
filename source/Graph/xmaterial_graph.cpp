@@ -1,11 +1,13 @@
+
+#include "dependencies/xproperty/source/xcore/my_properties.h"
+
 #ifdef EDITOR
-    #include "dependencies/imgui/imgui.h"
+    //#include "dependencies/imgui/imgui.h"
     #include "dependencies/imgui-node-editor/imgui_node_editor.h"
     #include "source/Examples/E10_TextureResourcePipeline/E10_AssetMgr.h"
 #endif
 
-#include "dependencies/xproperty/source/xcore/my_properties.h"
-#include "source/graph/xmaterial_graph.h"
+#include "xmaterial_graph.h"   
 #include "dependencies/xproperty/source/sprop/property_sprop_xtextfile_serializer.h"
 
 namespace xmaterial_compiler
