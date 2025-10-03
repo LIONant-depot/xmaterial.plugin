@@ -108,7 +108,7 @@ struct any_friend : xproperty::any
             } >>
         , obj_member < "TextureResource", +[](xproperty::any& Any, bool bRead, xresource::full_guid& FullGuid)
             {
-                if (!Any.m_pType || Any.m_pType->m_GUID != xproperty::settings::var_type<int>::guid_v) return;
+                if (!Any.m_pType || Any.m_pType->m_GUID != xproperty::settings::var_type<xresource::full_guid>::guid_v) return;
                 if (bRead) FullGuid = Any.get<xresource::full_guid>();
                 else       Any.set<xresource::full_guid>(FullGuid);
             }
@@ -116,8 +116,8 @@ struct any_friend : xproperty::any
             {
                 xproperty::flags::type Flags;
                 Flags.m_bShowReadOnly = false;
-                Flags.m_bDontShow = Any.m_pType == nullptr || Any.m_pType->m_GUID != xproperty::settings::var_type<std::uint64_t>::guid_v;
-                Flags.m_bDontSave = Any.m_pType == nullptr || Any.m_pType->m_GUID != xproperty::settings::var_type<std::uint64_t>::guid_v;
+                Flags.m_bDontShow = Any.m_pType == nullptr || Any.m_pType->m_GUID != xproperty::settings::var_type<xresource::full_guid>::guid_v;
+                Flags.m_bDontSave = Any.m_pType == nullptr || Any.m_pType->m_GUID != xproperty::settings::var_type<xresource::full_guid>::guid_v;
                 return Flags;
             } >>
         > ();
@@ -166,7 +166,7 @@ namespace xmaterial_compiler
         inline bool isFunctionNode      (void) const { return !m_OutputPins.empty() && !m_InputPins.empty(); }
 
 #ifdef EDITOR
-        using custom_input_callback = void(node&, int& i, e10::library_mgr& LibraryMgr, xproperty::settings::context& Context);
+        using custom_input_callback = void(node&, xresource::full_guid& FullGuid, e10::library_mgr& LibraryMgr, xproperty::settings::context& Context);
 #else
         using custom_input_callback = void(void);
 #endif

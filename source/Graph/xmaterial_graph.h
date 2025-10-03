@@ -6,6 +6,7 @@
 #include "dependencies/xresource_guid/source/xresource_guid.h"
 #include "dependencies/xerr/source/xerr.h"
 #include <unordered_map>
+#include <Plugins/xtexture.plugin/source/xtexture_xgpu_rsc_loader.h>
 
 namespace xmaterial_compiler
 {
@@ -26,7 +27,7 @@ namespace xmaterial_compiler
 
     struct shader_details
     {
-        mutable std::vector<std::string> m_Textures;
+        mutable std::vector<xrsc::texture_ref> m_Textures;
         XPROPERTY_DEF
         ( "shader_detals", shader_details
         , obj_member<"Textures", &shader_details::m_Textures >

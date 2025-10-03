@@ -40,6 +40,23 @@ xresource::loader< xrsc::material_type_guid_v >::data_type* xresource::loader< x
         assert(false);
     }
 
+    // Link up all other dependencies
+    for (int i=0; i<pMaterial->m_nDefaultTextures; ++i )
+    {
+        if( pMaterial->m_pDefaultTextures[i].empty() )
+        {
+            // Should we try to set the default texture here...
+        }
+        else
+        {
+            if ( auto p = Mgr.getResource( pMaterial->m_pDefaultTextures[i] ); p == nullptr)
+            {
+                // Set default texture here as well?
+                assert(false);
+            }
+        }
+    }
+
     // Return the texture
     return pMaterial;
 }
@@ -50,10 +67,27 @@ void xresource::loader< xrsc::material_type_guid_v >::Destroy(xresource::mgr& Mg
 {
     auto& UserData = Mgr.getUserData<resource_mgr_user_data>();
 
+    //
+    // Free up dependencies
+    //
+    for (int i = 0; i < Data.m_nDefaultTextures; ++i)
+    {
+        if (Data.m_pDefaultTextures[i].empty() == false)
+        {
+            Mgr.ReleaseRef( Data.m_pDefaultTextures[i] );
+        }
+    }
+
+    //
+    // Free up the shader
+    //
+
     // This function should be destorying the shader
   //  UserData.m_Device.Destroy( std::move(Data.getShader()) );
 
-    // Free the bitmap
+    //
+    // Finally Free the user data
+    //
     xserializer::default_memory_handler_v.Free(xserializer::mem_type{ .m_bUnique = true }, &Data);
 }
 

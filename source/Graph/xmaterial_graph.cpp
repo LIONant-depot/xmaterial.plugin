@@ -5,6 +5,11 @@
     //#include "dependencies/imgui/imgui.h"
     #include "dependencies/imgui-node-editor/imgui_node_editor.h"
     #include "source/Examples/E10_TextureResourcePipeline/E10_AssetMgr.h"
+
+    // Function found in E19
+    void RemapGUIDToString(std::string& Name, const xresource::full_guid& PreFullGuid);
+    void ResourceBrowserPopup(const void* pUID, bool& Open, xresource::full_guid& Output, const char* pPopUpName, std::span<const xresource::type_guid > Filter);
+
 #endif
 
 #include "xmaterial_graph.h"   
@@ -575,49 +580,44 @@ namespace xmaterial_compiler
             sampler.m_InputPins[0].m_Name       = "texture";
             sampler.m_InputPins[0].m_TypeGUID   = typeTexture.m_GUID;
             sampler.m_InputPins[0].m_ParamIndex = static_cast<int>(sampler.m_Params.m_Properties.size());
-            sampler.m_Params.m_Properties.push_back({ .m_Path= "texture", .m_Value= xproperty::any(std::string())});
+            sampler.m_Params.m_Properties.push_back({ .m_Path= "texture", .m_Value= xproperty::any(xresource::full_guid())});
 
             sampler.m_pCustomInput = nullptr;
 
 #ifdef EDITOR
-            sampler.m_pCustomInput = [](node& Node, int& Index, e10::library_mgr& LibraryMgr, xproperty::settings::context& Context )
+            sampler.m_pCustomInput = [](node& Node, xresource::full_guid& FullGuid, e10::library_mgr& LibraryMgr, xproperty::settings::context& Context )
                 {
                     auto& prop = Node.m_Params.m_Properties[0];
-                    std::string& texname = prop.m_Value.get<std::string>();
+
+                    std::string texname;
+                    RemapGUIDToString(texname, FullGuid);
+                    
                     ImGui::SetCursorPosX(ImGui::GetCursorPosX() - 20.f);
                     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 3.f);
                     ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(32, 32, 32, 200));
-                    
-                    if (ImGui::Button(std::format("{}{}", (texname == "None" || texname == "") ? "textures" : texname , std::to_string(Node.m_Guid.m_Value)).c_str(), ImVec2(68,14)))
-                    {
-                        ImVec2 button_pos = ax::NodeEditor::CanvasToScreen(ImGui::GetItemRectMin());
-                        ImVec2 button_size = ax::NodeEditor::CanvasToScreen(ImGui::GetItemRectSize());
-                        ImGui::SetNextWindowPos(ImVec2(button_pos.x, button_pos.y + 3.f));
 
-                        std::string popupId = "textures selection##" + std::to_string(Node.m_Guid.m_Value);
-                        ImGui::OpenPopup(popupId.c_str());
-                        
+                    bool bOpen = false;
+                    xresource::full_guid NewFullGuid = {};
+                    if (ImGui::Button(std::format("{}##{}", (texname.empty() || texname == "None") ? "textures" : texname, std::to_string(Node.m_Guid.m_Value)).c_str(), ImVec2(68,14)))
+                    {
+                        //ImVec2 button_pos  = ax::NodeEditor::CanvasToScreen(ImGui::GetItemRectMin());
+                        //ImVec2 button_size = ax::NodeEditor::CanvasToScreen(ImGui::GetItemRectSize());
+                        //ImGui::SetNextWindowPos(ImVec2(button_pos.x, button_pos.y + 3.f));
+                        bOpen = true;
                     }
                     ax::NodeEditor::Suspend();
 
                     std::string popupId = "textures selection##" + std::to_string(Node.m_Guid.m_Value);
-                    if (ImGui::BeginPopup(popupId.c_str()))
+
+                    static constexpr auto filter = std::array{ xrsc::texture_type_guid_v };
+
+                    ResourceBrowserPopup(&FullGuid, bOpen, NewFullGuid, "Select Texture", filter);
+
+                    if (NewFullGuid.empty() == false && NewFullGuid.m_Type == xrsc::texture_type_guid_v )
                     {
-                        /*
-                        for (int n = 0; n < textname.size(); n++)
-                        {
-                            bool is_selected = (Index == n);
-                            if (ImGui::Selectable(textname[n].c_str(), is_selected))
-                            {
-                                Index = n;
-                                texname = textname[n];
-                            }
-                            if (is_selected)
-                                ImGui::SetItemDefaultFocus();
-                        }
-                        */
-                        ImGui::EndPopup();
+                        FullGuid = NewFullGuid;
                     }
+
                     ax::NodeEditor::Resume();
                     ImGui::PopStyleColor();
                 };

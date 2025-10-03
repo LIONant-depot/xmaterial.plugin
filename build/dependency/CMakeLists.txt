@@ -47,6 +47,10 @@ DefineInterfaceComponent(xmaterial_compiler_ "dependencies"
   "source/Graph/xmaterial_graph.h"
   "source/Graph/xmaterial_graph.cpp"
   "source/Graph/xmaterial_graph_node_guid.h"
+  "**Others"
+  "source/xmaterial_xgpu_rsc_loader.h"
+  "source/xmaterial_rsc_descriptor.h"
+  "source/xmaterial_data_file.h"
 )
 if(xmaterial_compiler__CREATED)
    AppendComponentIncludes(xmaterial_compiler_ "${CMAKE_SOURCE_DIR}/dependencies/shaderc/include"

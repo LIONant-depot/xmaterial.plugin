@@ -2,6 +2,7 @@
 #define XMATERIAL_DATA_FILE_H
 
 #include "dependencies/xserializer/source/xserializer.h"
+#include "Plugins/xtexture.plugin/source/xtexture_xgpu_rsc_loader.h"
 
 namespace xmaterial
 {
@@ -38,7 +39,9 @@ namespace xmaterial
             };
         };
 
-        flags           m_Flags;
+        xrsc::texture_ref*  m_pDefaultTextures; 
+        flags               m_Flags;
+        std::uint8_t        m_nDefaultTextures;
     };
 
     //-------------------------------------------------------------------------
@@ -63,6 +66,8 @@ namespace xserializer::io_functions
         || (Err = Stream.Serialize(Material.m_pShader, Material.m_ShaderSize))
         || (Err = Stream.Serialize(Material.m_ShaderSize))
         || (Err = Stream.Serialize(Material.m_Flags.m_Value))
+        || (Err = Stream.Serialize(reinterpret_cast<std::uint64_t* const&>(Material.m_pDefaultTextures), Material.m_nDefaultTextures))
+        || (Err = Stream.Serialize(Material.m_nDefaultTextures))
         ;
 
         return Err;

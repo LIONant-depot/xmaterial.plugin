@@ -87,9 +87,11 @@ namespace xmaterial_compiler
                         return std::to_string(prop.m_Value.get<float>());
                     if (guid == xproperty::settings::var_type<int>::guid_v)
                         return std::to_string(prop.m_Value.get<int>());
-                    if (guid == xproperty::settings::var_type<std::string>::guid_v)
+                    if (guid == xproperty::settings::var_type<xresource::full_guid>::guid_v)
                     {
-                        g.m_shaderDetail.m_Textures.push_back(prop.m_Value.get<std::string>());
+                        xrsc::texture_ref Ref;
+                        Ref.m_Instance = prop.m_Value.get<xresource::full_guid>().m_Instance;
+                        g.m_shaderDetail.m_Textures.push_back(Ref);
                         return std::to_string(g.m_shaderDetail.m_Textures.size() - 1);
                     }
 
@@ -285,9 +287,11 @@ namespace xmaterial_compiler
             MaterialDataFile.m_pShader          = spirv.data();
             MaterialDataFile.m_ShaderSize       = static_cast<std::uint32_t>(spirv.size());
             MaterialDataFile.m_Flags.m_bAlpha   = false;
+            MaterialDataFile.m_pDefaultTextures  = m_graph.m_shaderDetail.m_Textures.empty()? nullptr : m_graph.m_shaderDetail.m_Textures.data();
+            MaterialDataFile.m_nDefaultTextures = static_cast<std::uint8_t>(m_graph.m_shaderDetail.m_Textures.size());
 
             //
-            // Serialize Final xBitmap
+            // Serialize Final xMaterial
             //
             int Count = 0;
             for (auto& T : m_Target)
@@ -306,8 +310,8 @@ namespace xmaterial_compiler
             //
             // Save the general information in case the viewer needs it...
             //
-            if ( auto Err = m_graph.m_shaderDetail.serializeShaderDetails(false, std::format(L"{}/{}.log/shader_detail.txt", m_ProjectPaths.m_ResourcesLogs, m_ResourcePartialPath )); Err )
-                return xerr::create_f<xmaterial_compiler::state, "Fail to serialize the information required for the editor">(Err);
+            //if ( auto Err = m_graph.m_shaderDetail.serializeShaderDetails(false, std::format(L"{}/{}.log/shader_detail.txt", m_ProjectPaths.m_ResourcesLogs, m_ResourcePartialPath )); Err )
+            //    return xerr::create_f<xmaterial_compiler::state, "Fail to serialize the information required for the editor">(Err);
 
             return {};
         }
