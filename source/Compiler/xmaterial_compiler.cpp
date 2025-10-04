@@ -273,6 +273,14 @@ namespace xmaterial_compiler
             displayProgressBar("Compiling Shader", 1.0f);
 
             //
+            // Add the dependencies
+            //
+            for (auto& E : m_graph.m_shaderDetail.m_Textures )
+            {
+                m_Dependencies.m_Resources.push_back(E);
+            }
+
+            //
             // Export the compiled material
             //
             std::vector<uint32_t> spirv(result.cbegin(), result.cend());
