@@ -8,7 +8,7 @@
 
     // Function found in E19
     void RemapGUIDToString(std::string& Name, const xresource::full_guid& PreFullGuid);
-    void ResourceBrowserPopup(const void* pUID, bool& Open, xresource::full_guid& Output, const char* pPopUpName, std::span<const xresource::type_guid > Filter);
+    void ResourceBrowserPopup(const void* pUID, bool& Open, xresource::full_guid& Output, std::span<const xresource::type_guid > Filter);
 
 #endif
 
@@ -410,18 +410,18 @@ namespace xmaterial_compiler
 
             Vec3ConstantPrefabs.m_InputPins[0].m_Name       = "X(1)";
             Vec3ConstantPrefabs.m_InputPins[0].m_TypeGUID   = typeFloat.m_GUID;
-            Vec3ConstantPrefabs.m_InputPins[0].m_ParamIndex = static_cast<int>(Vec3ConstantPrefabs.m_Params.m_Properties.size());
-            Vec3ConstantPrefabs.m_Params.m_Properties.push_back({ .m_Path= "x", .m_Value= xproperty::any(0.0f) });
+            Vec3ConstantPrefabs.m_InputPins[0].m_ParamIndex = static_cast<int>(Vec3ConstantPrefabs.m_Params.size());
+            Vec3ConstantPrefabs.m_Params.emplace_back( "x", 0.0f );
 
             Vec3ConstantPrefabs.m_InputPins[1].m_Name       = "Y(1)";
             Vec3ConstantPrefabs.m_InputPins[1].m_TypeGUID   = typeFloat.m_GUID;
-            Vec3ConstantPrefabs.m_InputPins[1].m_ParamIndex = static_cast<int>(Vec3ConstantPrefabs.m_Params.m_Properties.size());
-            Vec3ConstantPrefabs.m_Params.m_Properties.push_back({ .m_Path= "y", .m_Value= xproperty::any(0.0f) });
+            Vec3ConstantPrefabs.m_InputPins[1].m_ParamIndex = static_cast<int>(Vec3ConstantPrefabs.m_Params.size());
+            Vec3ConstantPrefabs.m_Params.emplace_back( "y", 0.0f );
 
             Vec3ConstantPrefabs.m_InputPins[2].m_Name       = "Z(1)";
             Vec3ConstantPrefabs.m_InputPins[2].m_TypeGUID   = typeFloat.m_GUID;
-            Vec3ConstantPrefabs.m_InputPins[2].m_ParamIndex = static_cast<int>(Vec3ConstantPrefabs.m_Params.m_Properties.size());
-            Vec3ConstantPrefabs.m_Params.m_Properties.push_back({ .m_Path= "z", .m_Value= xproperty::any(0.0f) });
+            Vec3ConstantPrefabs.m_InputPins[2].m_ParamIndex = static_cast<int>(Vec3ConstantPrefabs.m_Params.size());
+            Vec3ConstantPrefabs.m_Params.emplace_back( "z", 0.0f );
 
             Vec3ConstantPrefabs.m_OutputPins.resize(1);
             Vec3ConstantPrefabs.m_OutputPins[0].m_Name      = "Vec3";
@@ -440,13 +440,13 @@ namespace xmaterial_compiler
 
             Vec2ConstantPrefabs.m_InputPins[0].m_Name       = "X(1)";
             Vec2ConstantPrefabs.m_InputPins[0].m_TypeGUID   = typeFloat.m_GUID;
-            Vec2ConstantPrefabs.m_InputPins[0].m_ParamIndex = static_cast<int>(Vec2ConstantPrefabs.m_Params.m_Properties.size());
-            Vec2ConstantPrefabs.m_Params.m_Properties.push_back({ .m_Path= "x", .m_Value= xproperty::any(0.0f) });
+            Vec2ConstantPrefabs.m_InputPins[0].m_ParamIndex = static_cast<int>(Vec2ConstantPrefabs.m_Params.size());
+            Vec2ConstantPrefabs.m_Params.emplace_back( "x", 0.0f );
 
             Vec2ConstantPrefabs.m_InputPins[1].m_Name       = "Y(1)";
             Vec2ConstantPrefabs.m_InputPins[1].m_TypeGUID   = typeFloat.m_GUID;
-            Vec2ConstantPrefabs.m_InputPins[1].m_ParamIndex = static_cast<int>(Vec2ConstantPrefabs.m_Params.m_Properties.size());
-            Vec2ConstantPrefabs.m_Params.m_Properties.push_back({ .m_Path= "y", .m_Value= xproperty::any(0.0f) });
+            Vec2ConstantPrefabs.m_InputPins[1].m_ParamIndex = static_cast<int>(Vec2ConstantPrefabs.m_Params.size());
+            Vec2ConstantPrefabs.m_Params.emplace_back( "y", 0.0f );
 
             Vec2ConstantPrefabs.m_OutputPins.resize(1);
             Vec2ConstantPrefabs.m_OutputPins[0].m_Name      = "Vec2";
@@ -455,6 +455,39 @@ namespace xmaterial_compiler
             g.CompletePrefab(Vec2ConstantPrefabs);
         }
 
+        //const vec3
+        {
+            auto& Vec4ConstantPrefabs = g.CreatePrefabNode(node_guid{ xresource::type_guid{"Vec4 Const Node"}.m_Value });
+            Vec4ConstantPrefabs.m_Name      = "Vec4 Const";
+            Vec4ConstantPrefabs.m_Code      = "vec4 $var = vec4($input[0]_prop[0],$input[1]_prop[1],$input[2]_prop[2],$input[3]_prop[3]);\n";
+            Vec4ConstantPrefabs.m_InputPins.resize(4);
+
+            Vec4ConstantPrefabs.m_InputPins[0].m_Name       = "X(1)";
+            Vec4ConstantPrefabs.m_InputPins[0].m_TypeGUID   = typeFloat.m_GUID;
+            Vec4ConstantPrefabs.m_InputPins[0].m_ParamIndex = static_cast<int>(Vec4ConstantPrefabs.m_Params.size());
+            Vec4ConstantPrefabs.m_Params.emplace_back( "x", 0.0f );
+
+            Vec4ConstantPrefabs.m_InputPins[1].m_Name       = "Y(1)";
+            Vec4ConstantPrefabs.m_InputPins[1].m_TypeGUID   = typeFloat.m_GUID;
+            Vec4ConstantPrefabs.m_InputPins[1].m_ParamIndex = static_cast<int>(Vec4ConstantPrefabs.m_Params.size());
+            Vec4ConstantPrefabs.m_Params.emplace_back( "y", 0.0f );
+
+            Vec4ConstantPrefabs.m_InputPins[2].m_Name       = "Z(1)";
+            Vec4ConstantPrefabs.m_InputPins[2].m_TypeGUID   = typeFloat.m_GUID;
+            Vec4ConstantPrefabs.m_InputPins[2].m_ParamIndex = static_cast<int>(Vec4ConstantPrefabs.m_Params.size());
+            Vec4ConstantPrefabs.m_Params.emplace_back( "z", 0.0f );
+
+            Vec4ConstantPrefabs.m_InputPins[3].m_Name       = "W(1)";
+            Vec4ConstantPrefabs.m_InputPins[3].m_TypeGUID   = typeFloat.m_GUID;
+            Vec4ConstantPrefabs.m_InputPins[3].m_ParamIndex = static_cast<int>(Vec4ConstantPrefabs.m_Params.size());
+            Vec4ConstantPrefabs.m_Params.emplace_back( "w", 0.0f );
+
+            Vec4ConstantPrefabs.m_OutputPins.resize(1);
+            Vec4ConstantPrefabs.m_OutputPins[0].m_Name      = "Vec4";
+            Vec4ConstantPrefabs.m_OutputPins[0].m_TypeGUID  = typeVec4.m_GUID;
+
+            g.CompletePrefab(Vec4ConstantPrefabs);
+        }
 
         //--- final fragout ---
         {
@@ -467,8 +500,8 @@ namespace xmaterial_compiler
             finaloutputprefabs.m_InputPins[0].m_TypeGUID    = typeVec3.m_GUID;
             finaloutputprefabs.m_InputPins[1].m_Name        = "A(1)";
             finaloutputprefabs.m_InputPins[1].m_TypeGUID    = typeFloat.m_GUID;
-            finaloutputprefabs.m_InputPins[1].m_ParamIndex  = static_cast<int>(finaloutputprefabs.m_Params.m_Properties.size());
-            finaloutputprefabs.m_Params.m_Properties.push_back({ .m_Path= "a", .m_Value= xproperty::any(1.0f) });
+            finaloutputprefabs.m_InputPins[1].m_ParamIndex  = static_cast<int>(finaloutputprefabs.m_Params.size());
+            finaloutputprefabs.m_Params.emplace_back( "a", 1.0f );
 
             g.CompletePrefab(finaloutputprefabs);
         }
@@ -491,6 +524,24 @@ namespace xmaterial_compiler
 
             g.CompletePrefab(powerfuncprefabs);
         }
+
+        //convertVec4 to vec2 prefabs
+        {
+            auto& Vec4toVec2prefabs = g.CreatePrefabNode(node_guid{ xresource::type_guid{"Vec4toVec2prefabs"}.m_Value });
+            Vec4toVec2prefabs.m_Name = "Vec4toVec2 Func";
+            Vec4toVec2prefabs.m_Code = "vec2 $var = vec2($input[0].xy);\n";
+
+            Vec4toVec2prefabs.m_InputPins.resize(1);
+            Vec4toVec2prefabs.m_InputPins[0].m_Name = "A(4)";
+            Vec4toVec2prefabs.m_InputPins[0].m_TypeGUID = typeVec4.m_GUID;
+
+            Vec4toVec2prefabs.m_OutputPins.resize(1);
+            Vec4toVec2prefabs.m_OutputPins[0].m_Name = "Vec2";
+            Vec4toVec2prefabs.m_OutputPins[0].m_TypeGUID = typeVec2.m_GUID;
+
+            g.CompletePrefab(Vec4toVec2prefabs);
+        }
+
         //convertVec4 to vec3 prefabs
         {
             auto& Vec4toVec3prefabs = g.CreatePrefabNode(node_guid{ xresource::type_guid{"Vec4toVec3prefabs"}.m_Value });
@@ -498,11 +549,11 @@ namespace xmaterial_compiler
             Vec4toVec3prefabs.m_Code = "vec3 $var = vec3($input[0].xyz);\n";
 
             Vec4toVec3prefabs.m_InputPins.resize(1);
-            Vec4toVec3prefabs.m_InputPins[0].m_Name     = "A(4)";
+            Vec4toVec3prefabs.m_InputPins[0].m_Name = "A(4)";
             Vec4toVec3prefabs.m_InputPins[0].m_TypeGUID = typeVec4.m_GUID;
 
             Vec4toVec3prefabs.m_OutputPins.resize(1);
-            Vec4toVec3prefabs.m_OutputPins[0].m_Name     = "Vec3";
+            Vec4toVec3prefabs.m_OutputPins[0].m_Name = "Vec3";
             Vec4toVec3prefabs.m_OutputPins[0].m_TypeGUID = typeVec3.m_GUID;
 
             g.CompletePrefab(Vec4toVec3prefabs);
@@ -525,6 +576,25 @@ namespace xmaterial_compiler
             multiplyVec4.m_OutputPins[0].m_TypeGUID = typeVec4.m_GUID;
 
             g.CompletePrefab(multiplyVec4);
+        }
+
+        //Vec4 add
+        {
+            auto& addVec4 = g.CreatePrefabNode(node_guid{ xresource::type_guid{"addVec4Prefabs"}.m_Value });
+            addVec4.m_Name = "addVec4";
+            addVec4.m_Code = "vec4 $var = $input[0] + $input[1];\n";
+
+            addVec4.m_InputPins.resize(2);
+            addVec4.m_InputPins[0].m_Name = "A(4)";
+            addVec4.m_InputPins[0].m_TypeGUID = typeVec4.m_GUID;
+            addVec4.m_InputPins[1].m_Name = "B(4)";
+            addVec4.m_InputPins[1].m_TypeGUID = typeVec4.m_GUID;
+
+            addVec4.m_OutputPins.resize(1);
+            addVec4.m_OutputPins[0].m_Name = "Vec4";
+            addVec4.m_OutputPins[0].m_TypeGUID = typeVec4.m_GUID;
+
+            g.CompletePrefab(addVec4);
         }
 
         //float multiplier
@@ -579,18 +649,15 @@ namespace xmaterial_compiler
             sampler.m_InputPins.resize(1);
             sampler.m_InputPins[0].m_Name       = "texture";
             sampler.m_InputPins[0].m_TypeGUID   = typeTexture.m_GUID;
-            sampler.m_InputPins[0].m_ParamIndex = static_cast<int>(sampler.m_Params.m_Properties.size());
-            sampler.m_Params.m_Properties.push_back({ .m_Path= "texture", .m_Value= xproperty::any(xresource::full_guid())});
+            sampler.m_InputPins[0].m_ParamIndex = static_cast<int>(sampler.m_Params.size());
+            sampler.m_Params.emplace_back( "texture", node_prop::type::TEXTURE_RESOURCE, xresource::full_guid() );
 
             sampler.m_pCustomInput = nullptr;
 
 #ifdef EDITOR
             sampler.m_pCustomInput = [](node& Node, xresource::full_guid& FullGuid, e10::library_mgr& LibraryMgr, xproperty::settings::context& Context )
                 {
-                    auto& prop = Node.m_Params.m_Properties[0];
-
-                    std::string texname;
-                    RemapGUIDToString(texname, FullGuid);
+                    auto& prop = Node.m_Params[0];
                     
                     ImGui::SetCursorPosX(ImGui::GetCursorPosX() - 20.f);
                     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 3.f);
@@ -598,6 +665,9 @@ namespace xmaterial_compiler
 
                     bool bOpen = false;
                     xresource::full_guid NewFullGuid = {};
+
+                    std::string texname;
+                    RemapGUIDToString(texname, FullGuid);
                     if (ImGui::Button(std::format("{}##{}", (texname.empty() || texname == "None") ? "textures" : texname, std::to_string(Node.m_Guid.m_Value)).c_str(), ImVec2(68,14)))
                     {
                         //ImVec2 button_pos  = ax::NodeEditor::CanvasToScreen(ImGui::GetItemRectMin());
@@ -605,13 +675,12 @@ namespace xmaterial_compiler
                         //ImGui::SetNextWindowPos(ImVec2(button_pos.x, button_pos.y + 3.f));
                         bOpen = true;
                     }
+                    static constexpr auto filters = std::array{ xrsc::texture_type_guid_v };
+                    ResourceBrowserPopup(&FullGuid, bOpen, NewFullGuid, filters);
                     ax::NodeEditor::Suspend();
 
                     std::string popupId = "textures selection##" + std::to_string(Node.m_Guid.m_Value);
 
-                    static constexpr auto filter = std::array{ xrsc::texture_type_guid_v };
-
-                    ResourceBrowserPopup(&FullGuid, bOpen, NewFullGuid, "Select Texture", filter);
 
                     if (NewFullGuid.empty() == false && NewFullGuid.m_Type == xrsc::texture_type_guid_v )
                     {
@@ -669,8 +738,8 @@ namespace xmaterial_compiler
             FloatConstructor.m_InputPins.resize(1);
             FloatConstructor.m_InputPins[0].m_Name          = "A(1)";
             FloatConstructor.m_InputPins[0].m_TypeGUID      = typeFloat.m_GUID;
-            FloatConstructor.m_InputPins[0].m_ParamIndex    = static_cast<int>(FloatConstructor.m_Params.m_Properties.size());
-            FloatConstructor.m_Params.m_Properties.push_back({ .m_Path= "x", .m_Value= xproperty::any(0.0f) });
+            FloatConstructor.m_InputPins[0].m_ParamIndex    = static_cast<int>(FloatConstructor.m_Params.size());
+            FloatConstructor.m_Params.emplace_back( "x", 0.0f );
 
             FloatConstructor.m_OutputPins.resize(1);
             FloatConstructor.m_OutputPins[0].m_Name     = "A(1)";
@@ -717,9 +786,9 @@ namespace xmaterial_compiler
         {
             auto& groupWithComment = g.CreatePrefabNode(node_guid{ xresource::type_guid{"groupWithComment"}.m_Value });
             groupWithComment.m_Name = "Comment";
-            groupWithComment.m_Params.m_Properties.push_back({ "Comment", xproperty::any(std::string()) });
-            groupWithComment.m_Params.m_Properties.push_back({ "Size width", xproperty::any(10.f)});
-            groupWithComment.m_Params.m_Properties.push_back({ "Size Height", xproperty::any(10.f)});
+            groupWithComment.m_Params.emplace_back( "Comment", std::string() );
+            groupWithComment.m_Params.emplace_back( "Size width", 10.f );
+            groupWithComment.m_Params.emplace_back( "Size Height", 10.f );
             g.CompletePrefab(groupWithComment);
         }
     }

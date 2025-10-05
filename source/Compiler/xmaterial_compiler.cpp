@@ -25,7 +25,7 @@ namespace xmaterial_compiler
 
         std::string GetInputExpr(const graph& g, const node& n, int pinIndex, int paramIndex, bool requireConnectionOnly)
         {
-            if (pinIndex < 0 || pinIndex >= (int)n.m_InputPins.size())
+            if (pinIndex < 0 || pinIndex >= static_cast<int>(n.m_InputPins.size()))
                 return "/*bad pin index*/";
 
             const auto& ip = n.m_InputPins[pinIndex];
@@ -77,9 +77,9 @@ namespace xmaterial_compiler
             }
 
             // 3. use param fallback
-            if (paramIndex >= 0 && paramIndex < (int)n.m_Params.m_Properties.size())
+            if (paramIndex >= 0 && paramIndex < static_cast<int>(n.m_Params.size()))
             {
-                const auto& prop = n.m_Params.m_Properties[paramIndex];
+                const auto& prop = n.m_Params[paramIndex];
                 if (prop.m_Value.m_pType)
                 {
                     auto guid = prop.m_Value.m_pType->m_GUID;
@@ -87,6 +87,8 @@ namespace xmaterial_compiler
                         return std::to_string(prop.m_Value.get<float>());
                     if (guid == xproperty::settings::var_type<int>::guid_v)
                         return std::to_string(prop.m_Value.get<int>());
+                    if (guid == xproperty::settings::var_type<std::string>::guid_v)
+                        return prop.m_Value.get<std::string>();
                     if (guid == xproperty::settings::var_type<xresource::full_guid>::guid_v)
                     {
                         xrsc::texture_ref Ref;

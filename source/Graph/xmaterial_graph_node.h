@@ -9,103 +9,140 @@
 
 #include "xmaterial_graph_node_guid.h"
 #include "dependencies/xresource_guid/source/xresource_guid.h"
+#include "plugins/xtexture.plugin/source/xtexture_xgpu_rsc_loader.h"
 
-struct prop_friend : xproperty::sprop::container::prop
+struct node_prop
 {
     enum class type :std::uint8_t
     { NONE
     , FLOAT
     , INT
-    , RESOURCE
+    , STRING
+    , TEXTURE_RESOURCE
     , UNKNOWN 
     };
 
+    node_prop() = default;
+    node_prop( std::string_view Name, type Type ) : m_Name{ Name }
+    {
+        setupType(Type);
+    }
+
+    node_prop(std::string_view Name, int x)                             : m_Name{ Name }, m_Value{x},               m_Type{ type::INT }{}
+    node_prop(std::string_view Name, float x)                           : m_Name{ Name }, m_Value{ x },             m_Type{ type::FLOAT } {}
+    node_prop(std::string_view Name, type Type, xresource::full_guid x) : m_Name{ Name }, m_Value{ x },             m_Type{ Type } {}
+    node_prop(std::string_view Name, std::string&& S)                   : m_Name{ Name }, m_Value{ std::move(S) },  m_Type{type::STRING} {}
+    node_prop(std::string_view Name, std::string_view S)                : m_Name{ Name }, m_Value{ std::string(S) }, m_Type{ type::STRING } {}
+
+    std::string     m_Name;
+    xproperty::any  m_Value;
+    type            m_Type;
+
     inline static constexpr auto type_enum_v = std::array
-    { xproperty::settings::enum_item{ "NONE",       type::NONE      }
-    , xproperty::settings::enum_item{ "FLOAT",      type::FLOAT     }
-    , xproperty::settings::enum_item{ "INT",        type::INT       }
-    , xproperty::settings::enum_item{ "RESOURCE",   type::RESOURCE  }
-    , xproperty::settings::enum_item{ "UNKNOWN",    type::UNKNOWN   }
+    { xproperty::settings::enum_item{ "NONE",               type::NONE      }
+    , xproperty::settings::enum_item{ "FLOAT",              type::FLOAT     }
+    , xproperty::settings::enum_item{ "INT",                type::INT       }
+    , xproperty::settings::enum_item{ "STRING",             type::STRING    }
+    , xproperty::settings::enum_item{ "TEXTURE RESOURCE",   type::TEXTURE_RESOURCE }
+    , xproperty::settings::enum_item{ "UNKNOWN",            type::UNKNOWN   }
     };
 
-    using prop_t = xproperty::sprop::container::prop;
+    inline static constexpr auto type_guid_filters_v = std::array{ xrsc::texture_type_guid_v };
+
+    void setupType(type Enum)
+    {
+        m_Type = Enum;
+        switch (m_Type)
+        {
+        default:
+        case type::NONE:                m_Value = {};                             break;
+        case type::FLOAT:               m_Value.set<float>({});                   break;
+        case type::INT:                 m_Value.set<int>({});                     break;
+        case type::STRING:              m_Value.set<std::string>({});             break;
+        case type::TEXTURE_RESOURCE:    m_Value.set<xresource::full_guid>({});    break;
+        }
+    }
 
     XPROPERTY_DEF
-    ("Props", prop_t
-        , obj_member<"Name", &prop_t::m_Path
+    ("Props", node_prop
+        , obj_member<"Name", &node_prop::m_Name
             , member_flags<flags::SHOW_READONLY>>
-        , obj_member<"Type", +[](prop_t& O, bool bRead, type& Enum)
+        , obj_member<"Type", +[](node_prop& O, bool bRead, type& Enum)
             {
-                if (bRead)
-                {
-                    if (O.m_Value.m_pType == nullptr) Enum = type::NONE;
-                    else switch (O.m_Value.m_pType->m_GUID)
-                    {
-                    case xproperty::settings::var_type<float>::guid_v:                  Enum = type::FLOAT; break;
-                    case xproperty::settings::var_type<int>::guid_v:                    Enum = type::INT; break;
-                    case xproperty::settings::var_type<xresource::full_guid>::guid_v:   Enum = type::RESOURCE; break;
-                    default: Enum = type::UNKNOWN; break;
-                    }
-                }
-                else
-                {
-                    switch (Enum)
-                    {
-                    default:
-                    case type::NONE:                O = {};                                     break;
-                    case type::FLOAT:               O.m_Value.set<float>(0);                    break;
-                    case type::INT:                 O.m_Value.set<int>(0);                      break;
-                    case type::RESOURCE:            O.m_Value.set<xresource::full_guid>({});    break;
-                    }
-                }
+                if (bRead) Enum = O.m_Type;
+                else       O.setupType(Enum);
             }
             , member_enum_span<type_enum_v >
             , member_flags<flags::DONT_SHOW>>
-        , obj_member< "Float", +[](prop_t& O, bool bRead, float& Value)
+        , obj_member< "Float", +[](node_prop& O, bool bRead, float& Value)
             {
-                if (!O.m_Value.m_pType || O.m_Value.m_pType->m_GUID != xproperty::settings::var_type<float>::guid_v) return;
+                if ( O.m_Type != type::FLOAT ) return;
+                assert( O.m_Value.m_pType->m_GUID == xproperty::settings::var_type<float>::guid_v );
+
                 if (bRead) Value = O.m_Value.get<float>();
                 else       O.m_Value.set<float>(Value);
             }
-            , member_dynamic_flags < +[](const prop_t& O)
+            , member_dynamic_flags < +[](const node_prop& O)
             {
                 xproperty::flags::type Flags;
-                Flags.m_bShowReadOnly = false;
-                Flags.m_bDontShow = O.m_Value.m_pType == nullptr || O.m_Value.m_pType->m_GUID != xproperty::settings::var_type<float>::guid_v;
-                Flags.m_bDontSave = O.m_Value.m_pType == nullptr || O.m_Value.m_pType->m_GUID != xproperty::settings::var_type<float>::guid_v;
+                Flags.m_bShowReadOnly   = false;
+                Flags.m_bDontShow       = O.m_Type != type::FLOAT;
+                Flags.m_bDontSave       = O.m_Type != type::FLOAT;
                 return Flags;
             } >>
-        , obj_member< "Int", +[](prop_t& O, bool bRead, int& Value)
+        , obj_member< "Int", +[](node_prop& O, bool bRead, int& Value)
             {
-                if (!O.m_Value.m_pType || O.m_Value.m_pType->m_GUID != xproperty::settings::var_type<int>::guid_v) return;
+                if (O.m_Type != type::INT) return;
+                assert(O.m_Value.m_pType->m_GUID == xproperty::settings::var_type<int>::guid_v);
+
                 if (bRead) Value = O.m_Value.get<int>();
                 else      O.m_Value.set<int>(Value);
             }
-            , member_dynamic_flags < +[](const prop_t& O)
+            , member_dynamic_flags < +[](const node_prop& O)
             {
                 xproperty::flags::type Flags;
-                Flags.m_bShowReadOnly = false;
-                Flags.m_bDontShow = O.m_Value.m_pType == nullptr || O.m_Value.m_pType->m_GUID != xproperty::settings::var_type<int>::guid_v;
-                Flags.m_bDontSave = O.m_Value.m_pType == nullptr || O.m_Value.m_pType->m_GUID != xproperty::settings::var_type<int>::guid_v;
+                Flags.m_bShowReadOnly   = false;
+                Flags.m_bDontShow       = O.m_Type != type::INT;
+                Flags.m_bDontSave       = O.m_Type != type::INT;
                 return Flags;
             } >>
-        , obj_member < "Resource", +[](prop_t& O, bool bRead, xresource::full_guid& FullGuid)
+        , obj_member< "String", +[](node_prop& O, bool bRead, std::string& Value)
             {
-                if (!O.m_Value.m_pType || O.m_Value.m_pType->m_GUID != xproperty::settings::var_type<xresource::full_guid>::guid_v) return;
+                if (O.m_Type != type::STRING) return;
+                assert(O.m_Value.m_pType->m_GUID == xproperty::settings::var_type<std::string>::guid_v);
+
+                if (bRead) Value = O.m_Value.get<std::string>();
+                else      O.m_Value.set<std::string>(Value);
+            }
+            , member_dynamic_flags < +[](const node_prop& O)
+            {
+                xproperty::flags::type Flags;
+                Flags.m_bShowReadOnly   = false;
+                Flags.m_bDontShow       = O.m_Type != type::STRING;
+                Flags.m_bDontSave       = O.m_Type != type::STRING;
+                return Flags;
+            } >>
+        , obj_member < "TextureRef", +[](node_prop& O, bool bRead, xresource::full_guid& FullGuid)
+            {
+                if (O.m_Type != type::TEXTURE_RESOURCE) return;
+                assert(O.m_Value.m_pType->m_GUID == xproperty::settings::var_type<xresource::full_guid>::guid_v);
+
                 if (bRead) FullGuid = O.m_Value.get<xresource::full_guid>();
                 else       O.m_Value.set<xresource::full_guid>(FullGuid);
             }
-            , member_dynamic_flags < +[](const prop_t& O)
+            , member_ui<xresource::full_guid>::type_filters<type_guid_filters_v>
+            , member_dynamic_flags < +[](const node_prop& O)
             {
                 xproperty::flags::type Flags;
-                Flags.m_bShowReadOnly = false;
-                Flags.m_bDontShow = O.m_Value.m_pType == nullptr || O.m_Value.m_pType->m_GUID != xproperty::settings::var_type<xresource::full_guid>::guid_v;
-                Flags.m_bDontSave = O.m_Value.m_pType == nullptr || O.m_Value.m_pType->m_GUID != xproperty::settings::var_type<xresource::full_guid>::guid_v;
+                Flags.m_bShowReadOnly   = false;
+                Flags.m_bDontShow       = O.m_Type != type::TEXTURE_RESOURCE;
+                Flags.m_bDontSave       = O.m_Type != type::TEXTURE_RESOURCE;
                 return Flags;
-            } >>
+            } 
+            >>
     )
 };
-XPROPERTY_REG(prop_friend)
+XPROPERTY_REG(node_prop)
 
 namespace xmaterial_compiler
 {
@@ -118,7 +155,7 @@ namespace xmaterial_compiler
         std::vector<input_pin>          m_InputPins         = {};
         std::vector<output_pin>         m_OutputPins        = {};
         xmath::fvec2                    m_Pos               = {};
-        xproperty::sprop::container     m_Params            = {};
+        std::vector<node_prop>          m_Params            = {};
         bool                            m_HasErrMsg         = { false };
         std::string                     m_ErrMsg            = {};
         
@@ -142,7 +179,7 @@ namespace xmaterial_compiler
         , obj_member<"Position",    &node::m_Pos,           member_flags<flags::DONT_SHOW>>
         , obj_member<"Input Pins",  &node::m_InputPins,     member_flags<flags::DONT_SHOW>>
         , obj_member<"Output Pins", &node::m_OutputPins,    member_flags<flags::DONT_SHOW>>
-        , obj_member<"Params",    +[](node& O)->auto& {return O.m_Params.m_Properties; }, member_ui_open<true>>
+        , obj_member<"Params",    +[](node& O)->auto& {return O.m_Params; }, member_ui_open<true>>
         )
 
         int getInputPinIndex(pin_guid Guid);
