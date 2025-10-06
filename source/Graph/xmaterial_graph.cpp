@@ -652,6 +652,7 @@ namespace xmaterial_compiler
             sampler.m_InputPins[0].m_ParamIndex = static_cast<int>(sampler.m_Params.size());
             sampler.m_Params.emplace_back( "texture", node_prop::type::TEXTURE_RESOURCE, xresource::full_guid() );
 
+            sampler.m_bCanExpose   = true;
             sampler.m_pCustomInput = nullptr;
 
 #ifdef EDITOR

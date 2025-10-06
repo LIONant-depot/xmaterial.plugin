@@ -158,6 +158,10 @@ namespace xmaterial_compiler
         std::vector<node_prop>          m_Params            = {};
         bool                            m_HasErrMsg         = { false };
         std::string                     m_ErrMsg            = {};
+        bool                            m_bCanExpose        = { false };
+        bool                            m_bExpose           = { false };
+        std::string                     m_ExposeName        = {};
+
         
 
         inline bool isCommentNode       (void) const { return m_OutputPins.empty() && m_InputPins.empty(); }
@@ -180,6 +184,9 @@ namespace xmaterial_compiler
         , obj_member<"Input Pins",  &node::m_InputPins,     member_flags<flags::DONT_SHOW>>
         , obj_member<"Output Pins", &node::m_OutputPins,    member_flags<flags::DONT_SHOW>>
         , obj_member<"Params",      &node::m_Params,        member_ui_open<true>>
+        , obj_member<"bCanExpose",  &node::m_bCanExpose,    member_flags<flags::DONT_SHOW>>
+        , obj_member<"Expose",      &node::m_bExpose,       member_dynamic_flags<+[](const node& O){ flags::type Type{}; Type.m_bDontShow = Type.m_bDontSave = !O.m_bCanExpose; return Type;}>>
+        , obj_member<"ExposeName",  &node::m_ExposeName,    member_dynamic_flags<+[](const node& O){ flags::type Type{}; Type.m_bDontSave = !O.m_bCanExpose; Type.m_bDontShow = !O.m_bExpose; return Type;}>>
         )
 
         int getInputPinIndex(pin_guid Guid);
