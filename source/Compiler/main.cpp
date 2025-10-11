@@ -9,7 +9,7 @@ int main(int argc, const char* argv[])
         static const char* pDebugArgs[] =
         { "D:\\LIONant\\xGPU\\dependencies\\xresource_pipeline_example.lion_project\\Cache\\Plugins\\xmaterial.plugin\\Build\\xmaterial_compiler.vs2022\\Release\\xmaterial_compiler.exe" 
         , "-PROJECT"
-        , "D:\\LIONant\\xGPU\\dependencies\\xresource_pipeline_example.lion_project" 
+        , "D:\\LIONant\\xGPU/bin_dependencies\\xresource_pipeline_example.lion_project" 
         , "-OPTIMIZATION"
         , "O1"
         , "-DEBUG"
@@ -17,7 +17,7 @@ int main(int argc, const char* argv[])
         , "-DESCRIPTOR"
         , "Descriptors\\Material\\03\\40\\39C2185971104003.desc" 
         , "-OUTPUT"
-        , "D:\\LIONant\\xGPU\\dependencies\\xresource_pipeline_example.lion_project\\Cache\\Resources\\Platforms\\WINDOWS"
+        , "D:\\LIONant\\xGPU\\bin_dependencies\\xresource_pipeline_example.lion_project\\Cache\\Resources\\Platforms\\WINDOWS"
         };
 
         argv = pDebugArgs;

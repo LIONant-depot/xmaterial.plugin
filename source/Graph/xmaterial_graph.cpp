@@ -793,18 +793,4 @@ namespace xmaterial_compiler
             g.CompletePrefab(groupWithComment);
         }
     }
-
-    xerr shader_details::serializeShaderDetails(bool reading, std::wstring_view sDetailspath) const
-    {
-        xtextfile::stream               TextFile;
-        xproperty::settings::context    Context;
-
-        if (auto Err = TextFile.Open(reading, sDetailspath, xtextfile::file_type::TEXT, xtextfile::flags{ .m_isWriteFloats = true }); Err)
-            return Err;
-
-        if (auto Err = xproperty::sprop::serializer::Stream(TextFile, const_cast<shader_details&>(*this), Context); Err)
-            return Err;
-
-        return {};
-    }
 }

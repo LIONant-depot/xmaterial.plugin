@@ -10,9 +10,19 @@
 
 #include "source/xmaterial_data_file.h"
 
+#include "plugins/xmaterial_instance.plugin/source/xmaterial_intance_descriptor.h"
+
 #pragma comment(lib, "../../dependencies/shaderc/lib/shaderc_combined.lib")
 
 #include <process.h>
+
+//
+// force to create the property registrations for these types
+//
+xresource::property_reg_t<xrsc::texture_type_guid_v>       reg1_v = {};
+xresource::property_reg_t<xrsc::material_type_guid_v>      reg2_v = {};
+void xresource::loader< xrsc::material_type_guid_v >::Destroy(xresource::mgr& Mgr, data_type&& Data, const full_guid& GUID){}
+void xresource::loader< xrsc::texture_type_guid_v >::Destroy(xresource::mgr& Mgr, data_type&& Data, const full_guid& GUID) {}
 
 namespace xmaterial_compiler
 {
@@ -91,10 +101,8 @@ namespace xmaterial_compiler
                         return prop.m_Value.get<std::string>();
                     if (guid == xproperty::settings::var_type<xresource::full_guid>::guid_v)
                     {
-                        xrsc::texture_ref Ref;
-                        Ref.m_Instance = prop.m_Value.get<xresource::full_guid>().m_Instance;
-                        g.m_shaderDetail.m_Textures.push_back(Ref);
-                        return std::to_string(g.m_shaderDetail.m_Textures.size() - 1);
+                        g.m_FinalTextureNodes.m_Textures.emplace_back(&n, paramIndex);
+                        return std::to_string(g.m_FinalTextureNodes.m_Textures.size() - 1);
                     }
 
 
@@ -277,9 +285,10 @@ namespace xmaterial_compiler
             //
             // Add the dependencies
             //
-            for (auto& E : m_graph.m_shaderDetail.m_Textures )
+            for (auto& E : m_graph.m_FinalTextureNodes.m_Textures )
             {
-                m_Dependencies.m_Resources.push_back(E);
+                auto Ref = E.m_pNode->m_Params[ E.m_iParam ].m_Value.get<xresource::full_guid>();
+                m_Dependencies.m_Resources.push_back(Ref);
             }
 
             //
@@ -292,13 +301,23 @@ namespace xmaterial_compiler
             //
             // Create the actual material
             //
-            xmaterial::data_file MaterialDataFile;
 
+            // Allocate and collect the textures
+            auto Textures = std::make_unique<xrsc::texture_ref[]>(m_graph.m_FinalTextureNodes.m_Textures.size());
+            for (auto& E : m_graph.m_FinalTextureNodes.m_Textures)
+            {
+                const int Index = static_cast<int>(&E - m_graph.m_FinalTextureNodes.m_Textures.data());
+                auto Ref = E.m_pNode->m_Params[E.m_iParam].m_Value.get<xresource::full_guid>();
+                Textures[Index].m_Instance = Ref.m_Instance;
+            }
+
+            // Setup the structure
+            xmaterial::data_file MaterialDataFile;
             MaterialDataFile.m_pShader          = spirv.data();
             MaterialDataFile.m_ShaderSize       = static_cast<std::uint32_t>(spirv.size());
             MaterialDataFile.m_Flags.m_bAlpha   = false;
-            MaterialDataFile.m_pDefaultTextures  = m_graph.m_shaderDetail.m_Textures.empty()? nullptr : m_graph.m_shaderDetail.m_Textures.data();
-            MaterialDataFile.m_nDefaultTextures = static_cast<std::uint8_t>(m_graph.m_shaderDetail.m_Textures.size());
+            MaterialDataFile.m_pDefaultTextures = m_graph.m_FinalTextureNodes.m_Textures.empty()? nullptr : Textures.get();
+            MaterialDataFile.m_nDefaultTextures = static_cast<std::uint8_t>(m_graph.m_FinalTextureNodes.m_Textures.size());
 
             //
             // Serialize Final xMaterial
@@ -318,10 +337,43 @@ namespace xmaterial_compiler
             displayProgressBar("Serializing", 1);
 
             //
-            // Save the general information in case the viewer needs it...
+            // Save the material instance template
             //
-            //if ( auto Err = m_graph.m_shaderDetail.serializeShaderDetails(false, std::format(L"{}/{}.log/shader_detail.txt", m_ProjectPaths.m_ResourcesLogs, m_ResourcePartialPath )); Err )
-            //    return xerr::create_f<xmaterial_compiler::state, "Fail to serialize the information required for the editor">(Err);
+            {
+                displayProgressBar("default material instance", 0.0f);
+
+                xmaterial_instance::descriptor MaterialInstance;
+
+                // Set the material reference
+                MaterialInstance.m_MaterialRef.m_Instance = m_ResourceGuid;
+
+                // Set all the textures
+                for (auto& E : m_graph.m_FinalTextureNodes.m_Textures)
+                {
+                    if (E.m_pNode->m_bCanExpose && E.m_pNode->m_bExpose )
+                    {
+                        const int   Index = static_cast<int>(&E - m_graph.m_FinalTextureNodes.m_Textures.data());
+                        auto        Ref   = E.m_pNode->m_Params[E.m_iParam].m_Value.get<xresource::full_guid>();
+                        auto&       Entry = MaterialInstance.m_lTextures.emplace_back();
+
+                        // Set up the entry
+                        Entry.m_Name                         = E.m_pNode->m_ExposeName;
+                        Entry.m_Index                        = Index;
+                        Entry.m_DefaultTextureRef.m_Instance = Ref.m_Instance;
+                        Entry.m_TextureRef                   = {};
+                    }
+                }
+
+                xtextfile::stream Stream;
+                if ( auto Err = Stream.Open(false, std::format(L"{}/{}.log/MaterialInstance.txt", m_ProjectPaths.m_ResourcesLogs, m_ResourcePartialPath), xtextfile::file_type::TEXT); Err )
+                    return xerr::create_f<state, "Fail to open the file to save the material instance template">(Err);
+
+                xproperty::settings::context C;
+                if ( auto Err = xproperty::sprop::serializer::Stream( Stream, MaterialInstance, C); Err )
+                    return xerr::create_f<state, "Fail to save the material instance template">(Err);
+
+                displayProgressBar("default material instance", 1.0f);
+            }
 
             return {};
         }

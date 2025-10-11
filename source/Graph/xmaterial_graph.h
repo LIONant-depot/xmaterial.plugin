@@ -25,17 +25,15 @@ namespace xmaterial_compiler
     };
     XPROPERTY_REG(connection)
 
-    struct shader_details
+    struct final_texture_nodes
     {
-        mutable std::vector<xrsc::texture_ref> m_Textures;
-        XPROPERTY_DEF
-        ( "shader_detals", shader_details
-        , obj_member<"Textures", &shader_details::m_Textures >
-        )
-
-        xerr serializeShaderDetails(bool reading, std::wstring_view sDetailspath) const;
+        struct entry
+        {
+            const node* m_pNode;
+            int         m_iParam;
+        };
+        mutable std::vector<entry> m_Textures;
     };
-    XPROPERTY_REG(shader_details)
 
     struct graph
     {
@@ -58,7 +56,7 @@ namespace xmaterial_compiler
         std::map<connection_guid, std::unique_ptr<connection>>              m_Connections;      // Keep certain maps as simple maps so it will save the information in the same order
         std::unordered_map<type_guid, std::unique_ptr<sType>>               m_type;
         std::unordered_map<pin_guid, node_guid>                             m_PinToNode;
-        shader_details                                                      m_shaderDetail;
+        final_texture_nodes                                                 m_FinalTextureNodes;
     };
 }
 
