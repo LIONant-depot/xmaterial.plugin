@@ -19,8 +19,7 @@
 //
 // force to create the property registrations for these types
 //
-xresource::property_reg_t<xrsc::texture_type_guid_v>       reg1_v = {};
-xresource::property_reg_t<xrsc::material_type_guid_v>      reg2_v = {};
+#include "dependencies/xproperty/source/xcore/my_properties.cpp"
 void xresource::loader< xrsc::material_type_guid_v >::Destroy(xresource::mgr& Mgr, data_type&& Data, const full_guid& GUID){}
 void xresource::loader< xrsc::texture_type_guid_v >::Destroy(xresource::mgr& Mgr, data_type&& Data, const full_guid& GUID) {}
 
@@ -347,20 +346,31 @@ namespace xmaterial_compiler
                 // Set the material reference
                 MaterialInstance.m_MaterialRef.m_Instance = m_ResourceGuid;
 
+                // Allocate all the memory for the final textures
+                MaterialInstance.m_lFinalTextures.resize(m_graph.m_FinalTextureNodes.m_Textures.size());
+
                 // Set all the textures
                 for (auto& E : m_graph.m_FinalTextureNodes.m_Textures)
                 {
+                    const int Index = static_cast<int>(&E - m_graph.m_FinalTextureNodes.m_Textures.data());
+
                     if (E.m_pNode->m_bCanExpose && E.m_pNode->m_bExpose )
                     {
-                        const int   Index = static_cast<int>(&E - m_graph.m_FinalTextureNodes.m_Textures.data());
                         auto        Ref   = E.m_pNode->m_Params[E.m_iParam].m_Value.get<xresource::full_guid>();
-                        auto&       Entry = MaterialInstance.m_lTextures.emplace_back();
+                        auto&       Entry = MaterialInstance.m_lTextureDefaults.emplace_back();
 
                         // Set up the entry
                         Entry.m_Name                         = E.m_pNode->m_ExposeName;
                         Entry.m_Index                        = Index;
-                        Entry.m_DefaultTextureRef.m_Instance = Ref.m_Instance;
-                        Entry.m_TextureRef                   = {};
+
+                        // Set the default... let the material instance override it
+                        MaterialInstance.m_lFinalTextures[Index].m_TextureRef.m_Instance = Ref.m_Instance;
+                    }
+                    else
+                    {
+                        // In the future we need to differentiate between Hardcoded textures and system textures...
+                        auto Ref = E.m_pNode->m_Params[E.m_iParam].m_Value.get<xresource::full_guid>();
+                        MaterialInstance.m_lFinalTextures[Index].m_TextureRef.m_Instance = Ref.m_Instance;
                     }
                 }
 

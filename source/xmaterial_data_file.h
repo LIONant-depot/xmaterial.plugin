@@ -58,7 +58,7 @@ namespace xmaterial
 namespace xserializer::io_functions
 {
     //-------------------------------------------------------------------------
-    template<>
+    template<> inline
     xerr SerializeIO<xmaterial::data_file>(xserializer::stream& Stream, const xmaterial::data_file& Material) noexcept
     {
         xerr Err;

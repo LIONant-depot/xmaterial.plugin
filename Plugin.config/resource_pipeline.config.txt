@@ -2,14 +2,15 @@
 // New Types
 < s32:d u32:g s16:C u16:H s8:c u8:h f32:f f64:F string:s wstring:S u64:G s64:D bool:c enum:s >
 
-[ xProperties : 8 ]
+[ xProperties : 9 ]
 { Name:s                            Value:?                   }
 //--------------------------------  -------------------------
   "PipelinePlugin/TypeName"                  ;string "Material"    
   "PipelinePlugin/FileExtension"             ;wstring "xmat"               
-  "PipelinePlugin/TypeGUID/Value"            ;u64    #C59E01444175409E
+  "PipelinePlugin/TypeGUID/Value"            ;u64    #8B3C028882EA813D
   "PipelinePlugin/Icon"                      ;string "\xEE\xAE\x9F"        
-  "PipelinePlugin/Details/RunAfter[]"        ;s64    0                
+  "PipelinePlugin/Details/RunAfter[]"        ;s64    1        
+  "PipelinePlugin/Details/RunAfter[G:0]/Value" ;u64    #6701d481518bd833            
   "PipelinePlugin/Details/CompilationScript" ;wstring "Cache\\Plugins\\xmaterial.plugin\\Build\\CreateAndBuildProject.bat"
   "PipelinePlugin/Details/DebugCompiler"     ;wstring "Cache\\Plugins\\xmaterial.plugin\\Build\\xmaterial_compiler.vs2022\\Debug\\xmaterial_compiler.exe"               
   "PipelinePlugin/Details/ReleaseCompiler"   ;wstring "Cache\\Plugins\\xmaterial.plugin\\Build\\xmaterial_compiler.vs2022\\Release\\xmaterial_compiler.exe"               
