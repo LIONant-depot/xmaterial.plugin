@@ -319,23 +319,6 @@ namespace xmaterial_compiler
             MaterialDataFile.m_nDefaultTextures = static_cast<std::uint8_t>(m_graph.m_FinalTextureNodes.m_Textures.size());
 
             //
-            // Serialize Final xMaterial
-            //
-            int Count = 0;
-            for (auto& T : m_Target)
-            {
-                displayProgressBar("Serializing", Count++ / static_cast<float>(m_Target.size()));
-
-                if (T.m_bValid)
-                {
-                    xserializer::stream Stream;
-                    if ( auto Err = Stream.Save(T.m_DataPath, MaterialDataFile, xserializer::compression_level::HIGH); Err )
-                        return Err;
-                }
-            }
-            displayProgressBar("Serializing", 1);
-
-            //
             // Save the material instance template
             //
             {
@@ -359,9 +342,20 @@ namespace xmaterial_compiler
                         auto        Ref   = E.m_pNode->m_Params[E.m_iParam].m_Value.get<xresource::full_guid>();
                         auto&       Entry = MaterialInstance.m_lTextureDefaults.emplace_back();
 
+                        // Double check that the file is unique
+                        for (auto& O : MaterialInstance.m_lTextureDefaults)
+                        {
+                            if (O.m_Name == E.m_pNode->m_ExposeName)
+                            {
+                                LogMessage(xresource_pipeline::msg_type::ERROR, std::format("Found an Material Texture Expose Parameter duplication [{}]", O.m_Name) );
+                                return xerr::create_f<state, "Found an Material Texture Expose Parameter duplication">();
+                            }
+                        }
+
                         // Set up the entry
-                        Entry.m_Name                         = E.m_pNode->m_ExposeName;
-                        Entry.m_Index                        = Index;
+                        Entry.m_Name        = E.m_pNode->m_ExposeName;
+                        Entry.m_Index       = Index;
+                        Entry.m_GUID        = E.m_pNode->m_Guid.m_Value;
 
                         // Set the default... let the material instance override it
                         MaterialInstance.m_lFinalTextures[Index].m_TextureRef.m_Instance = Ref.m_Instance;
@@ -384,6 +378,23 @@ namespace xmaterial_compiler
 
                 displayProgressBar("default material instance", 1.0f);
             }
+
+            //
+            // Serialize Final xMaterial
+            //
+            int Count = 0;
+            for (auto& T : m_Target)
+            {
+                displayProgressBar("Serializing", Count++ / static_cast<float>(m_Target.size()));
+
+                if (T.m_bValid)
+                {
+                    xserializer::stream Stream;
+                    if (auto Err = Stream.Save(T.m_DataPath, MaterialDataFile, xserializer::compression_level::HIGH); Err)
+                        return Err;
+                }
+            }
+            displayProgressBar("Serializing", 1);
 
             return {};
         }
