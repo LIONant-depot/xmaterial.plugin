@@ -909,7 +909,7 @@ namespace xmaterial_graph
             sampler.m_InputPins[0].m_Name           = "TextureRsc";
             sampler.m_InputPins[0].m_TypeGUID       = typeTexture.m_GUID;
             sampler.m_InputPins[0].m_ParamIndex     = static_cast<int>(sampler.m_Params.size());
-            sampler.m_Params.emplace_back( "texture", xmaterial_graph::node_param::type::TEXTURE_RESOURCE, xresource::full_guid(), true );
+            sampler.m_Params.emplace_back( "Default Texture", xmaterial_graph::node_param::type::TEXTURE_RESOURCE, xresource::full_guid(), true );
             sampler.m_pCustomInput = nullptr;
 
 #ifdef EDITOR
