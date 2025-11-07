@@ -5,18 +5,18 @@
 #include "dependencies/xproperty/source/xcore/my_properties.h"
 #include "dependencies/xmath/source/xmath.h"
 
-namespace xmaterial_compiler
+namespace xmaterial_graph
 {
     using node_guid         = xmath::strong_typing_direct_numerics_t<std::uint64_t, struct node_guid_tag>;
     using connection_guid   = xmath::strong_typing_direct_numerics_t<std::uint64_t, struct connection_guid_tag>;
     using type_guid         = xmath::strong_typing_direct_numerics_t<std::uint64_t, struct type_guid_tag>;
     using pin_guid          = xmath::strong_typing_direct_numerics_t<std::uint64_t, struct pin_guid_tag>;
 
-    struct node_guid_friend : xmaterial_compiler::node_guid
+    struct node_guid_friend : xmaterial_graph::node_guid
     {
         XPROPERTY_DEF
-        ("node_guid", xmaterial_compiler::node_guid
-            , obj_member<"Value", &xmaterial_compiler::node_guid::m_Value >
+        ( "node_guid", xmaterial_graph::node_guid
+        , obj_member<"Value", &xmaterial_graph::node_guid::m_Value >
         )
     };
     XPROPERTY_REG(node_guid_friend)
@@ -24,8 +24,8 @@ namespace xmaterial_compiler
     struct connection_guid_friend : connection_guid
     {
         XPROPERTY_DEF
-        ("connection_guid", connection_guid
-            , obj_member<"Value", &connection_guid::m_Value >
+        ( "connection_guid", connection_guid
+        , obj_member<"Value", &connection_guid::m_Value >
         )
     };
     XPROPERTY_REG(connection_guid_friend)
@@ -33,17 +33,23 @@ namespace xmaterial_compiler
     struct pin_guid_friend : pin_guid
     {
         XPROPERTY_DEF
-        ("pin_guid", pin_guid
-            , obj_member<"Value", &pin_guid::m_Value >
+        ( "pin_guid", pin_guid
+        , obj_member<"Value", &pin_guid::m_Value >
         )
     };
-    XPROPERTY_REG(pin_guid_friend)
+    XPROPERTY_REG(pin_guid_friend) 
 
     struct var
     {
         type_guid	m_TypeGUID  = {};
         std::string m_Name      = {};
+        XPROPERTY_DEF
+        ( "var", var
+        , obj_member<"Name",    &var::m_Name,       member_flags<flags::DONT_SHOW> >
+        , obj_member<"TypeGUID", +[](var& O) -> auto& { return O.m_TypeGUID.m_Value; },   member_flags<flags::DONT_SHOW> >
+        )
     };
+    XPROPERTY_REG(var)
 
     struct pin : var
     {
@@ -51,8 +57,10 @@ namespace xmaterial_compiler
         std::string         m_DefaultExpr   = {};
         int                 m_ParamIndex    = -1;  // -1 = no property
         XPROPERTY_DEF
-        ("pin", pin
-            , obj_member<"PinGUID", &pin::m_PinGUID, member_flags<flags::DONT_SHOW> >
+        ( "pin", pin
+        , obj_base<var>
+        , obj_member<"PinGUID",    &pin::m_PinGUID, member_flags<flags::DONT_SHOW>, member_flags<flags::DONT_SHOW> > 
+        , obj_member<"ParamIndex", &pin::m_ParamIndex,  member_flags<flags::DONT_SHOW> >
         )
     };
     XPROPERTY_REG(pin)
@@ -84,12 +92,13 @@ namespace xmaterial_compiler
         ColorRGBA               m_Color         = {}; //ImColor
     };
 
-    struct input_pin : pin //serialize pin , connection 
+    struct input_pin : pin
     {
         connection_guid         m_ConnectionGUID = {};
         XPROPERTY_DEF
-        ("input_pin", input_pin, obj_base<pin>
-            , obj_member<"ConnectionGUID", &input_pin::m_ConnectionGUID, member_flags<flags::DONT_SHOW> >
+        ( "input_pin", input_pin
+        , obj_base<pin>
+        , obj_member<"ConnectionGUID", &input_pin::m_ConnectionGUID, member_flags<flags::DONT_SHOW> >
         )
     };
     XPROPERTY_REG(input_pin)
@@ -99,23 +108,15 @@ namespace xmaterial_compiler
         std::vector<pin>	m_SubElements = {};
 
         XPROPERTY_DEF
-        ("output_pin", output_pin, obj_base<pin>
-            , obj_member<"subelements", &output_pin::m_SubElements, member_flags<flags::DONT_SHOW> >
+        ( "output_pin", output_pin
+        , obj_base<pin>
+        , obj_member<"subelements", &output_pin::m_SubElements, member_flags<flags::DONT_SHOW, flags::DONT_SAVE> >    // backwards compatibility
+        , obj_member<"SubElements", &output_pin::m_SubElements, member_flags<flags::DONT_SHOW> >
         )
     };
     XPROPERTY_REG(output_pin)
 
 } // end namespace xmaterial_compiler
-
-struct xcore_vec2_friend : xmath::fvec2
-{
-    XPROPERTY_DEF
-    ("vector2", xmath::fvec2, xproperty::settings::vector2_group
-    , obj_member<"X", &xmath::fvec2::m_X >
-    , obj_member<"Y", &xmath::fvec2::m_Y >
-    )
-};
-XPROPERTY_REG(xcore_vec2_friend)
 
 #endif
 

@@ -20,11 +20,14 @@
 // force to create the property registrations for these types
 //
 #include "dependencies/xproperty/source/xcore/my_properties.cpp"
+#include "dependencies/xmath/source/bridge/xmath_to_xproperty.h"
+
 void xresource::loader< xrsc::material_type_guid_v >::Destroy(xresource::mgr& Mgr, data_type&& Data, const full_guid& GUID){}
 void xresource::loader< xrsc::texture_type_guid_v >::Destroy(xresource::mgr& Mgr, data_type&& Data, const full_guid& GUID) {}
 
 namespace xmaterial_compiler
 {
+    using namespace xmaterial_graph;
     struct implementation final : xmaterial_compiler::instance
     {
         std::string PinToVarName(const node& n)
@@ -337,7 +340,7 @@ namespace xmaterial_compiler
                 {
                     const int Index = static_cast<int>(&E - m_graph.m_FinalTextureNodes.m_Textures.data());
 
-                    if (E.m_pNode->m_bCanExpose && E.m_pNode->m_bExpose )
+                    if (E.m_pNode->m_Params[0].m_bCanExpose && E.m_pNode->m_Params[0].m_bExpose )
                     {
                         auto        Ref   = E.m_pNode->m_Params[E.m_iParam].m_Value.get<xresource::full_guid>();
                         auto&       Entry = MaterialInstance.m_lTextureDefaults.emplace_back();
@@ -345,7 +348,7 @@ namespace xmaterial_compiler
                         // Double check that the file is unique
                         for (auto& O : MaterialInstance.m_lTextureDefaults)
                         {
-                            if (O.m_Name == E.m_pNode->m_ExposeName)
+                            if (O.m_Name == E.m_pNode->m_Params[0].m_ExposeName)
                             {
                                 LogMessage(xresource_pipeline::msg_type::ERROR, std::format("Found an Material Texture Expose Parameter duplication [{}]", O.m_Name) );
                                 return xerr::create_f<state, "Found an Material Texture Expose Parameter duplication">();
@@ -353,7 +356,7 @@ namespace xmaterial_compiler
                         }
 
                         // Set up the entry
-                        Entry.m_Name        = E.m_pNode->m_ExposeName;
+                        Entry.m_Name        = E.m_pNode->m_Params[0].m_ExposeName;
                         Entry.m_Index       = Index;
                         Entry.m_GUID        = E.m_pNode->m_Guid.m_Value;
 

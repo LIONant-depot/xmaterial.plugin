@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <Plugins/xtexture.plugin/source/xtexture_xgpu_rsc_loader.h>
 
-namespace xmaterial_compiler
+namespace xmaterial_graph
 {
     struct connection
     {
@@ -34,6 +34,27 @@ namespace xmaterial_compiler
         };
         mutable std::vector<entry> m_Textures;
     };
+
+/*
+    struct xxx
+    {
+        xrsc::rendering_pipeline    m_RenderingPipeline;
+
+        // BLEND options?
+
+        // SORTED OPTIONS? (alpha (back to front), alpha (post-alpha blend) vs opaque?)
+
+        // CULLING ORDER (CCW/CW/NONE)
+
+        // WIRE-FRAME, SOLID, SOLID-AA?
+
+        XPROPERTY_DEF
+        ( "connection", connection
+        , obj_member<"ConnectionGuid",  &connection::m_Guid,            member_flags<flags::DONT_SAVE>>
+        )
+    };
+    XPROPERTY_REG(connection)
+*/
 
     struct graph
     {

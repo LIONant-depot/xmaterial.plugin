@@ -5,6 +5,10 @@
     //#include "dependencies/imgui/imgui.h"
     #include "dependencies/imgui-node-editor/imgui_node_editor.h"
     #include "source/Examples/E10_TextureResourcePipeline/E10_AssetMgr.h"
+    
+    #include <commdlg.h>
+    #include <iostream>
+    #include <fstream>
 
     // Function found in E19
     void RemapGUIDToString(std::string& Name, const xresource::full_guid& PreFullGuid);
@@ -15,7 +19,7 @@
 #include "xmaterial_graph.h"   
 #include "dependencies/xproperty/source/sprop/property_sprop_xtextfile_serializer.h"
 
-namespace xmaterial_compiler
+namespace xmaterial_graph
 {
     sType& graph::CreateType(type_guid Guid)
     {
@@ -94,11 +98,15 @@ namespace xmaterial_compiler
                 Pin.m_SubElements.resize(Type.m_Sub.size());
                 for (int i = 0, end = static_cast<int>(Type.m_Sub.size()); i < end; ++i)
                 {
-                    Pin.m_SubElements[i].m_Name = Type.m_Sub[i].m_Name;
+                    Pin.m_SubElements[i].m_Name     = Type.m_Sub[i].m_Name;
                     Pin.m_SubElements[i].m_TypeGUID = Type.m_Sub[i].m_TypeGUID;
                 }
             }
         }
+
+        // Compute the max
+        PrefabNode.ComputeMaxInputChars();
+        PrefabNode.ComputeMaxOutputChars();
     }
 
     connection& graph::createConnection(connection_guid connGuid)
@@ -336,6 +344,237 @@ namespace xmaterial_compiler
     //When add new types or nodes remember to recompile shader_compiler.sln too
     // 
     //
+    inline static type_guid g_TextureTypeGUID{};
+
+
+#ifdef EDITOR
+    static void HandleResources(node& Node, xproperty::any& Value, e10::library_mgr& LibraryMgr, xproperty::settings::context& Context)
+    {
+        auto& prop = Node.m_Params[0];
+
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() - 60.f);
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 3.f);
+        ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(32, 32, 32, 200));
+
+        xresource::full_guid& FullGuid = Value.get<xresource::full_guid>();
+
+        bool bOpen = false;
+        xresource::full_guid NewFullGuid = {};
+
+        std::string texname;
+        RemapGUIDToString(texname, FullGuid);
+        if (ImGui::Button(std::format("{}##{}", (texname.empty() || texname == "None") ? "textures" : texname, std::to_string(Node.m_Guid.m_Value)).c_str(), ImVec2(100, 14)))
+        {
+            //ImVec2 button_pos  = ax::NodeEditor::CanvasToScreen(ImGui::GetItemRectMin());
+            //ImVec2 button_size = ax::NodeEditor::CanvasToScreen(ImGui::GetItemRectSize());
+            //ImGui::SetNextWindowPos(ImVec2(button_pos.x, button_pos.y + 3.f));
+            bOpen = true;
+        }
+        static constexpr auto filters = std::array{ xrsc::texture_type_guid_v };
+        ResourceBrowserPopup(&FullGuid, bOpen, NewFullGuid, filters);
+        ax::NodeEditor::Suspend();
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", texname.c_str());
+
+        std::string popupId = "textures selection##" + std::to_string(Node.m_Guid.m_Value);
+
+
+        if (NewFullGuid.empty() == false && NewFullGuid.m_Type == xrsc::texture_type_guid_v)
+        {
+            FullGuid = NewFullGuid;
+        }
+
+        ax::NodeEditor::Resume();
+        ImGui::PopStyleColor();
+    };
+
+    //--------------------------------------------------------------------------------------------------
+
+    void HandleFilesAndResource(node& Node, xproperty::any& Value, e10::library_mgr& LibraryMgr, xproperty::settings::context& Context)
+        {
+            if (Value.m_pType->m_GUID != xproperty::settings::var_type<std::wstring>::guid_v)
+            {
+                HandleResources(Node, Value, LibraryMgr, Context);
+                return;
+            }
+
+            auto& prop = Node.m_Params[0];
+
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() - 60.f);
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 3.f);
+            ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(32, 32, 32, 200));
+
+            std::wstring FileName = Value.get<std::wstring>();
+
+            std::string texname;
+            if (ImGui::Button(std::format("{}##232331", xstrtool::To(xstrtool::PathFileName(FileName))).c_str(), ImVec2(100, 14)))
+            {
+                wchar_t fileBuffer[MAX_PATH] = { 0 };
+                OPENFILENAMEW ofn = { 0 };
+                ofn.lStructSize = sizeof(ofn);
+                ofn.hwndOwner = nullptr; // or a valid HWND
+                ofn.lpstrFilter = node_param::file_filter_v;
+                ofn.lpstrFile = fileBuffer;
+                ofn.nMaxFile = MAX_PATH;
+                ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
+                ofn.lpstrDefExt = L"txt";
+
+                if (GetOpenFileNameW(&ofn))
+                {
+                    //
+                    // Set the name
+                    //
+                    {
+                        std::size_t pos = xstrtool::findI(fileBuffer, L".lionprj");
+                        std::size_t sz = sizeof(".lionprj");
+                        if (pos == std::wstring::npos)
+                        {
+                            pos = xstrtool::findI(fileBuffer, L".lionlib");
+                            sz = sizeof(".lionlib");
+                        }
+
+                        if (pos != std::wstring::npos)
+                        {
+                            Value.get<std::wstring>() = std::wstring(fileBuffer).substr(pos + sz);
+                            int a = 3;
+                        }
+                    }
+
+                    //
+                    // Add new inputs
+                    //
+                    std::ifstream file(fileBuffer); // Replace with your actual file path
+                    if (!file.is_open())
+                    {
+                        // There is an error here...
+                        assert(false);
+                    }
+                    else
+                    {
+                        std::string line;
+                        int lineNumber = 0;
+                        std::vector<int> Found(Node.m_InputPins.size(), 0);
+                        bool bCanExpose = true;
+                        while (std::getline(file, line))
+                        {
+                            ++lineNumber;
+                            if (std::size_t pos = line.find("INPUT_TEXTURE_"); pos != std::string::npos)
+                            {
+                                std::string TextureName;
+                                if (std::size_t name_pos = line.find("sampler2D"); name_pos != std::string::npos)
+                                {
+                                    name_pos += sizeof("sampler2D");
+
+                                    // Skip any spaces
+                                    while (line[name_pos] == ' ') name_pos++;
+
+                                    char buffer[256] = { 0 };
+
+                                    for (int i = 0; line[name_pos + i] != ' ' && line[name_pos + i] != ';'; ++i)
+                                    {
+                                        buffer[i] = line[name_pos + i];
+                                        buffer[i + 1] = 0;
+                                    }
+
+                                    TextureName = buffer;
+                                }
+
+                                pos += sizeof("INPUT_TEXTURE_") - 1;
+                                line = line.substr(pos);
+
+                                std::size_t systemPos = line.find("SYSTEM");
+                                if (systemPos != std::string::npos)
+                                {
+                                    bCanExpose = false;
+                                    // Skip keyword system
+                                    if (systemPos == 0) line = line.substr(sizeof("SYSTEM"));
+                                }
+
+                                int GUID;
+                                auto result = std::from_chars(line.data(), line.data() + line.size(), GUID);
+                                if (result.ec != std::errc())
+                                {
+                                    // some error!
+                                    int a = 22;
+                                }
+
+                                std::size_t FinalGuid = Node.m_Guid.m_Value + 1000 + GUID;
+                                bool        bFound = false;
+                                for (auto& E : Node.m_InputPins)
+                                {
+                                    if (E.m_PinGUID.m_Value == FinalGuid)
+                                    {
+                                        Found[static_cast<int>(&E - Node.m_InputPins.data())] = 1;
+                                        bFound = true;
+                                        break;
+                                    }
+                                }
+                                if (bFound == false)
+                                {
+                                    auto& Input = Node.m_InputPins.emplace_back();
+
+                                    Input.m_Name            = TextureName;
+                                    Input.m_TypeGUID        = g_TextureTypeGUID;
+                                    Input.m_ParamIndex      = static_cast<int>(Node.m_Params.size());
+                                    Input.m_PinGUID.m_Value = FinalGuid;
+                                    auto& Param = Node.m_Params.emplace_back(TextureName, node_param::type::TEXTURE_RESOURCE, xresource::full_guid{}, bCanExpose);
+
+                                    // Set some useful defaults...
+                                    if (bCanExpose)
+                                    {
+                                        Param.m_bExpose    = true;
+                                        Param.m_ExposeName = TextureName;
+                                    }
+                                }
+                            }
+                        }
+                        file.close();
+
+                        //
+                        // Delete unused inputs
+                        //
+                        for (auto& E : std::views::reverse(Found))
+                        {
+                            int Index = static_cast<int>(&E - Found.data());
+                            if (E == 0 && Index != 0)
+                            {
+                                int iParam = Node.m_InputPins[Index].m_ParamIndex;
+                                for (auto& I : Node.m_InputPins)
+                                {
+                                    if (I.m_ParamIndex > iParam) I.m_ParamIndex--;
+                                }
+
+                                // Delete the param
+                                Node.m_Params.erase(Node.m_Params.begin() + iParam);
+
+                                // Delete pin
+                                Node.m_InputPins.erase(Node.m_InputPins.begin() + Index);
+                            }
+                        }
+
+                        //
+                        // Make sure to update the max length of our inputs
+                        //
+                        Node.ComputeMaxInputChars();
+                    }
+                }
+            }
+            ax::NodeEditor::Suspend();
+
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s", xstrtool::To(FileName).c_str());
+
+            std::string popupId = "textures selection##" + std::to_string(Node.m_Guid.m_Value);
+
+
+            ax::NodeEditor::Resume();
+            ImGui::PopStyleColor();
+        };
+
+
+#endif
+
+
     void graph::CreateGraph(graph& g)
     {
         //
@@ -397,14 +636,16 @@ namespace xmaterial_compiler
         typeTexture.m_Name          = "Texture";
         typeTexture.m_CodeString    = "texture";
         typeTexture.m_Color         = FromRGB(200, 180, 80);
+        g_TextureTypeGUID = typeTexture.m_GUID;
 
         //
         //-----Prefabs------
-        // 
-        //const vec3
+        //
+
+        // vec3
         {
             auto& Vec3ConstantPrefabs = g.CreatePrefabNode(node_guid{ xresource::type_guid{"Vec3 Const Node"}.m_Value });
-            Vec3ConstantPrefabs.m_Name      = "Vec3 Const";
+            Vec3ConstantPrefabs.m_Name      = "Vec3";
             Vec3ConstantPrefabs.m_Code      = "vec3 $var = vec3($input[0]_prop[0],$input[1]_prop[1],$input[2]_prop[2]);\n";
             Vec3ConstantPrefabs.m_InputPins.resize(3);
 
@@ -431,13 +672,13 @@ namespace xmaterial_compiler
         }
 
 
-        //const vec2
+        // vec2
         {
             auto& Vec2ConstantPrefabs = g.CreatePrefabNode(node_guid{ xresource::type_guid{"Vec2 Const Node"}.m_Value });
-            Vec2ConstantPrefabs.m_Name = "Vec2 Const";
+            Vec2ConstantPrefabs.m_Name = "Vec2";
             Vec2ConstantPrefabs.m_Code = "vec2 $var = vec2($input[0]_prop[0],$input[1]_prop[1]);\n";
-            Vec2ConstantPrefabs.m_InputPins.resize(2);
 
+            Vec2ConstantPrefabs.m_InputPins.resize(2);
             Vec2ConstantPrefabs.m_InputPins[0].m_Name       = "X(1)";
             Vec2ConstantPrefabs.m_InputPins[0].m_TypeGUID   = typeFloat.m_GUID;
             Vec2ConstantPrefabs.m_InputPins[0].m_ParamIndex = static_cast<int>(Vec2ConstantPrefabs.m_Params.size());
@@ -455,13 +696,13 @@ namespace xmaterial_compiler
             g.CompletePrefab(Vec2ConstantPrefabs);
         }
 
-        //const vec3
+        // vec4
         {
             auto& Vec4ConstantPrefabs = g.CreatePrefabNode(node_guid{ xresource::type_guid{"Vec4 Const Node"}.m_Value });
-            Vec4ConstantPrefabs.m_Name      = "Vec4 Const";
+            Vec4ConstantPrefabs.m_Name      = "Vec4";
             Vec4ConstantPrefabs.m_Code      = "vec4 $var = vec4($input[0]_prop[0],$input[1]_prop[1],$input[2]_prop[2],$input[3]_prop[3]);\n";
-            Vec4ConstantPrefabs.m_InputPins.resize(4);
 
+            Vec4ConstantPrefabs.m_InputPins.resize(4);
             Vec4ConstantPrefabs.m_InputPins[0].m_Name       = "X(1)";
             Vec4ConstantPrefabs.m_InputPins[0].m_TypeGUID   = typeFloat.m_GUID;
             Vec4ConstantPrefabs.m_InputPins[0].m_ParamIndex = static_cast<int>(Vec4ConstantPrefabs.m_Params.size());
@@ -489,10 +730,10 @@ namespace xmaterial_compiler
             g.CompletePrefab(Vec4ConstantPrefabs);
         }
 
-        //--- final fragout ---
+        // Output: Target Color
         {
             auto& finaloutputprefabs = g.CreatePrefabNode(node_guid{ xresource::type_guid{"fragoutprefabs"}.m_Value });
-            finaloutputprefabs.m_Name = "Final FragOut";
+            finaloutputprefabs.m_Name = "Output: Target Color";
             finaloutputprefabs.m_Code = "[TOP]<!layout (location = 0) out  vec4 outFragColor;\n!> [BOT]<!outFragColor = vec4($input[0],$input[1]_prop[0]);\n!>";
 
             finaloutputprefabs.m_InputPins.resize(2);
@@ -506,10 +747,28 @@ namespace xmaterial_compiler
             g.CompletePrefab(finaloutputprefabs);
         }
 
-        //pow function node
+        // Output: Shader File
+        {
+            auto& finaloutputprefabs = g.CreatePrefabNode(node_guid{ xresource::type_guid{"frag_shader"}.m_Value });
+            finaloutputprefabs.m_Name = "Output: Shader File";
+            finaloutputprefabs.m_Code = "[FULL_SHADER]";
+
+            finaloutputprefabs.m_InputPins.resize(1);
+            finaloutputprefabs.m_InputPins[0].m_Name        = "Shader File";
+            finaloutputprefabs.m_InputPins[0].m_TypeGUID    = typeVec3.m_GUID;
+            finaloutputprefabs.m_InputPins[0].m_ParamIndex  = static_cast<int>(finaloutputprefabs.m_Params.size());
+            finaloutputprefabs.m_Params.emplace_back("Shader File", std::wstring(L"") );
+            finaloutputprefabs.m_pCustomInput = nullptr;
+#ifdef EDITOR
+            finaloutputprefabs.m_pCustomInput = HandleFilesAndResource;
+#endif
+            g.CompletePrefab(finaloutputprefabs);
+        }
+
+        // Pow Function
         {
             auto& powerfuncprefabs = g.CreatePrefabNode(node_guid{ xresource::type_guid{"powerprefabs"}.m_Value });
-            powerfuncprefabs.m_Name = "Pow Function";
+            powerfuncprefabs.m_Name = "Pow";
             powerfuncprefabs.m_Code = "vec3 $var = pow($input[0], $input[1]);\n";
 
             powerfuncprefabs.m_InputPins.resize(2);
@@ -525,83 +784,83 @@ namespace xmaterial_compiler
             g.CompletePrefab(powerfuncprefabs);
         }
 
-        //convertVec4 to vec2 prefabs
+        // Vec4 To Vec2
         {
             auto& Vec4toVec2prefabs = g.CreatePrefabNode(node_guid{ xresource::type_guid{"Vec4toVec2prefabs"}.m_Value });
-            Vec4toVec2prefabs.m_Name = "Vec4toVec2 Func";
+            Vec4toVec2prefabs.m_Name = "Vec4 To Vec2";
             Vec4toVec2prefabs.m_Code = "vec2 $var = vec2($input[0].xy);\n";
 
             Vec4toVec2prefabs.m_InputPins.resize(1);
-            Vec4toVec2prefabs.m_InputPins[0].m_Name = "A(4)";
-            Vec4toVec2prefabs.m_InputPins[0].m_TypeGUID = typeVec4.m_GUID;
+            Vec4toVec2prefabs.m_InputPins[0].m_Name         = "A(4)";
+            Vec4toVec2prefabs.m_InputPins[0].m_TypeGUID     = typeVec4.m_GUID;
 
             Vec4toVec2prefabs.m_OutputPins.resize(1);
-            Vec4toVec2prefabs.m_OutputPins[0].m_Name = "Vec2";
-            Vec4toVec2prefabs.m_OutputPins[0].m_TypeGUID = typeVec2.m_GUID;
+            Vec4toVec2prefabs.m_OutputPins[0].m_Name        = "Vec2";
+            Vec4toVec2prefabs.m_OutputPins[0].m_TypeGUID    = typeVec2.m_GUID;
 
             g.CompletePrefab(Vec4toVec2prefabs);
         }
 
-        //convertVec4 to vec3 prefabs
+        // Vec4 To Vec3
         {
             auto& Vec4toVec3prefabs = g.CreatePrefabNode(node_guid{ xresource::type_guid{"Vec4toVec3prefabs"}.m_Value });
-            Vec4toVec3prefabs.m_Name = "Vec4toVec3 Func";
+            Vec4toVec3prefabs.m_Name = "Vec4 To Vec3";
             Vec4toVec3prefabs.m_Code = "vec3 $var = vec3($input[0].xyz);\n";
 
             Vec4toVec3prefabs.m_InputPins.resize(1);
-            Vec4toVec3prefabs.m_InputPins[0].m_Name = "A(4)";
-            Vec4toVec3prefabs.m_InputPins[0].m_TypeGUID = typeVec4.m_GUID;
+            Vec4toVec3prefabs.m_InputPins[0].m_Name         = "A(4)";
+            Vec4toVec3prefabs.m_InputPins[0].m_TypeGUID     = typeVec4.m_GUID;
 
             Vec4toVec3prefabs.m_OutputPins.resize(1);
-            Vec4toVec3prefabs.m_OutputPins[0].m_Name = "Vec3";
-            Vec4toVec3prefabs.m_OutputPins[0].m_TypeGUID = typeVec3.m_GUID;
+            Vec4toVec3prefabs.m_OutputPins[0].m_Name        = "Vec3";
+            Vec4toVec3prefabs.m_OutputPins[0].m_TypeGUID    = typeVec3.m_GUID;
 
             g.CompletePrefab(Vec4toVec3prefabs);
         }
 
-        //Vec4 multiply
+        //Vec4 Multiply
         {
             auto& multiplyVec4 = g.CreatePrefabNode(node_guid{ xresource::type_guid{"MultiplyVec4Prefabs"}.m_Value });
-            multiplyVec4.m_Name = "MultiplyVec4";
+            multiplyVec4.m_Name = "Vec4 Multiply";
             multiplyVec4.m_Code = "vec4 $var = $input[0] * $input[1];\n";
 
             multiplyVec4.m_InputPins.resize(2);
-            multiplyVec4.m_InputPins[0].m_Name      = "A(4)";
-            multiplyVec4.m_InputPins[0].m_TypeGUID  = typeVec4.m_GUID;
-            multiplyVec4.m_InputPins[1].m_Name      = "B(4)";
-            multiplyVec4.m_InputPins[1].m_TypeGUID  = typeVec4.m_GUID;
+            multiplyVec4.m_InputPins[0].m_Name          = "A(4)";
+            multiplyVec4.m_InputPins[0].m_TypeGUID      = typeVec4.m_GUID;
+            multiplyVec4.m_InputPins[1].m_Name          = "B(4)";
+            multiplyVec4.m_InputPins[1].m_TypeGUID      = typeVec4.m_GUID;
 
             multiplyVec4.m_OutputPins.resize(1);
-            multiplyVec4.m_OutputPins[0].m_Name     = "Vec4";
-            multiplyVec4.m_OutputPins[0].m_TypeGUID = typeVec4.m_GUID;
+            multiplyVec4.m_OutputPins[0].m_Name         = "Vec4";
+            multiplyVec4.m_OutputPins[0].m_TypeGUID     = typeVec4.m_GUID;
 
             g.CompletePrefab(multiplyVec4);
         }
 
-        //Vec4 add
+        // Vec4 add
         {
             auto& addVec4 = g.CreatePrefabNode(node_guid{ xresource::type_guid{"addVec4Prefabs"}.m_Value });
-            addVec4.m_Name = "addVec4";
+            addVec4.m_Name = "Vec4 Add";
             addVec4.m_Code = "vec4 $var = $input[0] + $input[1];\n";
 
             addVec4.m_InputPins.resize(2);
-            addVec4.m_InputPins[0].m_Name = "A(4)";
-            addVec4.m_InputPins[0].m_TypeGUID = typeVec4.m_GUID;
-            addVec4.m_InputPins[1].m_Name = "B(4)";
-            addVec4.m_InputPins[1].m_TypeGUID = typeVec4.m_GUID;
+            addVec4.m_InputPins[0].m_Name           = "A(4)";
+            addVec4.m_InputPins[0].m_TypeGUID       = typeVec4.m_GUID;
+            addVec4.m_InputPins[1].m_Name           = "B(4)";
+            addVec4.m_InputPins[1].m_TypeGUID       = typeVec4.m_GUID;
 
             addVec4.m_OutputPins.resize(1);
-            addVec4.m_OutputPins[0].m_Name = "Vec4";
-            addVec4.m_OutputPins[0].m_TypeGUID = typeVec4.m_GUID;
+            addVec4.m_OutputPins[0].m_Name          = "Vec4";
+            addVec4.m_OutputPins[0].m_TypeGUID      = typeVec4.m_GUID;
 
             g.CompletePrefab(addVec4);
         }
 
-        //float multiplier
+        // Float Multiply
         {
             auto& multiplyFloat = g.CreatePrefabNode(node_guid{ xresource::type_guid{"MultiplyFloatPrefabs"}.m_Value });
-            multiplyFloat.m_Name = "MultiplyFloat";
-            multiplyFloat.m_Code = "float $var = $input[0] * $input[1];\n";
+            multiplyFloat.m_Name                        = "Float Multiply";
+            multiplyFloat.m_Code                        = "float $var = $input[0] * $input[1];\n";
 
             multiplyFloat.m_InputPins.resize(2);
             multiplyFloat.m_InputPins[0].m_Name         = "A(1)";
@@ -617,14 +876,14 @@ namespace xmaterial_compiler
         }
 
 
-        //Texture Function
+        // Texture
         {
             auto& texture = g.CreatePrefabNode(node_guid{ xresource::type_guid{"texturePrefabs"}.m_Value });
             texture.m_Name = "Texture";
             texture.m_Code = "vec4 $var = texture($input[0], $input[1]);\n";
 
             texture.m_InputPins.resize(2);
-            texture.m_InputPins[0].m_Name       = "T(2D)";
+            texture.m_InputPins[0].m_Name       = "Texture(2D)";
             texture.m_InputPins[0].m_TypeGUID   = typeSampler2D.m_GUID;
             texture.m_InputPins[1].m_Name       = "UV(2)";
             texture.m_InputPins[1].m_TypeGUID   = typeVec2.m_GUID;
@@ -636,74 +895,38 @@ namespace xmaterial_compiler
             g.CompletePrefab(texture);
         }
 
-        //SamplerNode
+        // Sampler2D
         {
             auto& sampler = g.CreatePrefabNode(node_guid{ xresource::type_guid{"samplerPrefabs"}.m_Value });
-            sampler.m_Name = "Sampler2D";
+            sampler.m_Name = "Sampler 2D";
             sampler.m_Code = "[TOP]<!layout(binding = $tex[0]) uniform  sampler2D  $var;\n!>";
 
             sampler.m_OutputPins.resize(1);
-            sampler.m_OutputPins[0].m_Name      = "Texture(2D)";
-            sampler.m_OutputPins[0].m_TypeGUID  = typeSampler2D.m_GUID;
+            sampler.m_OutputPins[0].m_Name          = "Texture(2D)";
+            sampler.m_OutputPins[0].m_TypeGUID      = typeSampler2D.m_GUID;
 
             sampler.m_InputPins.resize(1);
-            sampler.m_InputPins[0].m_Name       = "texture";
-            sampler.m_InputPins[0].m_TypeGUID   = typeTexture.m_GUID;
-            sampler.m_InputPins[0].m_ParamIndex = static_cast<int>(sampler.m_Params.size());
-            sampler.m_Params.emplace_back( "texture", node_prop::type::TEXTURE_RESOURCE, xresource::full_guid() );
-
-            sampler.m_bCanExpose   = true;
+            sampler.m_InputPins[0].m_Name           = "TextureRsc";
+            sampler.m_InputPins[0].m_TypeGUID       = typeTexture.m_GUID;
+            sampler.m_InputPins[0].m_ParamIndex     = static_cast<int>(sampler.m_Params.size());
+            sampler.m_Params.emplace_back( "texture", xmaterial_graph::node_param::type::TEXTURE_RESOURCE, xresource::full_guid(), true );
             sampler.m_pCustomInput = nullptr;
 
 #ifdef EDITOR
-            sampler.m_pCustomInput = [](node& Node, xresource::full_guid& FullGuid, e10::library_mgr& LibraryMgr, xproperty::settings::context& Context )
-                {
-                    auto& prop = Node.m_Params[0];
-                    
-                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() - 20.f);
-                    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 3.f);
-                    ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(32, 32, 32, 200));
-
-                    bool bOpen = false;
-                    xresource::full_guid NewFullGuid = {};
-
-                    std::string texname;
-                    RemapGUIDToString(texname, FullGuid);
-                    if (ImGui::Button(std::format("{}##{}", (texname.empty() || texname == "None") ? "textures" : texname, std::to_string(Node.m_Guid.m_Value)).c_str(), ImVec2(68,14)))
-                    {
-                        //ImVec2 button_pos  = ax::NodeEditor::CanvasToScreen(ImGui::GetItemRectMin());
-                        //ImVec2 button_size = ax::NodeEditor::CanvasToScreen(ImGui::GetItemRectSize());
-                        //ImGui::SetNextWindowPos(ImVec2(button_pos.x, button_pos.y + 3.f));
-                        bOpen = true;
-                    }
-                    static constexpr auto filters = std::array{ xrsc::texture_type_guid_v };
-                    ResourceBrowserPopup(&FullGuid, bOpen, NewFullGuid, filters);
-                    ax::NodeEditor::Suspend();
-
-                    std::string popupId = "textures selection##" + std::to_string(Node.m_Guid.m_Value);
-
-
-                    if (NewFullGuid.empty() == false && NewFullGuid.m_Type == xrsc::texture_type_guid_v )
-                    {
-                        FullGuid = NewFullGuid;
-                    }
-
-                    ax::NodeEditor::Resume();
-                    ImGui::PopStyleColor();
-                };
+            sampler.m_pCustomInput = &HandleResources;
 #endif
 
             g.CompletePrefab(sampler);
         }
 
-        //vertex input node
+        // Input: Vertex Variants
         {
             auto& vertexInput = g.CreatePrefabNode(node_guid{ xresource::type_guid{"vertexPrefabs"}.m_Value });
-            vertexInput.m_Name = "VtxInput";
+            vertexInput.m_Name = "Input: Vertex Variants";
             vertexInput.m_Code = "[TOP]<!layout(location = 0) in struct { vec4 Color; vec2 UV; } In;\n!>";
 
             vertexInput.m_OutputPins.resize(2);
-            vertexInput.m_OutputPins[0].m_Name          = "Clr(4)";
+            vertexInput.m_OutputPins[0].m_Name          = "Color(4)";
             vertexInput.m_OutputPins[0].m_TypeGUID      = typeVec4.m_GUID;
             vertexInput.m_OutputPins[0].m_DefaultExpr   = "In.Color";
             vertexInput.m_OutputPins[1].m_Name          = "UV(2)";
@@ -713,10 +936,10 @@ namespace xmaterial_compiler
             g.CompletePrefab(vertexInput);
         }
 
-        //vec3 Dot Product vec3
+        // Vec3 Dot
         {
             auto& DotProduct = g.CreatePrefabNode(node_guid{ xresource::type_guid{"DotProductPrefabs"}.m_Value });
-            DotProduct.m_Name = "DotProductV3";
+            DotProduct.m_Name = "Vec3 Dot";
             DotProduct.m_Code = "float $var = dot($input[0], $input[1]);\n";
             DotProduct.m_InputPins.resize(2);
             DotProduct.m_InputPins[0].m_Name        = "A(3)";
@@ -731,10 +954,10 @@ namespace xmaterial_compiler
             g.CompletePrefab(DotProduct);
         }
 
-        //Float constructor
+        // Float
         {
             auto& FloatConstructor = g.CreatePrefabNode(node_guid{ xresource::type_guid{"FloatConstructPrefabs"}.m_Value });
-            FloatConstructor.m_Name = "Float Const";
+            FloatConstructor.m_Name = "Float";
             FloatConstructor.m_Code = "float $var = $input[0]_prop[0];\n";
             FloatConstructor.m_InputPins.resize(1);
             FloatConstructor.m_InputPins[0].m_Name          = "A(1)";
@@ -749,10 +972,10 @@ namespace xmaterial_compiler
             g.CompletePrefab(FloatConstructor);
         }
 
-        //Floor Func
+        // Float Floor
         {
             auto& FloorFloat = g.CreatePrefabNode(node_guid{ xresource::type_guid{"FloorFloatPrefabs"}.m_Value });
-            FloorFloat.m_Name = "Float Floor Func";
+            FloorFloat.m_Name = "Float Floor";
             FloorFloat.m_Code = "float $var = floor($input[0]);\n";
             FloorFloat.m_InputPins.resize(1);
             FloorFloat.m_InputPins[0].m_Name        = "A(1)";
@@ -765,7 +988,7 @@ namespace xmaterial_compiler
             g.CompletePrefab(FloorFloat);
         }
 
-        //float divider
+        // Float Divider
         {
             auto& floatDivider = g.CreatePrefabNode(node_guid{ xresource::type_guid{"FloatDividerPrefabs"}.m_Value });
             floatDivider.m_Name                     = "Float Divider";
@@ -783,7 +1006,7 @@ namespace xmaterial_compiler
             g.CompletePrefab(floatDivider);
         }
 
-        //grouping node with comment
+        // Comment
         {
             auto& groupWithComment = g.CreatePrefabNode(node_guid{ xresource::type_guid{"groupWithComment"}.m_Value });
             groupWithComment.m_Name = "Comment";

@@ -1,6 +1,6 @@
 #include "xmaterial_graph_node.h"
 
-namespace xmaterial_compiler
+namespace xmaterial_graph
 {
     int node::getInputPinIndex(pin_guid Guid)
     {
