@@ -49,11 +49,11 @@ namespace xmaterial_compiler
                 if (it != g.m_Connections.end())
                 {
                     const auto& conn = *it->second;
-                    if (auto* srcNode = g.FindNodeByPin(conn.m_OutputPinGuid))
+                    if (auto* srcNode = g.findNodeByPin(conn.m_OutputPinGuid))
                     {
                         int idx, sub;
                         bool dummy;
-                        const pin* outPin = g.FindPinConst(*srcNode, conn.m_OutputPinGuid, dummy, idx, sub);
+                        const pin* outPin = g.findPinConst(*srcNode, conn.m_OutputPinGuid, dummy, idx, sub);
                         if (outPin)
                         {
 
@@ -142,7 +142,7 @@ namespace xmaterial_compiler
                     auto it = g.m_Connections.find(ip.m_ConnectionGUID);
                     if (it != g.m_Connections.end())
                     {
-                        if (auto* dep = g.FindNodeByPin(it->second->m_OutputPinGuid))
+                        if (auto* dep = g.findNodeByPin(it->second->m_OutputPinGuid))
                             DFS(g, *dep, visited, ordered);
                     }
                 }
@@ -150,8 +150,53 @@ namespace xmaterial_compiler
             ordered.push_back(&n);
         }
 
-        std::string GenerateGLSL(const graph& g)
+
+        std::string HandleShaderOnlyNode(graph& g, node& n )
         {
+            std::string         ss;
+            std::wstring        ShaderFileName;
+            std::string         Shader;
+
+            ShaderFileName = std::format( L"{}/{}", m_ProjectPaths.m_Project, n.m_Params[0].m_Value.get<std::wstring>() );
+
+            if ( auto Err = RefreshShaderOnlyNode(ShaderFileName, n, Shader); Err )
+            {
+                Err.ForEachInChain([&](xerr Error)
+                {
+                    xstrtool::print("ERROR: {}\n", Err.getMessage());
+                    if (auto Hint = Err.getHint(); Hint.empty() == false)
+                        xstrtool::print("- HINT: {}\n", Hint);
+                });
+                return{"ERROR"};
+            }
+
+            for( int i=1; i<n.m_InputPins.size(); ++i)
+            {
+                auto& E = n.m_InputPins[i];
+
+                g.m_FinalTextureNodes.m_Textures.emplace_back( &n, i );
+            }
+
+            return Shader;
+        }
+
+        std::string HandleShaderOnlyGraphs( graph& g)
+        {
+            if ( auto pNode = g.findFullShaderNode(); pNode )
+            {
+                return HandleShaderOnlyNode(g, *pNode);
+            }
+
+            return {};
+        }
+
+        std::string GenerateGLSL( graph& g)
+        {
+            // handle shader only nodes
+            if (auto str = HandleShaderOnlyGraphs(g); not str.empty())
+                return str;
+
+
             // Header (always)
             std::ostringstream ss;
             ss << "#version 450\n";
@@ -242,14 +287,11 @@ namespace xmaterial_compiler
             //
             auto DescriptorFileName = std::format( L"{}/{}/Descriptor.txt", m_ProjectPaths.m_Project, m_InputSrcDescriptorPath);
 
-            graph m_graph;
-            m_graph.CreateGraph(m_graph);
-            m_graph.serialize(m_graph, true, DescriptorFileName);
-            
-            const auto& shaderString = GenerateGLSL(m_graph);
+            graph Graph;
+            Graph.CreateGraph(Graph);
+            Graph.serialize(Graph, true, DescriptorFileName);
 
-            // Print the generated shader
-            LogMessage( xresource_pipeline::msg_type::INFO, shaderString);
+            const auto& shaderString = GenerateGLSL(Graph);
 
             //
             // Generate the sprv shader
@@ -285,12 +327,23 @@ namespace xmaterial_compiler
             displayProgressBar("Compiling Shader", 1.0f);
 
             //
+            // Print the generated shader
+            //
+            LogMessage(xresource_pipeline::msg_type::INFO, shaderString);
+
+            //
             // Add the dependencies
             //
-            for (auto& E : m_graph.m_FinalTextureNodes.m_Textures )
+            for (auto& E : Graph.m_FinalTextureNodes.m_Textures )
             {
                 auto Ref = E.m_pNode->m_Params[ E.m_iParam ].m_Value.get<xresource::full_guid>();
                 m_Dependencies.m_Resources.push_back(Ref);
+            }
+
+            // Check if it is a FullShaderNode if so add the shader as an asset
+            if ( auto pNode = Graph.findFullShaderNode(); pNode )
+            {
+                m_Dependencies.m_Assets.push_back( pNode->m_Params[0].m_Value.get<std::wstring>() );
             }
 
             //
@@ -305,10 +358,10 @@ namespace xmaterial_compiler
             //
 
             // Allocate and collect the textures
-            auto Textures = std::make_unique<xrsc::texture_ref[]>(m_graph.m_FinalTextureNodes.m_Textures.size());
-            for (auto& E : m_graph.m_FinalTextureNodes.m_Textures)
+            auto Textures = std::make_unique<xrsc::texture_ref[]>(Graph.m_FinalTextureNodes.m_Textures.size());
+            for (auto& E : Graph.m_FinalTextureNodes.m_Textures)
             {
-                const int Index = static_cast<int>(&E - m_graph.m_FinalTextureNodes.m_Textures.data());
+                const int Index = static_cast<int>(&E - Graph.m_FinalTextureNodes.m_Textures.data());
                 auto Ref = E.m_pNode->m_Params[E.m_iParam].m_Value.get<xresource::full_guid>();
                 Textures[Index].m_Instance = Ref.m_Instance;
             }
@@ -318,8 +371,8 @@ namespace xmaterial_compiler
             MaterialDataFile.m_pShader          = spirv.data();
             MaterialDataFile.m_ShaderSize       = static_cast<std::uint32_t>(spirv.size());
             MaterialDataFile.m_Flags.m_bAlpha   = false;
-            MaterialDataFile.m_pDefaultTextures = m_graph.m_FinalTextureNodes.m_Textures.empty()? nullptr : Textures.get();
-            MaterialDataFile.m_nDefaultTextures = static_cast<std::uint8_t>(m_graph.m_FinalTextureNodes.m_Textures.size());
+            MaterialDataFile.m_pDefaultTextures = Graph.m_FinalTextureNodes.m_Textures.empty()? nullptr : Textures.get();
+            MaterialDataFile.m_nDefaultTextures = static_cast<std::uint8_t>(Graph.m_FinalTextureNodes.m_Textures.size());
 
             //
             // Save the material instance template
@@ -333,12 +386,12 @@ namespace xmaterial_compiler
                 MaterialInstance.m_MaterialRef.m_Instance = m_ResourceGuid;
 
                 // Allocate all the memory for the final textures
-                MaterialInstance.m_lFinalTextures.resize(m_graph.m_FinalTextureNodes.m_Textures.size());
+                MaterialInstance.m_lFinalTextures.resize(Graph.m_FinalTextureNodes.m_Textures.size());
 
                 // Set all the textures
-                for (auto& E : m_graph.m_FinalTextureNodes.m_Textures)
+                for (auto& E : Graph.m_FinalTextureNodes.m_Textures)
                 {
-                    const int Index = static_cast<int>(&E - m_graph.m_FinalTextureNodes.m_Textures.data());
+                    const int Index = static_cast<int>(&E - Graph.m_FinalTextureNodes.m_Textures.data());
 
                     if (E.m_pNode->m_Params[0].m_bCanExpose && E.m_pNode->m_Params[0].m_bExpose )
                     {
@@ -398,6 +451,20 @@ namespace xmaterial_compiler
                 }
             }
             displayProgressBar("Serializing", 1);
+
+            //
+            // Serialize the actual shader (If it is not a full-shader...)
+            //
+            if (auto pNode = Graph.findFullShaderNode(); pNode == nullptr)
+            {
+                std::ofstream out(std::format(L"{}/{}.log/Shader.txt", m_ProjectPaths.m_ResourcesLogs, m_ResourcePartialPath));
+                if (!out) { std::cerr << "Failed to open file for writing.\n";}
+                else
+                {
+                    out << shaderString << "\n";
+                    out.close();
+                }
+            }
 
             return {};
         }

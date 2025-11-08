@@ -10,6 +10,12 @@
 
 namespace xmaterial_graph
 {
+    enum class state : std::uint8_t
+    { OK
+    , FAILURE
+    };
+
+
     struct connection
     {
         connection_guid     m_Guid          = {};
@@ -34,6 +40,8 @@ namespace xmaterial_graph
         };
         mutable std::vector<entry> m_Textures;
     };
+
+    xerr RefreshShaderOnlyNode(std::wstring ShaderFileName, node& Node, std::string& Shader);
 
 /*
     struct xxx
@@ -65,11 +73,12 @@ namespace xmaterial_graph
         connection&         createConnection        (connection_guid connGuid = connection_guid{ xresource::guid_generator::Type64() });
         void                RemoveConnection        (connection_guid id);
         void                RemoveNode              (node_guid id);
-        node*               FindNodeByPin           (pin_guid pin) const;
-        sType*              GetType                 (type_guid id) const;
+        node*               findNodeByPin           (pin_guid pin) const;
+        sType*              findType                (type_guid id) const;
         void                RebuildPinGuidForNode   (const node& n);
         void                serialize               (graph& graph, bool isReading, const std::wstring_view filepath);
-        const pin*          FindPinConst            (const node& n, pin_guid pid, bool& isInput, int& idxOut, int& subOut) const;
+        const pin*          findPinConst            (const node& n, pin_guid pid, bool& isInput, int& idxOut, int& subOut) const;
+        node*               findFullShaderNode      (void);
         void                CreateGraph             (graph& g);
 
         std::unordered_map<node_guid, std::unique_ptr<node>>                m_PrefabNodes;      // right click option like sampler node etc

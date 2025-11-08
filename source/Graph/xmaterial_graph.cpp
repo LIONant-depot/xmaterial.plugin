@@ -1,5 +1,9 @@
 
 #include "dependencies/xproperty/source/xcore/my_properties.h"
+#include <iostream>
+#include <fstream>
+#include <numeric>  // std::iota
+#include <dependencies/xstrtool/source/xstrtool.h>
 
 #ifdef EDITOR
     //#include "dependencies/imgui/imgui.h"
@@ -7,8 +11,6 @@
     #include "source/Examples/E10_TextureResourcePipeline/E10_AssetMgr.h"
     
     #include <commdlg.h>
-    #include <iostream>
-    #include <fstream>
 
     // Function found in E19
     void RemapGUIDToString(std::string& Name, const xresource::full_guid& PreFullGuid);
@@ -21,6 +23,10 @@
 
 namespace xmaterial_graph
 {
+
+    static constexpr auto texture_type_guid_v = type_guid{ xresource::type_guid{"texture"}.m_Value };
+
+
     sType& graph::CreateType(type_guid Guid)
     {
         auto Type = std::make_unique<sType>();
@@ -127,7 +133,7 @@ namespace xmaterial_graph
         if (it != m_Connections.end()) {
             // Clear the input pin’s m_ConnectionGUID
             const auto& conn = *it->second;
-            if (auto* n = FindNodeByPin(conn.m_InputPinGuid)) {
+            if (auto* n = findNodeByPin(conn.m_InputPinGuid)) {
                 int idx = n->getInputPinIndex(conn.m_InputPinGuid);
                 if (idx >= 0) {
                     n->m_InputPins[idx].m_ConnectionGUID = {};
@@ -148,8 +154,8 @@ namespace xmaterial_graph
         std::vector<connection_guid> toRemove;
         for (auto& [cid, conn] : m_Connections)
         {
-            if (FindNodeByPin(conn->m_InputPinGuid) == &node ||
-                FindNodeByPin(conn->m_OutputPinGuid) == &node)
+            if (findNodeByPin(conn->m_InputPinGuid) == &node ||
+                findNodeByPin(conn->m_OutputPinGuid) == &node)
             {
                 toRemove.push_back(cid);
             }
@@ -170,7 +176,7 @@ namespace xmaterial_graph
         m_InstanceNodes.erase(it);
     }
 
-    node* graph::FindNodeByPin(pin_guid pin) const
+    node* graph::findNodeByPin(pin_guid pin) const
     {
         auto it = m_PinToNode.find(pin);
         if (it == m_PinToNode.end()) return nullptr;
@@ -181,7 +187,7 @@ namespace xmaterial_graph
         return itN->second.get();
     }
 
-    sType* graph::GetType(type_guid id) const
+    sType* graph::findType(type_guid id) const
     {
         auto it = m_type.find(id);
         return it == m_type.end() ? nullptr : it->second.get();
@@ -315,7 +321,7 @@ namespace xmaterial_graph
         }
     }
 
-    const pin* graph::FindPinConst(const node& n, pin_guid pid, bool& isInput, int& idxOut, int& subOut) const
+    const pin* graph::findPinConst(const node& n, pin_guid pid, bool& isInput, int& idxOut, int& subOut) const
     {
         // input search
         for (int i = 0; i < (int)n.m_InputPins.size(); ++i)
@@ -340,12 +346,250 @@ namespace xmaterial_graph
         }
         return nullptr;
     }
+
+    xerr RefreshShaderOnlyNode( std::wstring ShaderFileName, node& Node, std::string& Shader )
+    {
+        xstrtool::print( L"Opening Shader: {} \n", ShaderFileName );
+
+        std::ifstream File(ShaderFileName);
+        if (not File.is_open())
+        {
+            xerr::LogMessage<state::FAILURE>( std::format( "Failed opening the shader file {}", xstrtool::To(ShaderFileName)));
+            return xerr::create_f<state,"Failed opening the shader file">();
+        }
+
+        node             Backup         = Node;
+        std::vector<int> TexturePos     = {};
+
+        //
+        // Process the shader
+        //
+        std::string         line;
+        int                 lineNumber = 0;
+        std::vector<int>    Found(Node.m_InputPins.size(), 0);
+        bool                bCanExpose = true;
+        while( std::getline(File, line) )
+        {
+            Shader = std::format( "{}\n{}", Shader, line );
+
+            ++lineNumber;
+            if (std::size_t pos = line.find("INPUT_TEXTURE_"); pos != std::string::npos)
+            {
+                std::string TextureName;
+                if (std::size_t name_pos = line.find("sampler2D"); name_pos != std::string::npos)
+                {
+                    name_pos += sizeof("sampler2D");
+
+                    // Skip any spaces
+                    while (line[name_pos] == ' ') name_pos++;
+
+                    char buffer[256] = { 0 };
+
+                    for (int i = 0; line[name_pos + i] != ' ' && line[name_pos + i] != ';'; ++i)
+                    {
+                        buffer[i] = line[name_pos + i];
+                        buffer[i + 1] = 0;
+                    }
+
+                    TextureName = buffer;
+                }
+                else
+                {
+                    Node = Backup;
+                    return xerr::create_f<state, "Unsupported sampler type (PLEASE REQUEST FOR SUPPORT)!">();
+                }
+
+                int BindingIndex = -1;
+                if( std::size_t binding_pos = line.find("binding"); binding_pos != std::string::npos)
+                {
+                    binding_pos += sizeof("binding")-1;
+
+                    // Skip any spaces
+                    while (line[binding_pos] == ' ') binding_pos++;
+
+                    if ( line[binding_pos++] != '=')
+                    {
+                        Node = Backup;
+                        return xerr::create_f<state, "Fail reading the binding... `binding =` is missing...">();
+                    }
+
+                    // Skip any spaces
+                    while (line[binding_pos] == ' ') binding_pos++;
+
+                    auto result = std::from_chars(line.data() + binding_pos, &(*line.end()), BindingIndex);
+                    if (result.ec != std::errc())
+                    {
+                        std::error_code ec = std::make_error_code(result.ec);
+                        xerr::LogMessage<state::FAILURE>( std::format( "Error converting the 'binding = ##err##' error: [{}]", ec.message()) );
+                        Node = Backup;
+                        return xerr::create_f<state, "Error converting the 'binding = ##err##'">();
+                    }
+                }
+                else
+                {
+                    Node = Backup;
+                    return xerr::create_f<state, "Unable to find the binding for one of the textures">();
+                }
+
+                pos += sizeof("INPUT_TEXTURE_") - 1;
+                line = line.substr(pos);
+
+                std::size_t systemPos = line.find("SYSTEM");
+                if (systemPos != std::string::npos)
+                {
+                    bCanExpose = false;
+                    // Skip keyword system
+                    if (systemPos == 0) line = line.substr(sizeof("SYSTEM"));
+                }
+
+                int GUID;
+                auto result = std::from_chars(line.data(), line.data() + line.size(), GUID);
+                if (result.ec != std::errc())
+                {
+                    std::error_code ec = std::make_error_code(result.ec);
+                    xerr::LogMessage<state::FAILURE>(std::format("Error converting the texture GUID, (INPUT_TEXTURE_##err##), error: [{}]", ec.message()));
+                    Node = Backup;
+                    return xerr::create_f<state, "Error converting the texture GUID, (INPUT_TEXTURE_##err##)">();
+                }
+
+                std::size_t FinalGuid   = Node.m_Guid.m_Value + 1000 + GUID;
+                bool        bFound      = false;
+                for (auto& E : Node.m_InputPins)
+                {
+                    if (E.m_PinGUID.m_Value == FinalGuid)
+                    {
+                        int Index = static_cast<int>(&E - Node.m_InputPins.data());
+                        Found[Index] = 1;
+                        bFound = true;
+                        if (Index >= TexturePos.size()) TexturePos.resize(Index+1);
+                        TexturePos[Index] = BindingIndex;
+                        break;
+                    }
+                }
+
+                if (bFound == false)
+                {
+                    auto& Input             = Node.m_InputPins.emplace_back();
+
+                    Input.m_Name            = TextureName;
+                    Input.m_TypeGUID        = texture_type_guid_v;
+                    Input.m_ParamIndex      = static_cast<int>(Node.m_Params.size());
+                    Input.m_PinGUID.m_Value = FinalGuid;
+                    auto& Param = Node.m_Params.emplace_back(TextureName, node_param::type::TEXTURE_RESOURCE, xresource::full_guid{}, bCanExpose);
+
+                    // Set some useful defaults...
+                    if (bCanExpose)
+                    {
+                        Param.m_bExpose     = true;
+                        Param.m_ExposeName  = TextureName;
+                    }
+
+                    std::size_t Index = Node.m_InputPins.size()-1;
+                    if (Index >= TexturePos.size()) TexturePos.resize(Index + 1);
+                    TexturePos[Index] = BindingIndex;
+                }
+            }
+        }
+        File.close();
+
+        //
+        // Delete unused inputs
+        //
+        for (auto& E : std::views::reverse(Found))
+        {
+            int Index = static_cast<int>(&E - Found.data());
+            if (E == 0 && Index != 0)
+            {
+                int iParam = Node.m_InputPins[Index].m_ParamIndex;
+                for (auto& I : Node.m_InputPins)
+                {
+                    if (I.m_ParamIndex > iParam) I.m_ParamIndex--;
+                }
+
+                // Delete the param
+                Node.m_Params.erase(Node.m_Params.begin() + iParam);
+
+                // Delete pin
+                Node.m_InputPins.erase(Node.m_InputPins.begin() + Index);
+
+                // Delete texture index
+                TexturePos.erase(TexturePos.begin() + iParam);
+            }
+        }
+
+        //
+        // Sort params base on the binding from 0..n of the textures...
+        //
+        {
+            // Assume TexturePos and Node.m_Params have the same size > 0
+            std::vector<std::size_t> idx(TexturePos.size());
+            std::iota(idx.begin(), idx.end(), 0);
+
+            // Sort indices from 1 to end by TexturePos values (ascending), leave idx[0] == 0
+            std::sort(idx.begin()+1, idx.end(), [&](std::size_t i, std::size_t j) 
+            {
+                return TexturePos[i] < TexturePos[j];
+            });
+
+            // Generic permutation apply (moves where possible, O(n) time + space)
+            auto apply_perm = [](auto& vec, const std::vector<std::size_t>& indices)
+            {
+                using T = typename std::remove_reference<decltype(vec)>::type::value_type;
+                std::vector<T> temp(vec.size());
+                for (std::size_t i = 0; i < vec.size(); ++i) 
+                {
+                    temp[i] = std::move(vec[indices[i]]);
+                }
+                vec = std::move(temp);
+            };
+
+            apply_perm(TexturePos,    idx);
+            apply_perm(Node.m_Params, idx);
+        }
+
+        //
+        // Validate the binding positions
+        //
+        for (int i = 1; i < TexturePos.size(); ++i )
+        {
+            int Expecting = i-1;
+            if (TexturePos[i] != Expecting)
+            {
+                printf("Error: Non consecutive bindings... expecting %d but found %d\n", Expecting, TexturePos[i] );
+                xerr::LogMessage<state::FAILURE>(std::format("Error: Non consecutive bindings... expecting {} but found {}", Expecting, TexturePos[i]));
+                Node = Backup;
+                return xerr::create_f<state, "Non consecutive bindings...">();
+            }
+        }
+
+        //
+        // Make sure to update the max length of our inputs
+        //
+        Node.ComputeMaxInputChars();
+
+        return {};
+    }
+
+    node* graph::findFullShaderNode()
+    {
+        for (auto& E : m_InstanceNodes)
+        {
+            if (E.second->isOutputNode())
+            {
+                if (E.second->m_Code == "[FULL_SHADER]")
+                {
+                    return E.second.get();
+                }
+            }
+        }
+
+        return nullptr;
+    }
+
     //
     //When add new types or nodes remember to recompile shader_compiler.sln too
     // 
     //
-    inline static type_guid g_TextureTypeGUID{};
-
 
 #ifdef EDITOR
     static void HandleResources(node& Node, xproperty::any& Value, e10::library_mgr& LibraryMgr, xproperty::settings::context& Context)
@@ -443,119 +687,12 @@ namespace xmaterial_graph
                     //
                     // Add new inputs
                     //
-                    std::ifstream file(fileBuffer); // Replace with your actual file path
-                    if (!file.is_open())
                     {
-                        // There is an error here...
-                        assert(false);
-                    }
-                    else
-                    {
-                        std::string line;
-                        int lineNumber = 0;
-                        std::vector<int> Found(Node.m_InputPins.size(), 0);
-                        bool bCanExpose = true;
-                        while (std::getline(file, line))
+                        std::string Shader;
+                        if (auto Err = RefreshShaderOnlyNode(fileBuffer, Node, Shader); Err)
                         {
-                            ++lineNumber;
-                            if (std::size_t pos = line.find("INPUT_TEXTURE_"); pos != std::string::npos)
-                            {
-                                std::string TextureName;
-                                if (std::size_t name_pos = line.find("sampler2D"); name_pos != std::string::npos)
-                                {
-                                    name_pos += sizeof("sampler2D");
-
-                                    // Skip any spaces
-                                    while (line[name_pos] == ' ') name_pos++;
-
-                                    char buffer[256] = { 0 };
-
-                                    for (int i = 0; line[name_pos + i] != ' ' && line[name_pos + i] != ';'; ++i)
-                                    {
-                                        buffer[i] = line[name_pos + i];
-                                        buffer[i + 1] = 0;
-                                    }
-
-                                    TextureName = buffer;
-                                }
-
-                                pos += sizeof("INPUT_TEXTURE_") - 1;
-                                line = line.substr(pos);
-
-                                std::size_t systemPos = line.find("SYSTEM");
-                                if (systemPos != std::string::npos)
-                                {
-                                    bCanExpose = false;
-                                    // Skip keyword system
-                                    if (systemPos == 0) line = line.substr(sizeof("SYSTEM"));
-                                }
-
-                                int GUID;
-                                auto result = std::from_chars(line.data(), line.data() + line.size(), GUID);
-                                if (result.ec != std::errc())
-                                {
-                                    // some error!
-                                    int a = 22;
-                                }
-
-                                std::size_t FinalGuid = Node.m_Guid.m_Value + 1000 + GUID;
-                                bool        bFound = false;
-                                for (auto& E : Node.m_InputPins)
-                                {
-                                    if (E.m_PinGUID.m_Value == FinalGuid)
-                                    {
-                                        Found[static_cast<int>(&E - Node.m_InputPins.data())] = 1;
-                                        bFound = true;
-                                        break;
-                                    }
-                                }
-                                if (bFound == false)
-                                {
-                                    auto& Input = Node.m_InputPins.emplace_back();
-
-                                    Input.m_Name            = TextureName;
-                                    Input.m_TypeGUID        = g_TextureTypeGUID;
-                                    Input.m_ParamIndex      = static_cast<int>(Node.m_Params.size());
-                                    Input.m_PinGUID.m_Value = FinalGuid;
-                                    auto& Param = Node.m_Params.emplace_back(TextureName, node_param::type::TEXTURE_RESOURCE, xresource::full_guid{}, bCanExpose);
-
-                                    // Set some useful defaults...
-                                    if (bCanExpose)
-                                    {
-                                        Param.m_bExpose    = true;
-                                        Param.m_ExposeName = TextureName;
-                                    }
-                                }
-                            }
+                            std::cerr << "Error: " << Err.getMessage() << "\n";
                         }
-                        file.close();
-
-                        //
-                        // Delete unused inputs
-                        //
-                        for (auto& E : std::views::reverse(Found))
-                        {
-                            int Index = static_cast<int>(&E - Found.data());
-                            if (E == 0 && Index != 0)
-                            {
-                                int iParam = Node.m_InputPins[Index].m_ParamIndex;
-                                for (auto& I : Node.m_InputPins)
-                                {
-                                    if (I.m_ParamIndex > iParam) I.m_ParamIndex--;
-                                }
-
-                                // Delete the param
-                                Node.m_Params.erase(Node.m_Params.begin() + iParam);
-
-                                // Delete pin
-                                Node.m_InputPins.erase(Node.m_InputPins.begin() + Index);
-                            }
-                        }
-
-                        //
-                        // Make sure to update the max length of our inputs
-                        //
-                        Node.ComputeMaxInputChars();
                     }
                 }
             }
@@ -632,11 +769,10 @@ namespace xmaterial_graph
         typeSampler2D.m_Color       = FromRGB(240, 80, 80);
 
         //string
-        auto& typeTexture = g.CreateType(type_guid{ xresource::type_guid{"texture"}.m_Value });
+        auto& typeTexture = g.CreateType(texture_type_guid_v);
         typeTexture.m_Name          = "Texture";
         typeTexture.m_CodeString    = "texture";
         typeTexture.m_Color         = FromRGB(200, 180, 80);
-        g_TextureTypeGUID = typeTexture.m_GUID;
 
         //
         //-----Prefabs------
