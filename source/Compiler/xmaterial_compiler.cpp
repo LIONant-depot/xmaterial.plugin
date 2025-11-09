@@ -391,17 +391,18 @@ namespace xmaterial_compiler
                 // Set all the textures
                 for (auto& E : Graph.m_FinalTextureNodes.m_Textures)
                 {
-                    const int Index = static_cast<int>(&E - Graph.m_FinalTextureNodes.m_Textures.data());
+                    const int       Index = static_cast<int>(&E - Graph.m_FinalTextureNodes.m_Textures.data());
+                    const auto&     Param = E.m_pNode->m_Params[E.m_iParam];
 
-                    if (E.m_pNode->m_Params[0].m_bCanExpose && E.m_pNode->m_Params[0].m_bExpose )
+                    if (Param.m_bCanExpose && Param.m_bExpose )
                     {
-                        auto        Ref   = E.m_pNode->m_Params[E.m_iParam].m_Value.get<xresource::full_guid>();
+                        auto        Ref   = Param.m_Value.get<xresource::full_guid>();
                         auto&       Entry = MaterialInstance.m_lTextureDefaults.emplace_back();
 
                         // Double check that the file is unique
                         for (auto& O : MaterialInstance.m_lTextureDefaults)
                         {
-                            if (O.m_Name == E.m_pNode->m_Params[0].m_ExposeName)
+                            if (O.m_Name == Param.m_ExposeName)
                             {
                                 LogMessage(xresource_pipeline::msg_type::ERROR, std::format("Found an Material Texture Expose Parameter duplication [{}]", O.m_Name) );
                                 return xerr::create_f<state, "Found an Material Texture Expose Parameter duplication">();
@@ -409,7 +410,7 @@ namespace xmaterial_compiler
                         }
 
                         // Set up the entry
-                        Entry.m_Name        = E.m_pNode->m_Params[0].m_ExposeName;
+                        Entry.m_Name        = Param.m_ExposeName;
                         Entry.m_Index       = Index;
                         Entry.m_GUID        = E.m_pNode->m_Guid.m_Value;
 
@@ -419,7 +420,7 @@ namespace xmaterial_compiler
                     else
                     {
                         // In the future we need to differentiate between Hardcoded textures and system textures...
-                        auto Ref = E.m_pNode->m_Params[E.m_iParam].m_Value.get<xresource::full_guid>();
+                        auto Ref = Param.m_Value.get<xresource::full_guid>();
                         MaterialInstance.m_lFinalTextures[Index].m_TextureRef.m_Instance = Ref.m_Instance;
                     }
                 }
