@@ -416,7 +416,7 @@ namespace xmaterial_graph
                     // Skip any spaces
                     while (line[binding_pos] == ' ') binding_pos++;
 
-                    auto result = std::from_chars(line.data() + binding_pos, &(*line.end()), BindingIndex);
+                    auto result = std::from_chars(line.data() + binding_pos, &(*(line.end()-1)), BindingIndex);
                     if (result.ec != std::errc())
                     {
                         std::error_code ec = std::make_error_code(result.ec);
