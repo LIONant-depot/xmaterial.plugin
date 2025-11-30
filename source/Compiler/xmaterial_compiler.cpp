@@ -1,12 +1,14 @@
 ﻿#include "xmaterial_compiler.h"
 #include <regex>
 #include <unordered_set>
+#include <filesystem>
 
 #include "dependencies/shaderc/include/shaderc/shaderc.hpp"
 #include "dependencies/xstrtool/source/xstrtool.h"
 #include <fstream>
 #include <cerrno>   // for errno
 #include <iostream>
+
 
 #include "source/xmaterial_data_file.h"
 
@@ -27,6 +29,68 @@ void xresource::loader< xrsc::texture_type_guid_v >::Destroy(xresource::mgr& Mgr
 
 namespace xmaterial_compiler
 {
+#include <shaderc/shaderc.hpp>
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <array>  // Or use struct for container
+
+    class CustomIncluder : public shaderc::CompileOptions::IncluderInterface
+    {
+    public:
+        shaderc_include_result* GetInclude(const char* requested_source,
+            shaderc_include_type type,
+            const char* requesting_source,
+            size_t include_depth) override {
+            auto result = new shaderc_include_result;
+            auto container = new std::array<std::string, 2>;  // [0]: source_name, [1]: content or error
+            result->user_data = container;
+
+            try {
+                std::filesystem::path requested_path(requested_source);
+                if (type == shaderc_include_type_relative) {
+                    std::filesystem::path requesting_path(requesting_source);
+                    if (!requesting_path.empty()) {
+                        requested_path = requesting_path.parent_path() / requested_path;
+                    }
+                }
+                auto full_path = std::filesystem::absolute(requested_path);
+
+                std::ifstream file(full_path, std::ios::in | std::ios::binary);
+                if (!file) {
+                    throw std::runtime_error("File not found: " + full_path.string());
+                }
+
+                std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+
+                (*container)[0] = full_path.string();
+                (*container)[1] = std::move(content);
+
+                result->source_name = (*container)[0].data();
+                result->source_name_length = (*container)[0].size();
+                result->content = (*container)[1].data();
+                result->content_length = (*container)[1].size();
+            }
+            catch (const std::exception& e) {
+                (*container)[0] = "";
+                (*container)[1] = e.what();
+
+                result->source_name = (*container)[0].data();
+                result->source_name_length = 0;
+                result->content = (*container)[1].data();
+                result->content_length = (*container)[1].size();
+            }
+
+            return result;
+        }
+
+        void ReleaseInclude(shaderc_include_result* data) override {
+            delete static_cast<std::array<std::string, 2>*>(data->user_data);
+            delete data;
+        }
+    };
+
+
     using namespace xmaterial_graph;
     struct implementation final : xmaterial_compiler::instance
     {
@@ -293,16 +357,19 @@ namespace xmaterial_compiler
 
             const auto& shaderString = GenerateGLSL(Graph);
 
+            LogMessage(xresource_pipeline::msg_type::INFO, std::format("Setting the working path to : {}", xstrtool::To(m_ProjectPaths.m_Project)));
+            std::filesystem::current_path(m_ProjectPaths.m_Project);
+
             //
             // Generate the sprv shader
             //
             displayProgressBar("Compiling Shader", 0.0f);
             shaderc::Compiler       compiler;
             shaderc::CompileOptions options;
+            options.SetIncluder(std::make_unique<CustomIncluder>());
 
             options.SetOptimizationLevel(shaderc_optimization_level_performance);
             options.SetTargetSpirv(shaderc_spirv_version_1_0);
-
             auto result = compiler.CompileGlslToSpv( shaderString
                                                    , shaderc_glsl_default_fragment_shader
                                                    , "shader.glsl"
@@ -311,6 +378,7 @@ namespace xmaterial_compiler
 
             if (const auto Err = result.GetCompilationStatus(); Err != shaderc_compilation_status_success ) 
             {
+                LogMessage(xresource_pipeline::msg_type::ERROR, result.GetErrorMessage().c_str());
                 switch (Err)
                 {
                 case shaderc_compilation_status_invalid_stage:          return xerr::create_f<state, "Compilation for spirv fail - shaderc_compilation_status_invalid_stage">();

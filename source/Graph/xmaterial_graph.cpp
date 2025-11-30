@@ -596,8 +596,6 @@ namespace xmaterial_graph
     {
         auto& prop = Node.m_Params[0];
 
-        ImGui::SetCursorPosX(ImGui::GetCursorPosX() - 60.f);
-        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 3.f);
         ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(32, 32, 32, 200));
 
         xresource::full_guid& FullGuid = Value.get<xresource::full_guid>();
@@ -607,7 +605,7 @@ namespace xmaterial_graph
 
         std::string texname;
         RemapGUIDToString(texname, FullGuid);
-        if (ImGui::Button(std::format("{}##{}", (texname.empty() || texname == "None") ? "textures" : texname, std::to_string(Node.m_Guid.m_Value)).c_str(), ImVec2(100, 14)))
+        if (ImGui::Button(std::format("{}##{}", (texname.empty() || texname == "None") ? "textures" : texname, (void*) & Value).c_str(), ImVec2(100, 14)))
         {
             //ImVec2 button_pos  = ax::NodeEditor::CanvasToScreen(ImGui::GetItemRectMin());
             //ImVec2 button_size = ax::NodeEditor::CanvasToScreen(ImGui::GetItemRectSize());
@@ -642,8 +640,6 @@ namespace xmaterial_graph
                 return;
             }
 
-            auto& prop = Node.m_Params[0];
-
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() - 60.f);
             ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 3.f);
             ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(32, 32, 32, 200));
@@ -651,7 +647,10 @@ namespace xmaterial_graph
             std::wstring FileName = Value.get<std::wstring>();
 
             std::string texname;
-            if (ImGui::Button(std::format("{}##232331", xstrtool::To(xstrtool::PathFileName(FileName))).c_str(), ImVec2(100, 14)))
+
+            auto ButtonName = std::format("{}##{}", xstrtool::To(xstrtool::PathFileName(FileName)), (void*) & Value);
+
+            if (ImGui::Button(ButtonName.c_str(), ImVec2(102, 14)))
             {
                 wchar_t fileBuffer[MAX_PATH] = { 0 };
                 OPENFILENAMEW ofn = { 0 };
@@ -662,6 +661,7 @@ namespace xmaterial_graph
                 ofn.nMaxFile = MAX_PATH;
                 ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
                 ofn.lpstrDefExt = L"txt";
+                ofn.lpstrInitialDir = xproperty::member_ui<std::wstring>::g_CurrentPath.c_str();
 
                 if (GetOpenFileNameW(&ofn))
                 {
