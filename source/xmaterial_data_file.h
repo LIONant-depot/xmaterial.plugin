@@ -23,10 +23,19 @@ namespace xmaterial
             };
         };
 
+        struct material_basis_entry
+        {
+            std::array<void*, 2> m_Pipeline;
+        };
+
         //-------------------------------------------------------------------------
 
         inline          data_file       (void)                          noexcept = default;
         inline          data_file       (xserializer::stream& Steaming) noexcept;
+
+        inline std::span<xrsc::texture_ref>         getTextures     (void) { return { m_pDefaultTextures, (std::size_t)m_nDefaultTextures  }; }
+
+        std::array<material_basis_entry,1>  m_MaterialBasisSlot;
 
         union
         {
@@ -63,6 +72,7 @@ namespace xserializer::io_functions
     {
         xerr Err;
         false
+        || (Err = Stream.Serialize(Material.m_MaterialBasisSlot))
         || (Err = Stream.Serialize(Material.m_pShader, Material.m_ShaderSize))
         || (Err = Stream.Serialize(Material.m_ShaderSize))
         || (Err = Stream.Serialize(Material.m_Flags.m_Value))
@@ -72,6 +82,19 @@ namespace xserializer::io_functions
 
         return Err;
     }
+
+    //-------------------------------------------------------------------------
+    template<> inline
+    xerr SerializeIO<xmaterial::data_file::material_basis_entry>(xserializer::stream& Stream, const xmaterial::data_file::material_basis_entry& Entry) noexcept
+    {
+        xerr Err;
+        false
+        || (Err = Stream.Serialize( *(std::array<std::byte,sizeof(Entry)>*)&Entry))
+        ;
+
+        return Err;
+    }
+
 }
 
 #endif

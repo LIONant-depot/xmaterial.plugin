@@ -7,17 +7,17 @@ int main(int argc, const char* argv[])
     if constexpr (false)
     {
         static const char* pDebugArgs[] =
-        { "D:\\LIONant\\xGPU\\dependencies\\xresource_pipeline_example.lion_project\\Cache\\Plugins\\xmaterial.plugin\\Build\\xmaterial_compiler.vs2022\\Release\\xmaterial_compiler.exe" 
+        { "D:\\xgpu_test\\xGPU\\example.lionprj\\Cache\\Plugins\\xmaterial.plugin\\Build\\xmaterial_compiler.vs2022\\Release\\xmaterial_compiler.exe" 
         , "-PROJECT"
-        , "D:\\LIONant\\xGPU\\example.lionprj" 
+        , "D:\\xgpu_test\\xGPU\\example.lionprj" 
         , "-OPTIMIZATION"
         , "O1"
         , "-DEBUG"
         , "D0"
         , "-DESCRIPTOR"
-        , "Descriptors\\Material\\03\\80\\16ECD866594D8003.desc" 
+        , "Descriptors\\Material\\03\\C0\\8D45F86DC5F2C003.desc" 
         , "-OUTPUT"
-        , "D:\\LIONant\\xGPU\\bin_dependencies\\xresource_pipeline_example.lion_project\\Cache\\Resources\\Platforms\\WINDOWS"
+        , "D:\\xgpu_test\\xGPU\\example.lionprj\\Cache\\Resources\\Platforms\\WINDOWS"
         };
 
         argv = pDebugArgs;

@@ -435,7 +435,8 @@ namespace xmaterial_compiler
             }
 
             // Setup the structure
-            xmaterial::data_file MaterialDataFile;
+            xmaterial::data_file MaterialDataFile = {};
+
             MaterialDataFile.m_pShader          = spirv.data();
             MaterialDataFile.m_ShaderSize       = static_cast<std::uint32_t>(spirv.size());
             MaterialDataFile.m_Flags.m_bAlpha   = false;
@@ -477,10 +478,19 @@ namespace xmaterial_compiler
                             }
                         }
 
+                        // Find the input pin ID
+                        for ( auto& P : E.m_pNode->m_InputPins)
+                        {
+                            if ( P.m_ParamIndex == E.m_iParam )
+                            {
+                                Entry.m_GUID = P.m_PinGUID.m_Value;
+                            }
+                        }
+
                         // Set up the entry
                         Entry.m_Name        = Param.m_ExposeName;
                         Entry.m_Index       = Index;
-                        Entry.m_GUID        = E.m_pNode->m_Guid.m_Value;
+                        
 
                         // Set the default... let the material instance override it
                         MaterialInstance.m_lFinalTextures[Index].m_TextureRef.m_Instance = Ref.m_Instance;

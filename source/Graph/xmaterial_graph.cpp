@@ -452,7 +452,7 @@ namespace xmaterial_graph
                     return xerr::create_f<state, "Error converting the texture GUID, (INPUT_TEXTURE_##err##)">();
                 }
 
-                std::size_t FinalGuid   = Node.m_Guid.m_Value + 1000 + GUID;
+                std::size_t FinalGuid   = GUID;
                 bool        bFound      = false;
                 for (auto& E : Node.m_InputPins)
                 {
@@ -461,6 +461,11 @@ namespace xmaterial_graph
                         int Index = static_cast<int>(&E - Node.m_InputPins.data());
                         Found[Index] = 1;
                         bFound = true;
+
+                        // Make sure we are up to date with the name
+                        E.m_Name                             = TextureName;
+                        Node.m_Params[E.m_ParamIndex].m_Name = TextureName;
+
                         if (Index >= TexturePos.size()) TexturePos.resize(Index+1);
                         TexturePos[Index] = BindingIndex;
                         break;
@@ -513,7 +518,8 @@ namespace xmaterial_graph
                 Node.m_InputPins.erase(Node.m_InputPins.begin() + Index);
 
                 // Delete texture index
-                TexturePos.erase(TexturePos.begin() + iParam);
+                // TODO: If we remove an entry don't we have to reindex all the params?
+                if (iParam < TexturePos.size()) TexturePos.erase(TexturePos.begin() + iParam);
             }
         }
 
