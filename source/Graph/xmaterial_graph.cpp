@@ -532,14 +532,19 @@ namespace xmaterial_graph
             std::iota(idx.begin(), idx.end(), 0);
 
             // Sort indices from 1 to end by TexturePos values (ascending), leave idx[0] == 0
-            std::sort(idx.begin()+1, idx.end(), [&](std::size_t i, std::size_t j) 
+            if (idx.size() > 1)
             {
-                return TexturePos[i] < TexturePos[j];
-            });
+                std::sort(idx.begin() + 1, idx.end(), [&](std::size_t i, std::size_t j)
+                {
+                    return TexturePos[i] < TexturePos[j];
+                });
+            }
 
             // Generic permutation apply (moves where possible, O(n) time + space)
             auto apply_perm = [](auto& vec, const std::vector<std::size_t>& indices)
             {
+                if (indices.empty()) return;
+
                 using T = typename std::remove_reference<decltype(vec)>::type::value_type;
                 std::vector<T> temp(vec.size());
                 for (std::size_t i = 0; i < vec.size(); ++i) 

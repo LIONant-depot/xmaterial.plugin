@@ -15,7 +15,7 @@ namespace xmaterial_graph
 {
     struct node_param
     {
-        static constexpr wchar_t        file_filter_v[] = L"ShaderFile\0 *.glsl\0Any Thing\0 *.*\0";
+        static constexpr wchar_t        file_filter_v[] = L"ShaderFile\0 *.glsl;*.frag\0Any Thing\0 *.*\0";
 
         enum class type :std::uint8_t
         { NONE
