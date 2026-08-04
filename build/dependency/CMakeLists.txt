@@ -14,12 +14,14 @@ FetchAndPopulate("https://github.com/LIONant-depot/xmath.git" "main")
 #
 # Download Shaderc zip if it doesn't exist
 set(SHADERC_ZIP "${CMAKE_SOURCE_DIR}/dependencies/Shaderc.zip")
-if(NOT EXISTS "${SHADERC_ZIP}")
+set(SHADERC_EXTRACT_DIR "${CMAKE_SOURCE_DIR}/dependencies")
+set(SHADERC_INSTALL_DIR "${SHADERC_EXTRACT_DIR}/shaderc")
+# Gate on the fully-extracted install dir, not the zip: a failed/interrupted download can
+# leave a stale or 0-byte zip behind, which would otherwise block every future retry.
+if(NOT EXISTS "${SHADERC_INSTALL_DIR}")
 
     # Define paths
     set(SHADERC_URL "https://storage.googleapis.com/shaderc/artifacts/prod/graphics_shader_compiler/shaderc/windows-vs2022-amd64-release/continuous/36/20260731-122731/install.zip")
-    set(SHADERC_EXTRACT_DIR "${CMAKE_SOURCE_DIR}/dependencies")
-    set(SHADERC_INSTALL_DIR "${SHADERC_EXTRACT_DIR}/shaderc")
 
     message(STATUS "Downloading Shaderc...")
     file(DOWNLOAD "${SHADERC_URL}" "${SHADERC_ZIP}" STATUS download_status)
