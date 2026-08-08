@@ -8,7 +8,7 @@
   "PipelinePlugin/TypeName"                  ;string "Material"    
   "PipelinePlugin/FileExtension"             ;wstring "xmat"               
   "PipelinePlugin/TypeGUID/Value"            ;u64    #8B3C028882EA813D
-  "PipelinePlugin/Icon"                      ;string "\xEE\xAE\x9F"        
+  "PipelinePlugin/Icon"                      ;string "\xEE\xAA\xBC"        
   "PipelinePlugin/Details/RunAfter[]"        ;s64    1        
   "PipelinePlugin/Details/RunAfter[G:0]/Value" ;u64    #6701d481518bd833            
   "PipelinePlugin/Details/CompilationScript" ;wstring "Cache\\Plugins\\xmaterial.plugin\\Build\\CreateAndBuildProject.bat"
