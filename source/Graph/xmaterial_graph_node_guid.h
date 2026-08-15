@@ -59,7 +59,7 @@ namespace xmaterial_graph
         XPROPERTY_DEF
         ( "pin", pin
         , obj_base<var>
-        , obj_member<"PinGUID",    &pin::m_PinGUID, member_flags<flags::DONT_SHOW>, member_flags<flags::DONT_SHOW> > 
+        , obj_member<"PinGUID",    &pin::m_PinGUID, member_flags<flags::DONT_SHOW> >
         , obj_member<"ParamIndex", &pin::m_ParamIndex,  member_flags<flags::DONT_SHOW> >
         )
     };
