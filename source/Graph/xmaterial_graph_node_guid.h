@@ -37,7 +37,17 @@ namespace xmaterial_graph
         , obj_member<"Value", &pin_guid::m_Value >
         )
     };
-    XPROPERTY_REG(pin_guid_friend) 
+    XPROPERTY_REG(pin_guid_friend)
+
+    // node::m_Guid, pin::m_PinGUID, and input_pin::m_ConnectionGUID are declared with the raw
+    // strong-typed guids (not a lambda reaching into .m_Value like var::m_TypeGUID does), so they need
+    // the explicit link to the wrapper structs above.
+} // namespace xmaterial_graph
+template<> struct xproperty::settings::reflected_type<xmaterial_graph::node_guid>       { using type = xmaterial_graph::node_guid_friend; };
+template<> struct xproperty::settings::reflected_type<xmaterial_graph::pin_guid>        { using type = xmaterial_graph::pin_guid_friend; };
+template<> struct xproperty::settings::reflected_type<xmaterial_graph::connection_guid> { using type = xmaterial_graph::connection_guid_friend; };
+namespace xmaterial_graph
+{
 
     struct var
     {
