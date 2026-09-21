@@ -3,7 +3,7 @@
 #pragma once
 
 #ifdef EDITOR
-    #include "source/Examples/E10_TextureResourcePipeline/E10_AssetMgr.h"
+    #include "dependencies/xresource_pipeline_v2/source/editor/E10_AssetMgr.h"
     #include "plugins/xtexture.plugin/source/xtexture_xgpu_rsc_loader.h"
 #endif
 
