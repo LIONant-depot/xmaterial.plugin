@@ -61,24 +61,34 @@ namespace xmaterial_graph
         Node->m_Guid = Guid;
         Node->m_PrefabGuid = PrefabGuid;
 
-        //every new node created need to assign unique pin for each instance
+        //every new node created need to assign unique pin for each instance. The pins' ids come from the node's id (the same node always gets the
+        //same pins), so creating a node again - an undo followed by a redo - gives the connections that refer to its pins something to find
+        std::uint64_t iPin = 0;
+        auto NextPinGuid = [&]
+        {
+            std::uint64_t z = Guid.m_Value + (++iPin) * 0x9E3779B97F4A7C15ull;              // splitmix64
+            z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+            z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+            return pin_guid{ z ^ (z >> 31) };
+        };
+
         //input pin unique id
         for (auto& ip : Node->m_InputPins)
         {
-            ip.m_PinGUID = pin_guid{ xresource::guid_generator::Type64() };
+            ip.m_PinGUID = NextPinGuid();
             m_PinToNode[ip.m_PinGUID] = Guid;
         }
 
         //output pin unique id
         for (auto& op : Node->m_OutputPins)
         {
-            op.m_PinGUID = pin_guid{ xresource::guid_generator::Type64() };
+            op.m_PinGUID = NextPinGuid();
             m_PinToNode[op.m_PinGUID] = Guid;
             if (!op.m_SubElements.empty())
             {
                 for (auto& sub : op.m_SubElements)
                 {
-                    sub.m_PinGUID = pin_guid{ xresource::guid_generator::Type64() };
+                    sub.m_PinGUID = NextPinGuid();
                     m_PinToNode[sub.m_PinGUID] = Guid; //-> node guid
                     if (!op.m_DefaultExpr.empty())
                         sub.m_DefaultExpr = op.m_DefaultExpr;
