@@ -242,7 +242,7 @@ namespace xmaterial_graph
         , obj_member<"Position",    &node::m_Pos,           member_flags<flags::DONT_SHOW>>
         , obj_member<"Input Pins",  &node::m_InputPins,     member_flags<flags::DONT_SHOW>>
         , obj_member<"Output Pins", &node::m_OutputPins,    member_flags<flags::DONT_SHOW>>
-        , obj_member<"Params",      &node::m_Params,        member_ui_open<true>>
+        , obj_member<"Params",      &node::m_Params,        member_ui_open<true>, member_array_size_readonly<true> >
         )
 
         int getInputPinIndex(pin_guid Guid);

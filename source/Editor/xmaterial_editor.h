@@ -34,11 +34,13 @@ namespace xmaterial_editor
         xeditor::inspector_panel        m_NodeInspector{ "Node Properties" };
         std::uint64_t                   m_InspectedNode = 0;
         xeditor::mesh_preview           m_Preview;
+        xeditor::mesh_preview_cmds      m_PreviewCmds;
         TextEditor                      m_Shader;
         xrsc::material_ref              m_MaterialRef;
 
         session(xresource::full_guid Guid, e10::library::guid LibraryGuid, xgpu::device* pDevice) noexcept
             : document_editor("Material", Guid, LibraryGuid, pDevice)
+            , m_PreviewCmds(m_Undo, m_Preview)
             , m_CreateNode(m_Undo, m_Document), m_DeleteNode(m_Undo, m_Document), m_Connect(m_Undo, m_Document), m_Disconnect(m_Undo, m_Document)
             , m_SetShaderFile(m_Undo, m_Document), m_MoveNode(m_Undo, m_Document), m_SetNodeProperty(m_Undo, m_Document)
             , m_ListNodeTypes(m_Undo, m_Document), m_ListNodes(m_Undo, m_Document), m_NodeProperties(m_Undo, m_Document)
