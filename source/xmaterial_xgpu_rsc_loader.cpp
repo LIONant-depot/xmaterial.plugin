@@ -19,11 +19,14 @@ xresource::loader< xrsc::material_type_guid_v >::data_type* xresource::loader< x
 
     static_assert( sizeof(xmaterial::rt) == sizeof(xmaterial::data_file));
 
-    // Load the xbitmap
+    // Load the material. A missing/not-yet-compiled resource is an expected, recoverable case (same
+    // reasoning as xtexture_xgpu_rsc_loader.cpp's identical fix) - every caller already handles
+    // getResource() returning null, so return null instead of asserting-then-dereferencing a null
+    // pMaterial below (a crash in a debug build, silent undefined behaviour in Release).
     xserializer::stream Stream;
     if (auto Err = Stream.Load(Path, pMaterial); Err)
     {
-        assert(false);
+        return nullptr;
     }
 
     xgpu::shader::setup Setup
