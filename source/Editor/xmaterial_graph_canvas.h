@@ -97,11 +97,13 @@ namespace xmaterial_editor
         //------------------------------------------------------------------------------------------
         // The widgets of an unconnected input: a number, a texture, a shader file
         //------------------------------------------------------------------------------------------
-        void DrawParamWidget(xmaterial_graph::node& N, const xmaterial_graph::input_pin& Pin, float OffsetX, float OffsetY, const ImU32 BorderColor) noexcept
+        // PinCenterY: the real vertical center of this pin's row (see InputPinCenterY in Draw()) - the
+        // widget's own pseudo-link dot is placed there so it lines up with the pin regardless of font metrics.
+        void DrawParamWidget(xmaterial_graph::node& N, const xmaterial_graph::input_pin& Pin, float OffsetX, float PinCenterY, const ImU32 BorderColor) noexcept
         {
             auto& Param  = N.m_Params[Pin.m_ParamIndex];
             const int iParam = Pin.m_ParamIndex;
-            const ImVec2 WidgetPos = ImVec2(N.m_Pos.m_X - OffsetX, N.m_Pos.m_Y + OffsetY);
+            const ImVec2 WidgetPos = ImVec2(N.m_Pos.m_X - OffsetX, PinCenterY - 10.f);
             ImGui::SetCursorScreenPos(WidgetPos);
 
             if (Param.m_Type == xmaterial_graph::node_param::type::FLOAT || Param.m_Type == xmaterial_graph::node_param::type::INT)
@@ -322,17 +324,23 @@ namespace xmaterial_editor
 
                 if (N.isCommentNode()) ed::Group(ImVec2(N.m_Params[1].m_Value.get<float>(), N.m_Params[2].m_Value.get<float>()));
 
+                // The vertical center of each input pin's own row, as actually laid out (font-dependent) -
+                // reused below to line up the unconnected-input widgets' pseudo-links with the real pin.
+                std::vector<float> InputPinCenterY(N.m_InputPins.size());
                 if (N.m_InputPins.size())
                 {
                     ImGui::BeginGroup();
-                    for (auto& Ip : N.m_InputPins)
+                    for (size_t i = 0; i < N.m_InputPins.size(); ++i)
                     {
+                        auto& Ip = N.m_InputPins[i];
+                        const float RowTop = ImGui::GetCursorScreenPos().y;
                         ed::BeginPin(Ip.m_PinGUID.m_Value, ed::PinKind::Input);
                         ed::PinPivotAlignment(ImVec2(0.f, 0.5f));
                         DrawPinCircle(Ip.m_TypeGUID, Ip.m_PinGUID);
                         ImGui::SameLine();
                         ImGui::Text("%s", Ip.m_Name.c_str());
                         ed::EndPin();
+                        InputPinCenterY[i] = (RowTop + ImGui::GetItemRectMax().y) * 0.5f;
                         ImGui::Dummy({ 0.f, 1.f });
                     }
                     ImGui::EndGroup();
@@ -412,12 +420,11 @@ namespace xmaterial_editor
                 ed::Resume();
 
                 // The widgets floating over the node for its unconnected inputs
-                float OffsetY = 28.f;
-                for (auto& Ip : N.m_InputPins)
+                for (size_t i = 0; i < N.m_InputPins.size(); ++i)
                 {
+                    auto& Ip = N.m_InputPins[i];
                     if (!IsPinConnected(Ip.m_PinGUID) && Ip.m_ParamIndex >= 0 && Ip.m_ParamIndex < static_cast<int>(N.m_Params.size()))
-                        DrawParamWidget(N, Ip, 70.f, OffsetY, BorderOutline);
-                    OffsetY += 21.f;
+                        DrawParamWidget(N, Ip, 70.f, InputPinCenterY[i], BorderOutline);
                 }
             }
 
