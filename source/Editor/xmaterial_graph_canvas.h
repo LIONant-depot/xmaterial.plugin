@@ -345,7 +345,7 @@ namespace xmaterial_editor
                     auto DrawOutput = [&](const xmaterial_graph::pin& Op)
                     {
                         const ImVec2 ScreenPos = ImGui::GetCursorScreenPos();
-                        ImGui::SetCursorScreenPos({ ScreenPos.x + LineWidth2 - (Op.m_Name.length()) * CharacterWidth, ScreenPos.y });
+                        ImGui::SetCursorScreenPos({ ScreenPos.x + LineWidth2 - ImGui::CalcTextSize(Op.m_Name.c_str()).x, ScreenPos.y });
                         ed::BeginPin(Op.m_PinGUID.m_Value, ed::PinKind::Output);
                         ImGui::TextUnformatted(Op.m_Name.c_str());
                         ImGui::SameLine();
