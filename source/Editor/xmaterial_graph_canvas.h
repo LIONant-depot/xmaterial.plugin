@@ -100,7 +100,7 @@ namespace xmaterial_editor
 
             if (Param.m_Type == xmaterial_graph::node_param::type::FLOAT || Param.m_Type == xmaterial_graph::node_param::type::INT)
             {
-                NodeFillColor(N, { WidgetPos.x - 23.f, WidgetPos.y + 1.3f }, { 85, 18 }, IM_COL32(96, 96, 96, 200), ed::GetStyle().NodeRounding, ImDrawFlags_RoundCornersNone, true, BorderColor);
+                NodeFillColor(N, { WidgetPos.x - 23.f, WidgetPos.y + 1.3f }, { 85, 18 }, IM_COL32(96, 96, 96, 200), 0.f, ImDrawFlags_RoundCornersNone, true, BorderColor);
 
                 const float TextHeight = ImGui::GetTextLineHeight();
                 const float DragHeight = ImGui::GetFrameHeight();
@@ -148,7 +148,7 @@ namespace xmaterial_editor
                 const bool bTexture = Param.m_Type == xmaterial_graph::node_param::type::TEXTURE_RESOURCE;
                 if (bTexture)
                 {
-                    NodeFillColor(N, { WidgetPos.x - 63.f - 30, WidgetPos.y + 0.3f }, { 125 + 30, 19 }, IM_COL32(96, 96, 96, 255), ed::GetStyle().NodeRounding, ImDrawFlags_RoundCornersNone, true, BorderColor);
+                    NodeFillColor(N, { WidgetPos.x - 63.f - 30, WidgetPos.y + 0.3f }, { 125 + 30, 19 }, IM_COL32(96, 96, 96, 255), 0.f, ImDrawFlags_RoundCornersNone, true, BorderColor);
                     ImGui::SetCursorPosX(ImGui::GetCursorPosX() - 60.f - 25);
                     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 5.f);
                     ImGui::Text("Rsc");
@@ -158,7 +158,7 @@ namespace xmaterial_editor
                 }
                 else
                 {
-                    NodeFillColor(N, { WidgetPos.x - 63.f - 35, WidgetPos.y + 0.3f }, { 125 + 35, 19 }, IM_COL32(96, 96, 96, 255), ed::GetStyle().NodeRounding, ImDrawFlags_RoundCornersNone, true, BorderColor);
+                    NodeFillColor(N, { WidgetPos.x - 63.f - 35, WidgetPos.y + 0.3f }, { 125 + 35, 19 }, IM_COL32(96, 96, 96, 255), 0.f, ImDrawFlags_RoundCornersNone, true, BorderColor);
                     ImGui::SetCursorPosX(ImGui::GetCursorPosX() - 60.f - 32);
                     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 5.f);
                     ImGui::Text("File");
@@ -377,10 +377,10 @@ namespace xmaterial_editor
                     if (N.isFunctionNode())
                     {
                         const bool bExpose = std::ranges::any_of(N.m_Params, [](auto& P) { return P.m_bExpose; });
-                        NodeFillColor(N, Pos, { Size.x, HeaderHeight + 1 }, bExpose ? IM_COL32(200, 200, 96, 128) : IM_COL32(100, 100, 100, 128), ed::GetStyle().NodeRounding, ImDrawFlags_RoundCornersTop, true, BorderOutline);
+                        NodeFillColor(N, Pos, { Size.x, HeaderHeight + 1 }, bExpose ? IM_COL32(200, 200, 96, 128) : IM_COL32(100, 100, 100, 128), 0.f, ImDrawFlags_RoundCornersTop, true, BorderOutline);
                     }
-                    else if (N.isInputNode())  NodeFillColor(N, Pos, { Size.x, HeaderHeight + 1 }, IM_COL32(22, 128, 22, 128),  ed::GetStyle().NodeRounding, ImDrawFlags_RoundCornersTop, true, BorderOutline);
-                    else if (N.isOutputNode()) NodeFillColor(N, Pos, { Size.x, HeaderHeight + 1 }, IM_COL32(148, 48, 148, 128), ed::GetStyle().NodeRounding, ImDrawFlags_RoundCornersTop, true, BorderOutline);
+                    else if (N.isInputNode())  NodeFillColor(N, Pos, { Size.x, HeaderHeight + 1 }, IM_COL32(22, 128, 22, 128),  0.f, ImDrawFlags_RoundCornersTop, true, BorderOutline);
+                    else if (N.isOutputNode()) NodeFillColor(N, Pos, { Size.x, HeaderHeight + 1 }, IM_COL32(148, 48, 148, 128), 0.f, ImDrawFlags_RoundCornersTop, true, BorderOutline);
                     else if (N.isCommentNode()) DrawComment(N, BorderOutline);
                 }
                 if (!N.isCommentNode())
@@ -388,19 +388,19 @@ namespace xmaterial_editor
                     auto Pos  = ed::GetNodePosition(N.m_Guid.m_Value);
                     auto Size = ed::GetNodeSize(N.m_Guid.m_Value);
                     Pos.y += HeaderHeight;
-                    if (N.m_OutputPins.empty())     NodeFillColor(N, { Pos.x, Pos.y }, { Size.x, Size.y - HeaderHeight }, IM_COL32(96, 96, 96, 128), ed::GetStyle().NodeRounding, ImDrawFlags_RoundCornersBottom, true, BorderOutline);
-                    else if (N.m_InputPins.empty()) NodeFillColor(N, { Pos.x, Pos.y }, { Size.x, Size.y - HeaderHeight }, IM_COL32(32, 32, 32, 128), ed::GetStyle().NodeRounding, ImDrawFlags_RoundCornersBottom, true, BorderOutline);
+                    if (N.m_OutputPins.empty())     NodeFillColor(N, { Pos.x, Pos.y }, { Size.x, Size.y - HeaderHeight }, IM_COL32(96, 96, 96, 128), 0.f, ImDrawFlags_RoundCornersBottom, true, BorderOutline);
+                    else if (N.m_InputPins.empty()) NodeFillColor(N, { Pos.x, Pos.y }, { Size.x, Size.y - HeaderHeight }, IM_COL32(32, 32, 32, 128), 0.f, ImDrawFlags_RoundCornersBottom, true, BorderOutline);
                     else if (N.isFunctionNode())
                     {
                         const float End = LineWidth1;
-                        NodeFillColor(N, { Pos.x, Pos.y }, { End + 1, Size.y - HeaderHeight }, IM_COL32(96, 96, 96, 128), ed::GetStyle().NodeRounding, ImDrawFlags_RoundCornersBottomLeft, true, BorderOutline);
-                        NodeFillColor(N, { Pos.x + End, Pos.y }, { Size.x - End, Size.y - HeaderHeight }, IM_COL32(32, 32, 32, 128), ed::GetStyle().NodeRounding, ImDrawFlags_RoundCornersBottomRight, true, BorderOutline);
+                        NodeFillColor(N, { Pos.x, Pos.y }, { End + 1, Size.y - HeaderHeight }, IM_COL32(96, 96, 96, 128), 0.f, ImDrawFlags_RoundCornersBottomLeft, true, BorderOutline);
+                        NodeFillColor(N, { Pos.x + End, Pos.y }, { Size.x - End, Size.y - HeaderHeight }, IM_COL32(32, 32, 32, 128), 0.f, ImDrawFlags_RoundCornersBottomRight, true, BorderOutline);
                     }
                 }
 
                 // A node the compiler complained about
                 if (N.m_HasErrMsg)
-                    NodeFillColor(N, ed::GetNodePosition(N.m_Guid.m_Value), ed::GetNodeSize(N.m_Guid.m_Value), IM_COL32(255, 0, 0, 150), ed::GetStyle().NodeRounding, ImDrawFlags_RoundCornersAll);
+                    NodeFillColor(N, ed::GetNodePosition(N.m_Guid.m_Value), ed::GetNodeSize(N.m_Guid.m_Value), IM_COL32(255, 0, 0, 150), 0.f, ImDrawFlags_RoundCornersAll);
                 ed::Suspend();
                 if (N.m_HasErrMsg && !N.m_ErrMsg.empty() && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", N.m_ErrMsg.c_str());
                 ed::Resume();
