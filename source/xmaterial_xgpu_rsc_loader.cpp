@@ -37,13 +37,18 @@ xresource::loader< xrsc::material_type_guid_v >::data_type* xresource::loader< x
     // Must clear the memory before we can recycle it....
     memset(&pMaterial->getShader(), 0, sizeof(pMaterial->getShader()) );
 
-    // OK time to create the shader officially
+    // OK time to create the shader officially. A genuine GPU-side failure (not the "missing resource"
+    // case above - the file loaded fine, the shader bytecode itself didn't build), but still not
+    // something that should take the whole app down over one bad material - same graceful-failure
+    // principle applies.
     if (auto Err = UserData.m_Device.Create(pMaterial->getShader(), Setup); Err)
     {
-        assert(false);
+        return nullptr;
     }
 
-    // Link up all other dependencies
+    // Link up all other dependencies. A default texture that fails to resolve (missing/uncompiled
+    // itself) is the same expected, recoverable case as every other dependency-resolution loop fixed
+    // this session - this slot just stays unresolved; every consumer already renders a fallback.
     for (int i=0; i<pMaterial->m_nDefaultTextures; ++i )
     {
         if( pMaterial->m_pDefaultTextures[i].empty() )
@@ -52,11 +57,7 @@ xresource::loader< xrsc::material_type_guid_v >::data_type* xresource::loader< x
         }
         else
         {
-            if ( auto p = Mgr.getResource( pMaterial->m_pDefaultTextures[i] ); p == nullptr)
-            {
-                // Set default texture here as well?
-                assert(false);
-            }
+            (void)Mgr.getResource( pMaterial->m_pDefaultTextures[i] );
         }
     }
 
