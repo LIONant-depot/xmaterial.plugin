@@ -324,8 +324,9 @@ namespace xmaterial_editor
 
                 if (N.isCommentNode()) ed::Group(ImVec2(N.m_Params[1].m_Value.get<float>(), N.m_Params[2].m_Value.get<float>()));
 
-                // The vertical center of each input pin's own row, as actually laid out (font-dependent) -
-                // reused below to line up the unconnected-input widgets' pseudo-links with the real pin.
+                // The vertical center of each input pin's own CIRCLE (not the row, which is taller than the
+                // circle once text is included) - reused below to line up the unconnected-input widgets'
+                // pseudo-links with the real pin. Must match DrawPinCircle's own Center = Cursor + Radius.
                 std::vector<float> InputPinCenterY(N.m_InputPins.size());
                 if (N.m_InputPins.size())
                 {
@@ -333,14 +334,13 @@ namespace xmaterial_editor
                     for (size_t i = 0; i < N.m_InputPins.size(); ++i)
                     {
                         auto& Ip = N.m_InputPins[i];
-                        const float RowTop = ImGui::GetCursorScreenPos().y;
+                        InputPinCenterY[i] = ImGui::GetCursorScreenPos().y + 5.f;
                         ed::BeginPin(Ip.m_PinGUID.m_Value, ed::PinKind::Input);
                         ed::PinPivotAlignment(ImVec2(0.f, 0.5f));
                         DrawPinCircle(Ip.m_TypeGUID, Ip.m_PinGUID);
                         ImGui::SameLine();
                         ImGui::Text("%s", Ip.m_Name.c_str());
                         ed::EndPin();
-                        InputPinCenterY[i] = (RowTop + ImGui::GetItemRectMax().y) * 0.5f;
                         ImGui::Dummy({ 0.f, 1.f });
                     }
                     ImGui::EndGroup();
