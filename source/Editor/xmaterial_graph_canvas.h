@@ -76,7 +76,13 @@ namespace xmaterial_editor
             auto* pDraw = ed::GetNodeBackgroundDrawList(N.m_Guid.m_Value);
             const ImVec2 Max = ImVec2(Pos.x + Size.x, Pos.y + Size.y);
             pDraw->AddRectFilled(Pos, Max, Color, Rounding, Flags);
-            if (bBorderOnly) pDraw->AddRect(Pos, Max, BorderColor, Rounding, Flags);
+            // imgui 1.92.8 swapped AddRect's last two parameters (thickness now comes before flags); with
+            // the old order the corner flags silently become a 48-240px border thickness.
+#if IMGUI_VERSION_NUM >= 19280
+            if (bBorderOnly) pDraw->AddRect(Pos, Max, BorderColor, Rounding, 1.0f, Flags);
+#else
+            if (bBorderOnly) pDraw->AddRect(Pos, Max, BorderColor, Rounding, Flags, 1.0f);
+#endif
         }
 
         // Runs a command for an edit the widgets have already applied: Before is what the value was.
