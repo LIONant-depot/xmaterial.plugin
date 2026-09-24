@@ -1080,12 +1080,12 @@ namespace xmaterial_graph
         {
             auto& vertexInput = g.CreatePrefabNode(node_guid{ xresource::type_guid{"vertexPrefabs"}.m_Value });
             vertexInput.m_Name = "Input: Vertex Variants";
-            vertexInput.m_Code = "[TOP]<!layout(location = 0) in struct { vec4 Color; vec2 UV; } In;\n!>";
+            vertexInput.m_Code = "[TOP]<!layout(location = 0) in struct { vec4 wSpacePosition; vec4 ShadowPosition; vec4 VertColor; vec4 Tangent; vec3 Normal; vec2 UV; } In;\n!>";
 
             vertexInput.m_OutputPins.resize(2);
             vertexInput.m_OutputPins[0].m_Name          = "Color(4)";
             vertexInput.m_OutputPins[0].m_TypeGUID      = typeVec4.m_GUID;
-            vertexInput.m_OutputPins[0].m_DefaultExpr   = "In.Color";
+            vertexInput.m_OutputPins[0].m_DefaultExpr   = "In.VertColor";
             vertexInput.m_OutputPins[1].m_Name          = "UV(2)";
             vertexInput.m_OutputPins[1].m_TypeGUID      = typeVec2.m_GUID;
             vertexInput.m_OutputPins[1].m_DefaultExpr   = "In.UV";

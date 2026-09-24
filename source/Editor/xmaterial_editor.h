@@ -7,7 +7,7 @@
 // text. Hosts include this header and open editors through xeditor::open_resource_editors.
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_graph_canvas.h"
 #include "source/Tools/Editor/xeditor_mesh_preview.h"
-#include "source/Examples/E19_MaterialEditor/E19_TextEditor.h"
+#include "source/Tools/Editor/xeditor_text_widget.h"
 #include "dependencies/xresource_pipeline_v2/source/editor/E10_Resources.h"
 #include "plugins/xmaterial.plugin/source/xmaterial_xgpu_rsc_loader.h"
 #include "plugins/xmaterial.plugin/source/xmaterial_runtime.h"
