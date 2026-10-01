@@ -8,7 +8,7 @@
 #ifdef EDITOR
     //#include "dependencies/imgui/imgui.h"
     #include "dependencies/imgui-node-editor/imgui_node_editor.h"
-    #include "dependencies/xresource_pipeline_v2/source/editor/E10_AssetMgr.h"
+    #include "dependencies/xresource_pipeline_v2/source/editor/xresource_editor_asset_mgr.h"
     
     #include <commdlg.h>
 
@@ -613,7 +613,7 @@ namespace xmaterial_graph
     //
 
 #ifdef EDITOR
-    static void HandleResources(node& Node, xproperty::any& Value, e10::library_mgr& LibraryMgr, xproperty::settings::context& Context)
+    static void HandleResources(node& Node, xproperty::any& Value, xresource_editor::library_mgr& LibraryMgr, xproperty::settings::context& Context)
     {
         auto& prop = Node.m_Params[0];
 
@@ -653,7 +653,7 @@ namespace xmaterial_graph
 
     //--------------------------------------------------------------------------------------------------
 
-    void HandleFilesAndResource(node& Node, xproperty::any& Value, e10::library_mgr& LibraryMgr, xproperty::settings::context& Context)
+    void HandleFilesAndResource(node& Node, xproperty::any& Value, xresource_editor::library_mgr& LibraryMgr, xproperty::settings::context& Context)
         {
             if (Value.m_pType->m_GUID != xproperty::settings::var_type<std::wstring>::guid_v)
             {

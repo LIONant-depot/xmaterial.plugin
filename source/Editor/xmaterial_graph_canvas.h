@@ -5,7 +5,7 @@
 // The material graph's canvas: nodes, pins, links, the widgets of unconnected inputs, the create/delete menus. It only draws and asks: every edit it
 // makes is a command run on the editor's undo system (xmaterial_graph_editing.h), so what a person does here an AI does from the console.
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_graph_editing.h"
-#include "dependencies/xresource_pipeline_v2/source/editor/E10_InspectorPickers.h"
+#include "dependencies/xresource_pipeline_v2/source/editor/xresource_editor_inspector_pickers.h"
 #include "dependencies/imgui-node-editor/imgui_node_editor.h"
 #include "dependencies/imgui/imgui_internal.h"
 
@@ -192,10 +192,10 @@ namespace xmaterial_editor
             bool bOpen = false;
             xresource::full_guid NewGuid = {};
             std::string Name;
-            e10::RemapGUIDToString(Name, Guid);
+            xresource_editor::RemapGUIDToString(Name, Guid);
             if (ImGui::Button(std::format("{}##{}", (Name.empty() || Name == "None") ? "textures" : Name, (void*)&Param.m_Value).c_str(), ImVec2(100, 14))) bOpen = true;
             static constexpr auto Filters = std::array{ xrsc::texture_type_guid_v };
-            e10::ResourceBrowserPopup(&Guid, bOpen, NewGuid, Filters);
+            xresource_editor::ResourceBrowserPopup(&Guid, bOpen, NewGuid, Filters);
             ed::Suspend();
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", Name.c_str());
             ed::Resume();

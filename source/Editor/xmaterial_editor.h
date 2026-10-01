@@ -8,7 +8,7 @@
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_graph_canvas.h"
 #include "source/Tools/Editor/xeditor_mesh_preview.h"
 #include "source/Tools/Editor/xeditor_text_widget.h"
-#include "dependencies/xresource_pipeline_v2/source/editor/E10_Resources.h"
+#include "dependencies/xresource_pipeline_v2/source/editor/xresource_editor_resources.h"
 #include "plugins/xmaterial.plugin/source/xmaterial_xgpu_rsc_loader.h"
 #include "plugins/xmaterial.plugin/source/xmaterial_runtime.h"
 #include "plugins/xmaterial.plugin/source/xmaterial_xgpu_rsc_loader.cpp"        // the resource loader: compiled once, in the host's translation unit
@@ -38,7 +38,7 @@ namespace xmaterial_editor
         TextEditor                      m_Shader;
         xrsc::material_ref              m_MaterialRef;
 
-        session(xresource::full_guid Guid, e10::library::guid LibraryGuid, xgpu::device* pDevice) noexcept
+        session(xresource::full_guid Guid, xresource_editor::library::guid LibraryGuid, xgpu::device* pDevice) noexcept
             : document_editor("Material", Guid, LibraryGuid, pDevice)
             , m_PreviewCmds(m_Undo, m_Preview)
             , m_CreateNode(m_Undo, m_Document), m_DeleteNode(m_Undo, m_Document), m_Connect(m_Undo, m_Document), m_Disconnect(m_Undo, m_Document)
@@ -46,7 +46,7 @@ namespace xmaterial_editor
             , m_ListNodeTypes(m_Undo, m_Document), m_ListNodes(m_Undo, m_Document), m_NodeProperties(m_Undo, m_Document)
             , m_Canvas(m_Document, m_Undo)
         {
-            e10::WireResourcePickerCallbacks(m_NodeInspector.m_Inspector);
+            xresource_editor::WireResourcePickerCallbacks(m_NodeInspector.m_Inspector);
             m_Shader.SetLanguageDefinition(TextEditor::LanguageDefinition::GLSL());
             m_Shader.SetImGuiChildIgnored(true);                // it draws in its panel's window
             m_Shader.SetReadOnly(true);                         // a view of the shader the graph makes (or of the node's shader file)
@@ -158,7 +158,7 @@ namespace xmaterial_editor
                 if (bAfterCompile) return;
                 const auto& Param = pNode->m_Params[0].m_Value.get<std::wstring>();
                 if (Param.empty()) return;
-                File = std::format(L"{}/{}", e10::g_LibMgr.m_ProjectPath, Param);
+                File = std::format(L"{}/{}", xresource_editor::g_LibMgr.m_ProjectPath, Param);
             }
             else File = std::format(L"{}/shader.txt", m_Document.m_LogPath);
 
@@ -171,7 +171,7 @@ namespace xmaterial_editor
 
     inline const xeditor::auto_register_resource_editor g_Registration
     { xrsc::material_type_guid_v
-    , [](xresource::full_guid Guid, e10::library::guid LibraryGuid, xgpu::device* pDevice) -> std::unique_ptr<xeditor::resource_editor>
+    , [](xresource::full_guid Guid, xresource_editor::library::guid LibraryGuid, xgpu::device* pDevice) -> std::unique_ptr<xeditor::resource_editor>
       { return std::make_unique<session>(Guid, LibraryGuid, pDevice); }
     };
 }

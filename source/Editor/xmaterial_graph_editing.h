@@ -246,7 +246,7 @@ namespace xmaterial_editor
                 if (pNode->m_Code != "[FULL_SHADER]" || pNode->m_Params.empty() || !pNode->m_Params[0].m_Value.is<std::wstring>()) return "that node has no shader file";
 
                 std::wstring Path = xstrtool::To(xeditor::Base64Decode(Text));
-                if (!std::filesystem::exists(Path)) Path = std::format(L"{}/{}", e10::g_LibMgr.m_ProjectPath, Path);          // relative to the project
+                if (!std::filesystem::exists(Path)) Path = std::format(L"{}/{}", xresource_editor::g_LibMgr.m_ProjectPath, Path);          // relative to the project
                 if (!std::filesystem::exists(Path)) return "no such file";
 
                 std::string Shader;

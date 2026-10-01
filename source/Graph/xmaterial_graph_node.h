@@ -3,7 +3,7 @@
 #pragma once
 
 #ifdef EDITOR
-    #include "dependencies/xresource_pipeline_v2/source/editor/E10_AssetMgr.h"
+    #include "dependencies/xresource_pipeline_v2/source/editor/xresource_editor_asset_mgr.h"
     #include "plugins/xtexture.plugin/source/xtexture_xgpu_rsc_loader.h"
 #endif
 
@@ -229,7 +229,7 @@ namespace xmaterial_graph
         }
 
 #ifdef EDITOR
-        using custom_input_callback = void(node&, xproperty::any& Value, e10::library_mgr& LibraryMgr, xproperty::settings::context& Context);
+        using custom_input_callback = void(node&, xproperty::any& Value, xresource_editor::library_mgr& LibraryMgr, xproperty::settings::context& Context);
 #else
         using custom_input_callback = void(void);
 #endif
