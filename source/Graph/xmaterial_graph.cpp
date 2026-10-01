@@ -1,5 +1,6 @@
 
 #include "dependencies/xproperty/source/xcore/my_properties.h"
+#include "dependencies/xeditor/include/xeditor/hint.h"
 #include <iostream>
 #include <fstream>
 #include <numeric>  // std::iota
@@ -637,7 +638,7 @@ namespace xmaterial_graph
         ResourceBrowserPopup(&FullGuid, bOpen, NewFullGuid, filters);
         ax::NodeEditor::Suspend();
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("%s", texname.c_str());
+            xeditor::hint::Text("%s", texname.c_str());
 
         std::string popupId = "textures selection##" + std::to_string(Node.m_Guid.m_Value);
 
@@ -720,7 +721,7 @@ namespace xmaterial_graph
             ax::NodeEditor::Suspend();
 
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("%s", xstrtool::To(FileName).c_str());
+                xeditor::hint::Text("%s", xstrtool::To(FileName).c_str());
 
             std::string popupId = "textures selection##" + std::to_string(Node.m_Guid.m_Value);
 

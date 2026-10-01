@@ -5,6 +5,7 @@
 // The material graph's canvas: nodes, pins, links, the widgets of unconnected inputs, the create/delete menus. It only draws and asks: every edit it
 // makes is a command run on the editor's undo system (xmaterial_graph_editing.h), so what a person does here an AI does from the console.
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_graph_editing.h"
+#include "dependencies/xeditor/include/xeditor/hint.h"
 #include "dependencies/xresource_pipeline_v2/source/editor/xresource_editor_inspector_pickers.h"
 #include "dependencies/imgui-node-editor/imgui_node_editor.h"
 #include "dependencies/imgui/imgui_internal.h"
@@ -197,7 +198,7 @@ namespace xmaterial_editor
             static constexpr auto Filters = std::array{ xrsc::texture_type_guid_v };
             xresource_editor::ResourceBrowserPopup(&Guid, bOpen, NewGuid, Filters);
             ed::Suspend();
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", Name.c_str());
+            if (ImGui::IsItemHovered()) xeditor::hint::Text("%s", Name.c_str());
             ed::Resume();
 
             if (!NewGuid.empty() && NewGuid.m_Type == xrsc::texture_type_guid_v && NewGuid != Guid)
@@ -229,7 +230,7 @@ namespace xmaterial_editor
                     xeditor::Run(m_Undo, std::format("SetShaderFile -Node {:016X} -File {}", N.m_Guid.m_Value, xeditor::Base64Encode(xstrtool::To(std::wstring(Buffer)))));
             }
             ed::Suspend();
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", xstrtool::To(FileName).c_str());
+            if (ImGui::IsItemHovered()) xeditor::hint::Text("%s", xstrtool::To(FileName).c_str());
             ed::Resume();
             ImGui::PopStyleColor();
         }
@@ -416,7 +417,7 @@ namespace xmaterial_editor
                 if (N.m_HasErrMsg)
                     NodeFillColor(N, ed::GetNodePosition(N.m_Guid.m_Value), ed::GetNodeSize(N.m_Guid.m_Value), IM_COL32(255, 0, 0, 150), ed::GetStyle().NodeRounding, ImDrawFlags_RoundCornersAll);
                 ed::Suspend();
-                if (N.m_HasErrMsg && !N.m_ErrMsg.empty() && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", N.m_ErrMsg.c_str());
+                if (N.m_HasErrMsg && !N.m_ErrMsg.empty() && ImGui::IsItemHovered()) xeditor::hint::Text("%s", N.m_ErrMsg.c_str());
                 ed::Resume();
 
                 // The widgets floating over the node for its unconnected inputs
