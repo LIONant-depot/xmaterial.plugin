@@ -221,7 +221,7 @@ namespace xmaterial_editor
         struct set_shader_file_cmd : graph_cmd
         {
             set_shader_file_cmd(xundo::system& System, graph_document& Doc) noexcept : graph_cmd(System, Doc, "SetShaderFile") { RegisterArguments(); }
-            const char* getCommandHelp() const noexcept override { return "Picks the shader file of a shader-file output node (undoable); its texture inputs become the node's pins. Usage: SetShaderFile -Node hexguid -File base64 (a path, absolute or relative to the project)"; }
+            const char* getCommandHelp() const noexcept override { return "Picks the shader file of a shader-file output node (undoable); its texture inputs become the node's pins. Usage: SetShaderFile -Node hexguid -File text (a path, absolute or relative to the project)"; }
             void RegisterArguments() noexcept override
             {
                 m_hNode = m_Parser.addOption("Node", "The node's guid, hex",                           true, 1);
@@ -245,7 +245,7 @@ namespace xmaterial_editor
                 if (!pNode) return "no such node";
                 if (pNode->m_Code != "[FULL_SHADER]" || pNode->m_Params.empty() || !pNode->m_Params[0].m_Value.is<std::wstring>()) return "that node has no shader file";
 
-                std::wstring Path = xstrtool::To(xeditor::Base64Decode(Text));
+                std::wstring Path = xstrtool::To(Text);
                 if (!std::filesystem::exists(Path)) Path = std::format(L"{}/{}", xresource_editor::g_LibMgr.m_ProjectPath, Path);          // relative to the project
                 if (!std::filesystem::exists(Path)) return "no such file";
 
@@ -305,13 +305,13 @@ namespace xmaterial_editor
         {
             graph_document& m_Doc;
             set_node_property_cmd(xundo::system& System, graph_document& Doc) noexcept : command_base(System, "SetNodeProperty", nullptr), m_Doc(Doc) { RegisterArguments(); }
-            const char* getCommandHelp() const noexcept override { return "Sets one property of a node (undoable): see NodeProperties for the paths. Usage: SetNodeProperty -Node hexguid -Path base64 -Value base64 [-Before base64]"; }
+            const char* getCommandHelp() const noexcept override { return "Sets one property of a node (undoable): see NodeProperties for the paths. Usage: SetNodeProperty -Node hexguid -Path text -Value text [-Before text]"; }
             void RegisterArguments() noexcept override
             {
                 m_hNode   = m_Parser.addOption("Node",   "The node's guid, hex",          true,  1);
-                m_hPath   = m_Parser.addOption("Path",   "Property path, base64",         true,  1);
-                m_hValue  = m_Parser.addOption("Value",  "New value, base64",             true,  1);
-                m_hBefore = m_Parser.addOption("Before", "Previous value, base64",        false, 1);
+                m_hPath   = m_Parser.addOption("Path",   "Property path",         true,  1);
+                m_hValue  = m_Parser.addOption("Value",  "New value",             true,  1);
+                m_hBefore = m_Parser.addOption("Before", "Previous value",        false, 1);
             }
             static property_target TargetOf(xmaterial_graph::node& N) noexcept { return { xproperty::getObject(N), &N }; }
 
@@ -321,7 +321,6 @@ namespace xmaterial_editor
                 if (!HexArg(m_Parser, m_hNode, Node) || !GetArg(m_Parser, m_hPath, Path) || !GetArg(m_Parser, m_hValue, Value)) return "SetNodeProperty: bad arguments";
                 auto* pNode = m_Doc.isLoaded() ? m_Doc.FindNode(Node) : nullptr;
                 if (!pNode) return "SetNodeProperty: no such node";
-                Path = xeditor::Base64Decode(Path); Value = xeditor::Base64Decode(Value);
 
                 xproperty::any Current;
                 if (!FindProperty(TargetOf(*pNode), Path, Current)) return std::format("SetNodeProperty: no property '{}'", Path);
@@ -336,7 +335,6 @@ namespace xmaterial_editor
                 HexArg(m_Parser, m_hNode, Node);
                 if (GetArg(m_Parser, m_hPath, Path))
                 {
-                    Path = xeditor::Base64Decode(Path);
                     xproperty::any Current;
                     if (auto* pNode = m_Doc.isLoaded() ? m_Doc.FindNode(Node) : nullptr; pNode && FindProperty(TargetOf(*pNode), Path, Current))
                     {
@@ -344,7 +342,7 @@ namespace xmaterial_editor
                         Before   = FormatValue(Current);
                     }
                 }
-                if (std::string Given; GetArg(m_Parser, m_hBefore, Given)) Before = xeditor::Base64Decode(Given);
+                if (std::string Given; GetArg(m_Parser, m_hBefore, Given)) Before = Given;
                 File.Write(Node); File.Write(TypeGuid);
                 xeditor::WriteString(File, Path);
                 xeditor::WriteString(File, Before);

@@ -90,7 +90,7 @@ namespace xmaterial_editor
         void CommitProperty(const xmaterial_graph::node& N, const std::string& Path, const std::string& After, const std::string& Before) noexcept
         {
             xeditor::Run(m_Undo, std::format("SetNodeProperty -Node {:016X} -Path {} -Value {} -Before {}", N.m_Guid.m_Value
-                , xeditor::Base64Encode(Path), xeditor::Base64Encode(After), xeditor::Base64Encode(Before)));
+                , xeditor::Quote(Path), xeditor::Quote(After), xeditor::Quote(Before)));
         }
 
         static std::string ParamPath(int iParam, const char* pMember) noexcept { return std::format("node/Params[G:{}]/{}", iParam, pMember); }
@@ -202,8 +202,8 @@ namespace xmaterial_editor
             ed::Resume();
 
             if (!NewGuid.empty() && NewGuid.m_Type == xrsc::texture_type_guid_v && NewGuid != Guid)
-                xeditor::Run(m_Undo, std::format("SetNodeProperty -Node {:016X} -Path {} -Value {}", N.m_Guid.m_Value, xeditor::Base64Encode(ParamPath(iParam, "TextureRef"))
-                    , xeditor::Base64Encode(std::format("{:X}, {:X}", NewGuid.m_Instance.m_Value, NewGuid.m_Type.m_Value))));
+                xeditor::Run(m_Undo, std::format("SetNodeProperty -Node {:016X} -Path {} -Value {}", N.m_Guid.m_Value, xeditor::Quote(ParamPath(iParam, "TextureRef"))
+                    , xeditor::Quote(std::format("{:X}, {:X}", NewGuid.m_Instance.m_Value, NewGuid.m_Type.m_Value))));
             ImGui::PopStyleColor();
         }
 
@@ -227,7 +227,7 @@ namespace xmaterial_editor
                 Ofn.lpstrDefExt     = L"txt";
                 Ofn.lpstrInitialDir = xproperty::member_ui<std::wstring>::g_CurrentPath.c_str();
                 if (GetOpenFileNameW(&Ofn))
-                    xeditor::Run(m_Undo, std::format("SetShaderFile -Node {:016X} -File {}", N.m_Guid.m_Value, xeditor::Base64Encode(xstrtool::To(std::wstring(Buffer)))));
+                    xeditor::Run(m_Undo, std::format("SetShaderFile -Node {:016X} -File {}", N.m_Guid.m_Value, xeditor::Quote(xstrtool::To(std::wstring(Buffer)))));
             }
             ed::Suspend();
             if (ImGui::IsItemHovered()) xeditor::hint::Text("%s", xstrtool::To(FileName).c_str());

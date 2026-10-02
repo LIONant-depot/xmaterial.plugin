@@ -126,8 +126,8 @@ namespace xmaterial_editor
             m_Document.m_bDirty = true;
             auto* pNode = m_Document.FindNode(m_InspectedNode);
             if (!pNode || !Cmd.m_NewValue.m_pType || !Cmd.m_Original.m_pType || !xeditor::cmd_util::IsAtomicType(Cmd.m_NewValue.getTypeGuid())) return;
-            xeditor::Run(m_Undo, std::format("SetNodeProperty -Node {:016X} -Path {} -Value {} -Before {}", pNode->m_Guid.m_Value, xeditor::Base64Encode(Cmd.m_Name)
-                , xeditor::Base64Encode(xeditor::cmd_util::FormatValue(Cmd.m_NewValue)), xeditor::Base64Encode(xeditor::cmd_util::FormatValue(Cmd.m_Original))));
+            xeditor::Run(m_Undo, std::format("SetNodeProperty -Node {:016X} -Path {} -Value {} -Before {}", pNode->m_Guid.m_Value, xeditor::Quote(Cmd.m_Name)
+                , xeditor::Quote(xeditor::cmd_util::FormatValue(Cmd.m_NewValue)), xeditor::Quote(xeditor::cmd_util::FormatValue(Cmd.m_Original))));
         }
 
         // What the preview draws: the compiled material, its default textures.

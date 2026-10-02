@@ -19,7 +19,7 @@ Material Graph (the canvas), Node Properties (the selected node's reflected prop
 
 ## Commands
 
-Run as `<resource name>\<Command>`. Nodes, pins and connections are named by guid (hex); text is base64.
+Run as `<resource name>\<Command>`. Nodes, pins and connections are named by guid (hex); text is written in quotes.
 
 | Command | |
 |---|---|
