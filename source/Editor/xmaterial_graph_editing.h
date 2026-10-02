@@ -225,7 +225,7 @@ namespace xmaterial_editor
             void RegisterArguments() noexcept override
             {
                 m_hNode = m_Parser.addOption("Node", "The node's guid, hex",                           true, 1);
-                m_hFile = m_Parser.addOption("File", "The shader file, base64 (absolute or project-relative)", true, 1);
+                m_hFile = m_Parser.addOption("File", "The shader file (absolute or project-relative)", true, 1);
             }
 
             // The path a node stores: relative to the project when the file is inside one (what the compiler expects), else as given.
