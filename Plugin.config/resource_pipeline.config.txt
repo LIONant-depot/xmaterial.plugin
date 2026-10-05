@@ -2,10 +2,12 @@
 // New Types
 < s32:d u32:g s16:C u16:H s8:c u8:h f32:f f64:F string:s wstring:S u64:G s64:D bool:c enum:s >
 
-[ xProperties : 10 ]
+[ xProperties : 12 ]
 { Name:s                            Value:?                   }
 //--------------------------------  -------------------------
   "PipelinePlugin/TypeName"                  ;string "Material"    
+  "PipelinePlugin/Group"                     ;string "Graphics"
+  "PipelinePlugin/Description"               ;string "A shader and the parameters it needs: how a surface is drawn."
   "PipelinePlugin/FileExtension"             ;wstring "xmat"               
   "PipelinePlugin/TypeGUID/Value"            ;u64    #8B3C028882EA813D
   "PipelinePlugin/IconPaths[]"                      ;s64    1
