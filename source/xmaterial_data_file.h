@@ -2,7 +2,7 @@
 #define XMATERIAL_DATA_FILE_H
 
 #include "dependencies/xserializer/source/xserializer.h"
-#include "Plugins/xtexture.plugin/source/xtexture_xgpu_rsc_loader.h"
+#include "plugins/xtexture.plugin/source/xtexture_xgpu_rsc_loader.h"
 
 namespace xmaterial
 {
