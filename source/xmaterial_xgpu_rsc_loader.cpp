@@ -35,7 +35,7 @@ xresource::loader< xrsc::material_type_guid_v >::data_type* xresource::loader< x
     };
 
     // Must clear the memory before we can recycle it....
-    memset(&pMaterial->getShader(), 0, sizeof(pMaterial->getShader()) );
+    memset(static_cast<void*>(&pMaterial->getShader()), 0, sizeof(pMaterial->getShader()) );
 
     // OK time to create the shader officially. A genuine GPU-side failure (not the "missing resource"
     // case above - the file loaded fine, the shader bytecode itself didn't build), but still not
