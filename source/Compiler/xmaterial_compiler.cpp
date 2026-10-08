@@ -3,7 +3,11 @@
 #include <unordered_set>
 #include <filesystem>
 
-#include "dependencies/shaderc/include/shaderc/shaderc.hpp"
+#if defined(_WIN32)
+    #include "dependencies/shaderc/include/shaderc/shaderc.hpp"
+#else
+    #include <shaderc/shaderc.hpp>     // Linux: the distribution's shaderc (see build/dependency/CMakeLists.txt)
+#endif
 #include "dependencies/xstrtool/source/xstrtool.h"
 #include <fstream>
 #include <cerrno>   // for errno
@@ -14,9 +18,10 @@
 
 #include "plugins/xmaterial_instance.plugin/source/xmaterial_intance_descriptor.h"
 
-#pragma comment(lib, "../../dependencies/shaderc/lib/shaderc_combined.lib")
-
-#include <process.h>
+#if defined(_WIN32)
+    #pragma comment(lib, "../../dependencies/shaderc/lib/shaderc_combined.lib")
+    #include <process.h>
+#endif
 
 //
 // force to create the property registrations for these types
@@ -536,7 +541,7 @@ namespace xmaterial_compiler
             //
             if (auto pNode = Graph.findFullShaderNode(); pNode == nullptr)
             {
-                std::ofstream out(std::format(L"{}/{}.log/Shader.txt", m_ProjectPaths.m_ResourcesLogs, m_ResourcePartialPath));
+                std::ofstream out(std::filesystem::path(std::format(L"{}/{}.log/Shader.txt", m_ProjectPaths.m_ResourcesLogs, m_ResourcePartialPath)));
                 if (!out) { std::cerr << "Failed to open file for writing.\n";}
                 else
                 {

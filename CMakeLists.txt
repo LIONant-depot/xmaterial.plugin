@@ -4,11 +4,13 @@ set(TARGET_PROJECT "xmaterial_compiler")
 set(COMPONENT_REGISTRY "")
 
 
-# Create /MT code generation as we must match shaderc settings
-set(CMAKE_C_FLAGS_RELEASE "/MT")
-set(CMAKE_C_FLAGS_DEBUG "/MT")
-set(CMAKE_CXX_FLAGS_RELEASE "/MT")
-set(CMAKE_CXX_FLAGS_DEBUG "/MT")
+# Create /MT code generation as we must match shaderc settings (MSVC only: Linux links the distribution's shaderc)
+if(MSVC)
+  set(CMAKE_C_FLAGS_RELEASE "/MT")
+  set(CMAKE_C_FLAGS_DEBUG "/MT")
+  set(CMAKE_CXX_FLAGS_RELEASE "/MT")
+  set(CMAKE_CXX_FLAGS_DEBUG "/MT")
+endif()
 
 
 include(FetchContent)
