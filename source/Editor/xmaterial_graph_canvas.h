@@ -314,7 +314,7 @@ namespace xmaterial_editor
                 ImGui::TextUnformatted(N.m_Name.c_str());
                 ImGui::Dummy({ 0.f, 5.f });                                     // space between the header and the content
 
-                const float LineWidth1 = N.m_OutputPins.empty() ? std::max(N.m_Name.length(), N.m_MaxInputChars + 4ull) * CharacterWidth : (N.m_MaxInputChars + 6ull) * CharacterWidth;
+                const float LineWidth1 = N.m_OutputPins.empty() ? std::max<std::uint64_t>(N.m_Name.length(), N.m_MaxInputChars + 4ull) * CharacterWidth : (N.m_MaxInputChars + 6ull) * CharacterWidth;
                 const float LineWidth2 = [&]
                 {
                     if (N.m_InputPins.empty()) return std::max(N.m_Name.length() - 3ull, N.m_MaxOutputChars + 4ull) * CharacterWidth;

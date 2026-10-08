@@ -362,7 +362,7 @@ namespace xmaterial_graph
     {
         xstrtool::print( L"Opening Shader: {} \n", ShaderFileName );
 
-        std::ifstream File(ShaderFileName);
+        std::ifstream File{ std::filesystem::path(ShaderFileName) };
         if (not File.is_open())
         {
             xerr::LogMessage<state::FAILURE>( std::format( "Failed opening the shader file {}", xstrtool::To(ShaderFileName)));

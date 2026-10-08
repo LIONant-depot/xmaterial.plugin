@@ -6,7 +6,7 @@
 #include "dependencies/xresource_guid/source/xresource_guid.h"
 #include "dependencies/xerr/source/xerr.h"
 #include <unordered_map>
-#include <Plugins/xtexture.plugin/source/xtexture_xgpu_rsc_loader.h>
+#include <plugins/xtexture.plugin/source/xtexture_xgpu_rsc_loader.h>
 
 namespace xmaterial_graph
 {

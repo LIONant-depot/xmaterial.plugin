@@ -162,7 +162,7 @@ namespace xmaterial_editor
             }
             else File = std::format(L"{}/shader.txt", m_Document.m_LogPath);
 
-            std::ifstream In(File);
+            std::ifstream In{ std::filesystem::path(File) };
             if (!In.is_open()) return;
             std::stringstream Text; Text << In.rdbuf();
             m_Shader.SetText(Text.str());
