@@ -1,14 +1,15 @@
 
 #include "dependencies/xproperty/source/xcore/my_properties.h"
-#include "dependencies/xeditor/include/xeditor/hint.h"
 #include <iostream>
 #include <fstream>
 #include <numeric>  // std::iota
+#include <filesystem>
 #include <dependencies/xstrtool/source/xstrtool.h>
 
 #ifdef EDITOR
     //#include "dependencies/imgui/imgui.h"
     #include "dependencies/imgui-node-editor/imgui_node_editor.h"
+    #include "dependencies/xeditor/include/xeditor/hint.h"                // editor-only (needs imgui); the compiler builds without EDITOR
     #include "dependencies/xresource_pipeline_v2/source/editor/xresource_editor_asset_mgr.h"
     
     #include <commdlg.h>
