@@ -33,15 +33,24 @@ xresource::loader< xrsc::material_type_guid_v >::data_type* xresource::loader< x
     { .m_Type   = xgpu::shader::type::bit::FRAGMENT
     , .m_Sharer = xgpu::shader::setup::raw_data{ std::span{reinterpret_cast<const int32_t*>(pMaterial->m_pShader), (std::size_t)pMaterial->m_ShaderSize } }
     };
+    xgpu::shader::setup SetupHDR
+    { .m_Type   = xgpu::shader::type::bit::FRAGMENT
+    , .m_Sharer = xgpu::shader::setup::raw_data{ std::span{reinterpret_cast<const int32_t*>(pMaterial->m_pShaderHDR), (std::size_t)pMaterial->m_ShaderSizeHDR } }
+    };
 
     // Must clear the memory before we can recycle it....
-    memset(static_cast<void*>(&pMaterial->getShader()), 0, sizeof(pMaterial->getShader()) );
+    memset(static_cast<void*>(&pMaterial->getShader()),    0, sizeof(pMaterial->getShader()) );
+    memset(static_cast<void*>(&pMaterial->getShaderHDR()), 0, sizeof(pMaterial->getShaderHDR()) );
 
     // OK time to create the shader officially. A genuine GPU-side failure (not the "missing resource"
     // case above - the file loaded fine, the shader bytecode itself didn't build), but still not
     // something that should take the whole app down over one bad material - same graceful-failure
     // principle applies.
     if (auto Err = UserData.m_Device.Create(pMaterial->getShader(), Setup); Err)
+    {
+        return nullptr;
+    }
+    if (auto Err = UserData.m_Device.Create(pMaterial->getShaderHDR(), SetupHDR); Err)
     {
         return nullptr;
     }

@@ -369,34 +369,45 @@ namespace xmaterial_compiler
             // Generate the sprv shader
             //
             displayProgressBar("Compiling Shader", 0.0f);
-            shaderc::Compiler       compiler;
-            shaderc::CompileOptions options;
-            options.SetIncluder(std::make_unique<CustomIncluder>());
-
-            options.SetOptimizationLevel(shaderc_optimization_level_performance);
-            options.SetTargetSpirv(shaderc_spirv_version_1_0);
-            auto result = compiler.CompileGlslToSpv( shaderString
-                                                   , shaderc_glsl_default_fragment_shader
-                                                   , "shader.glsl"
-                                                   , options
-                                                   );
-
-            if (const auto Err = result.GetCompilationStatus(); Err != shaderc_compilation_status_success ) 
+            // Two variants (xLIONRender): LDR = tone mapped in the material (XLION_LDR_OUTPUT defined, what the
+            // editors draw straight to the screen), HDR = scene-linear output that the renderer tone maps.
+            // Materials that never test XLION_LDR_OUTPUT produce the same code twice.
+            shaderc::Compiler compiler;
+            const auto CompileVariant = [&](bool bLDR, std::vector<uint32_t>& SPIRV) -> xerr
             {
-                LogMessage(xresource_pipeline::msg_type::ERROR, result.GetErrorMessage().c_str());
-                switch (Err)
+                shaderc::CompileOptions options;
+                options.SetIncluder(std::make_unique<CustomIncluder>());
+                options.SetOptimizationLevel(shaderc_optimization_level_performance);
+                options.SetTargetSpirv(shaderc_spirv_version_1_0);
+                if (bLDR) options.AddMacroDefinition("XLION_LDR_OUTPUT");
+                auto result = compiler.CompileGlslToSpv( shaderString
+                                                       , shaderc_glsl_default_fragment_shader
+                                                       , "shader.glsl"
+                                                       , options
+                                                       );
+                if (const auto Err = result.GetCompilationStatus(); Err != shaderc_compilation_status_success )
                 {
-                case shaderc_compilation_status_invalid_stage:          return xerr::create_f<state, "Compilation for spirv fail - shaderc_compilation_status_invalid_stage">();
-                case shaderc_compilation_status_compilation_error:      return xerr::create_f<state, "Compilation for spirv fail - shaderc_compilation_status_compilation_error">();
-                case shaderc_compilation_status_internal_error:         return xerr::create_f<state, "Compilation for spirv fail - shaderc_compilation_status_internal_error">();
-                case shaderc_compilation_status_null_result_object:     return xerr::create_f<state, "Compilation for spirv fail - shaderc_compilation_status_null_result_object">();
-                case shaderc_compilation_status_invalid_assembly:       return xerr::create_f<state, "Compilation for spirv fail - shaderc_compilation_status_invalid_assembly">();
-                case shaderc_compilation_status_validation_error:       return xerr::create_f<state, "Compilation for spirv fail - shaderc_compilation_status_validation_error">();
-                case shaderc_compilation_status_transformation_error:   return xerr::create_f<state, "Compilation for spirv fail - shaderc_compilation_status_transformation_error">();
-                case shaderc_compilation_status_configuration_error:    return xerr::create_f<state, "Compilation for spirv fail - shaderc_compilation_status_configuration_error">();
-                default:                                                return xerr::create_f<state, "Compilation for spirv fail">();
+                    LogMessage(xresource_pipeline::msg_type::ERROR, result.GetErrorMessage().c_str());
+                    switch (Err)
+                    {
+                    case shaderc_compilation_status_invalid_stage:          return xerr::create_f<state, "Compilation for spirv fail - shaderc_compilation_status_invalid_stage">();
+                    case shaderc_compilation_status_compilation_error:      return xerr::create_f<state, "Compilation for spirv fail - shaderc_compilation_status_compilation_error">();
+                    case shaderc_compilation_status_internal_error:         return xerr::create_f<state, "Compilation for spirv fail - shaderc_compilation_status_internal_error">();
+                    case shaderc_compilation_status_null_result_object:     return xerr::create_f<state, "Compilation for spirv fail - shaderc_compilation_status_null_result_object">();
+                    case shaderc_compilation_status_invalid_assembly:       return xerr::create_f<state, "Compilation for spirv fail - shaderc_compilation_status_invalid_assembly">();
+                    case shaderc_compilation_status_validation_error:       return xerr::create_f<state, "Compilation for spirv fail - shaderc_compilation_status_validation_error">();
+                    case shaderc_compilation_status_transformation_error:   return xerr::create_f<state, "Compilation for spirv fail - shaderc_compilation_status_transformation_error">();
+                    case shaderc_compilation_status_configuration_error:    return xerr::create_f<state, "Compilation for spirv fail - shaderc_compilation_status_configuration_error">();
+                    default:                                                return xerr::create_f<state, "Compilation for spirv fail">();
+                    }
                 }
-            }
+                SPIRV.assign(result.cbegin(), result.cend());
+                return {};
+            };
+
+            std::vector<uint32_t> spirv, spirvHDR;
+            if (auto Err = CompileVariant(true,  spirv);    Err) return Err;
+            if (auto Err = CompileVariant(false, spirvHDR); Err) return Err;
             displayProgressBar("Compiling Shader", 1.0f);
 
             //
@@ -422,8 +433,7 @@ namespace xmaterial_compiler
             //
             // Export the compiled material
             //
-            std::vector<uint32_t> spirv(result.cbegin(), result.cend());
-            LogMessage(xresource_pipeline::msg_type::INFO, std::format("Shader compiled successfully! SPIR-V size: {} words.\n", spirv.size()) );
+            LogMessage(xresource_pipeline::msg_type::INFO, std::format("Shader compiled successfully! SPIR-V size: {} words (HDR variant {}).\n", spirv.size(), spirvHDR.size()) );
 
 
             //
@@ -444,6 +454,8 @@ namespace xmaterial_compiler
 
             MaterialDataFile.m_pShader          = spirv.data();
             MaterialDataFile.m_ShaderSize       = static_cast<std::uint32_t>(spirv.size());
+            MaterialDataFile.m_pShaderHDR       = spirvHDR.data();
+            MaterialDataFile.m_ShaderSizeHDR    = static_cast<std::uint32_t>(spirvHDR.size());
             MaterialDataFile.m_Flags.m_bAlpha   = false;
             MaterialDataFile.m_pDefaultTextures = Graph.m_FinalTextureNodes.m_Textures.empty()? nullptr : Textures.get();
             MaterialDataFile.m_nDefaultTextures = static_cast<std::uint8_t>(Graph.m_FinalTextureNodes.m_Textures.size());

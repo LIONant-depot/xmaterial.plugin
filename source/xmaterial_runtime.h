@@ -13,6 +13,13 @@ namespace xmaterial
             return reinterpret_cast<xgpu::shader&>(m_RawData);
         }
 
+        // Scene-linear HDR output, for xLIONRender (getShader() is the tone-mapped LDR one)
+        xgpu::shader& getShaderHDR()
+        {
+            static_assert(sizeof(m_RawDataHDR) == sizeof(xgpu::shader));
+            return reinterpret_cast<xgpu::shader&>(m_RawDataHDR);
+        }
+
         xgpu::pipeline& getPipeline(int MaterialBasisIndex)
         {
             static_assert(sizeof(material_basis_entry) == sizeof(xgpu::pipeline));

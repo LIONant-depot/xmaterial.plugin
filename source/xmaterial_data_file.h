@@ -8,7 +8,7 @@ namespace xmaterial
 {
     struct data_file
     {
-        inline static constexpr auto xserializer_version_v = 1;
+        inline static constexpr auto xserializer_version_v = 2;    // v2: second shader, the scene-linear HDR variant for xLIONRender
 
         struct flags
         {
@@ -48,6 +48,17 @@ namespace xmaterial
             };
         };
 
+        // The same material compiled without XLION_LDR_OUTPUT: writes scene-linear HDR, the renderer tone maps.
+        // ponytail: two variants while editors still draw materials straight to the screen; drop the LDR one after.
+        union
+        {
+            std::array<void*,2> m_RawDataHDR;
+            struct
+            {
+                std::uint32_t*  m_pShaderHDR;
+                std::uint32_t   m_ShaderSizeHDR;
+            };
+        };
         xrsc::texture_ref*  m_pDefaultTextures; 
         flags               m_Flags;
         std::uint8_t        m_nDefaultTextures;
@@ -78,6 +89,8 @@ namespace xserializer::io_functions
         || (Err = Stream.Serialize(Material.m_Flags.m_Value))
         || (Err = Stream.Serialize(reinterpret_cast<std::uint64_t* const&>(Material.m_pDefaultTextures), Material.m_nDefaultTextures))
         || (Err = Stream.Serialize(Material.m_nDefaultTextures))
+        || (Err = Stream.Serialize(Material.m_pShaderHDR, Material.m_ShaderSizeHDR))
+        || (Err = Stream.Serialize(Material.m_ShaderSizeHDR))
         ;
 
         return Err;
