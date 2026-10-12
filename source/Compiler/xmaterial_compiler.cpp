@@ -40,9 +40,14 @@ namespace xmaterial_compiler
 #include <string>
 #include <array>  // Or use struct for container
 
+    // Resolves #include relative to the including file (or the working path: the project) and records every file it opens,
+    // so the compiler can make them dependencies: a material recompiles when any shader it includes changes (the renderer's
+    // shader library included).
     class CustomIncluder : public shaderc::CompileOptions::IncluderInterface
     {
     public:
+        explicit CustomIncluder(std::vector<std::filesystem::path>* pOpened = nullptr) : m_pOpened(pOpened) {}
+
         shaderc_include_result* GetInclude(const char* requested_source,
             shaderc_include_type type,
             const char* requesting_source,
@@ -70,6 +75,7 @@ namespace xmaterial_compiler
 
                 (*container)[0] = full_path.string();
                 (*container)[1] = std::move(content);
+                if (m_pOpened) m_pOpened->push_back(full_path);
 
                 result->source_name = (*container)[0].data();
                 result->source_name_length = (*container)[0].size();
@@ -93,6 +99,9 @@ namespace xmaterial_compiler
             delete static_cast<std::array<std::string, 2>*>(data->user_data);
             delete data;
         }
+
+    private:
+        std::vector<std::filesystem::path>* m_pOpened;
     };
 
 
@@ -373,10 +382,11 @@ namespace xmaterial_compiler
             // editors draw straight to the screen), HDR = scene-linear output that the renderer tone maps.
             // Materials that never test XLION_LDR_OUTPUT produce the same code twice.
             shaderc::Compiler compiler;
+            std::vector<std::filesystem::path> Includes;
             const auto CompileVariant = [&](bool bLDR, std::vector<uint32_t>& SPIRV) -> xerr
             {
                 shaderc::CompileOptions options;
-                options.SetIncluder(std::make_unique<CustomIncluder>());
+                options.SetIncluder(std::make_unique<CustomIncluder>(&Includes));
                 options.SetOptimizationLevel(shaderc_optimization_level_performance);
                 options.SetTargetSpirv(shaderc_spirv_version_1_0);
                 if (bLDR) options.AddMacroDefinition("XLION_LDR_OUTPUT");
@@ -421,7 +431,15 @@ namespace xmaterial_compiler
             for (auto& E : Graph.m_FinalTextureNodes.m_Textures )
             {
                 auto Ref = E.m_pNode->m_Params[ E.m_iParam ].m_Value.get<xresource::full_guid>();
-                m_Dependencies.m_Resources.push_back(Ref);
+                if (std::ranges::find(m_Dependencies.m_Resources, Ref) == m_Dependencies.m_Resources.end()) m_Dependencies.m_Resources.push_back(Ref);     // a texture used by several nodes: once
+            }
+
+            // Every shader file the material includes (both variants), relative to the project as the asset dependencies are
+            for (const auto& Path : Includes)
+            {
+                std::error_code Ec;
+                const auto Relative = std::filesystem::relative(Path, m_ProjectPaths.m_Project, Ec);
+                m_Dependencies.m_Assets.push_back(Ec ? Path.wstring() : Relative.wstring());
             }
 
             // Check if it is a FullShaderNode if so add the shader as an asset
