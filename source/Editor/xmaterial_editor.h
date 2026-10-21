@@ -7,6 +7,7 @@
 // text. Hosts include this header and open editors through xeditor::open_resource_editors.
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_graph_canvas.h"
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_stack_commands.h"
+#include "plugins/xmaterial.plugin/source/Editor/xmaterial_stack_routes.h"
 #include "source/Tools/Editor/xeditor_mesh_preview.h"
 #include "source/Tools/Editor/xeditor_text_widget.h"
 #include "dependencies/xresource_pipeline_v2/source/editor/xresource_editor_resources.h"
@@ -47,6 +48,11 @@ namespace xmaterial_editor
         cmds::sources_cmd               m_Sources;
         cmds::find_uses_cmd             m_FindUses;
         cmds::validate_placement_cmd    m_ValidatePlacement;
+        cmds::stack_view                m_StackView;            // layout + lane memory (view state, never saved)
+        cmds::layout_stats_cmd          m_LayoutStats;
+        cmds::route_info_cmd            m_RouteInfo;
+        cmds::repack_routes_cmd         m_RepackRoutes;
+        cmds::stack_self_test_cmd       m_StackSelfTest;
 
         graph_canvas                    m_Canvas;
         xeditor::inspector_panel        m_NodeInspector{ "Node Properties" };
@@ -67,6 +73,8 @@ namespace xmaterial_editor
             , m_ExposeParam(m_Undo, m_Document), m_UnexposeParam(m_Undo, m_Document), m_SetParamInfo(m_Undo, m_Document), m_ListParams(m_Undo, m_Document)
             , m_InsertOnConnection(m_Undo, m_Document), m_DuplicateStep(m_Undo, m_Document), m_ListStack(m_Undo, m_Document), m_Sources(m_Undo, m_Document)
             , m_FindUses(m_Undo, m_Document), m_ValidatePlacement(m_Undo, m_Document)
+            , m_LayoutStats(m_Undo, m_Document, m_StackView), m_RouteInfo(m_Undo, m_Document, m_StackView)
+            , m_RepackRoutes(m_Undo, m_StackView), m_StackSelfTest(m_Undo)
             , m_Canvas(m_Document, m_Undo)
         {
             xresource_editor::WireResourcePickerCallbacks(m_NodeInspector.m_Inspector);
@@ -85,7 +93,7 @@ namespace xmaterial_editor
 
         ~session() noexcept override { xresource::g_Mgr.ReleaseRef(m_MaterialRef); }
 
-        void OnDocumentReplaced() noexcept override { m_InspectedNode = 0; m_NodeInspector.Clear(); }
+        void OnDocumentReplaced() noexcept override { m_InspectedNode = 0; m_NodeInspector.Clear(); m_StackView.m_Memory = {}; }
 
         void OnCompiled() noexcept override
         {
