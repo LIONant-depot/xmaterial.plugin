@@ -21,6 +21,7 @@
 #endif
 
 #include "xmaterial_graph.h"   
+#include "xmaterial_stack_adapter.h"
 #include "dependencies/xproperty/source/sprop/property_sprop_xtextfile_serializer.h"
 
 namespace xmaterial_graph
@@ -272,13 +273,14 @@ namespace xmaterial_graph
             graph.m_PinToNode.clear();
             graph.m_Connections.clear();  //make sure the connection container is empty
             graph.m_Stack = {};
+            graph.m_Params.clear();
         }
         //
         //for reading and writing of nodes
         //
         int nNodeCount = static_cast<int>(graph.m_InstanceNodes.size());
         int nConnectionsCount = static_cast<int>(graph.m_Connections.size());
-        int  Version = 2;
+        int  Version = 3, nParameters = int(graph.m_Params.size());
         xerr Error;
 
         TextFile.Record("Info"
@@ -288,9 +290,18 @@ namespace xmaterial_graph
                 || (Error = TextFile.Field("nNodes", nNodeCount))
                 || (Error = TextFile.Field("nConnections", nConnectionsCount));
 
-                // v1 files have no Version column (and the failed read must not stop the record)
-                if (TextFile.isReading()) Version = TextFile.Field("Version", Version) ? 1 : 2;
-                else                      Error   = TextFile.Field("Version", Version);
+                // v1 files have no Version column, v2 no nParameters (and a failed read must not stop the record)
+                if (TextFile.isReading())
+                {
+                    if (TextFile.Field("Version", Version)) Version = 1;
+                    else if (Version >= 3) Error = TextFile.Field("nParameters", nParameters);
+                }
+                else
+                {
+                    false
+                    || (Error = TextFile.Field("Version", Version))
+                    || (Error = TextFile.Field("nParameters", nParameters));
+                }
             });
 
         auto Itr = graph.m_InstanceNodes.begin();
@@ -382,6 +393,23 @@ namespace xmaterial_graph
                 assert(false);
             }
         }
+
+        //
+        // The declared parameters (v3 only)
+        //
+        if (Version >= 3)
+        {
+            if (TextFile.isReading()) graph.m_Params.resize(nParameters);
+            for (auto& Decl : graph.m_Params)
+            {
+                TextFile.Record("Parameter", [&](xerr& Error){ Error = TextFile.Field("Guid", Decl.m_ID); });
+                if (auto Err = xproperty::sprop::serializer::Stream(TextFile, Decl, Context); Err)
+                {
+                    assert(false);
+                }
+            }
+        }
+        if (TextFile.isReading() && Version < 2) stack_adapter::Migrate(graph);   // v1: no stack yet, sort the graph into one
         if (TextFile.isReading()) graph.m_Stack.Reindex();
     }
 

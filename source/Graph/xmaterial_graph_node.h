@@ -8,6 +8,7 @@
 #endif
 
 #include "xmaterial_graph_node_guid.h"
+#include "../xmaterial_params.h"
 #include "dependencies/xresource_guid/source/xresource_guid.h"
 #include "plugins/xtexture.plugin/source/xtexture_xgpu_rsc_loader.h"
 
@@ -48,6 +49,7 @@ namespace xmaterial_graph
         bool            m_bCanExpose = false;
         bool            m_bExpose    = false;
         std::string     m_ExposeName = {};
+        xmaterial::param_id m_ParamID = 0;      // the declared parameter this input reads instead of its literal (0 = none)
 
         inline static constexpr auto type_enum_v = std::array
         { xproperty::settings::enum_item{ "NONE",               type::NONE      }
@@ -183,6 +185,15 @@ namespace xmaterial_graph
                 xproperty::flags::type Flags={};
                 Flags.m_bDontShow       = !O.m_bCanExpose || !O.m_bExpose;
                 Flags.m_bDontSave       = Flags.m_bDontShow;
+                return Flags;
+            } 
+            >>
+        , obj_member< "ParamID", &node_param::m_ParamID
+            , member_dynamic_flags < +[](const node_param& O)
+            {
+                xproperty::flags::type Flags={};
+                Flags.m_bDontShow       = true;
+                Flags.m_bDontSave       = O.m_ParamID == 0;     // unlinked inputs write nothing: old files stay byte-identical
                 return Flags;
             } 
             >>

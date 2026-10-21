@@ -4,6 +4,7 @@
 
 #include "xmaterial_graph_node.h"
 #include "xmaterial_stack.h"
+#include "../xmaterial_params.h"
 #include "dependencies/xresource_guid/source/xresource_guid.h"
 #include "dependencies/xerr/source/xerr.h"
 #include <unordered_map>
@@ -88,6 +89,7 @@ namespace xmaterial_graph
         std::unordered_map<type_guid, std::unique_ptr<sType>>               m_type;
         std::unordered_map<pin_guid, node_guid>                             m_PinToNode;
         final_texture_nodes                                                 m_FinalTextureNodes;
+        std::vector<xmaterial::param_decl>                                  m_Params;           // declared material parameters (file v3)
         stack                                                               m_Stack;            // organisation: sections and the order of their steps
     };
 }
