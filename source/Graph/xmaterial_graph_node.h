@@ -195,6 +195,7 @@ namespace xmaterial_graph
         node_guid                       m_Guid              = {};  //instance guid
         node_guid                       m_PrefabGuid        = {};  //prefab id
         std::string                     m_Name              = {};
+        std::string                     m_StepName          = {};  // unique in the graph; chips, console symbols, GLSL names
         std::string                     m_Code              = {};
         std::vector<input_pin>          m_InputPins         = {};
         std::vector<output_pin>         m_OutputPins        = {};
@@ -239,7 +240,8 @@ namespace xmaterial_graph
         ( "node", node
         , obj_member<"Name",        &node::m_Name,          member_flags<flags::SHOW_READONLY> >
         , obj_member<"NodeGuid",    &node::m_Guid,          member_flags<flags::DONT_SHOW, flags::DONT_SAVE>>
-        , obj_member<"Position",    &node::m_Pos,           member_flags<flags::DONT_SHOW>>
+        , obj_member<"StepName",    &node::m_StepName>
+        , obj_member<"Position",    &node::m_Pos,           member_flags<flags::DONT_SHOW>>   // still saved: the old canvas needs it until the stack canvas replaces it (stack_canvas.md task 12), then DONT_SAVE
         , obj_member<"Input Pins",  &node::m_InputPins,     member_flags<flags::DONT_SHOW>>
         , obj_member<"Output Pins", &node::m_OutputPins,    member_flags<flags::DONT_SHOW>>
         , obj_member<"Params",      &node::m_Params,        member_ui_open<true>, member_array_size_readonly<true> >

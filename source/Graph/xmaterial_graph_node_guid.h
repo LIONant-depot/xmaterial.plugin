@@ -11,6 +11,7 @@ namespace xmaterial_graph
     using connection_guid   = xmath::strong_typing_direct_numerics_t<std::uint64_t, struct connection_guid_tag>;
     using type_guid         = xmath::strong_typing_direct_numerics_t<std::uint64_t, struct type_guid_tag>;
     using pin_guid          = xmath::strong_typing_direct_numerics_t<std::uint64_t, struct pin_guid_tag>;
+    using section_guid      = xmath::strong_typing_direct_numerics_t<std::uint64_t, struct section_guid_tag>;
 
     struct node_guid_friend : xmaterial_graph::node_guid
     {
@@ -39,6 +40,15 @@ namespace xmaterial_graph
     };
     XPROPERTY_REG(pin_guid_friend)
 
+    struct section_guid_friend : section_guid
+    {
+        XPROPERTY_DEF
+        ( "section_guid", section_guid
+        , obj_member<"Value", &section_guid::m_Value >
+        )
+    };
+    XPROPERTY_REG(section_guid_friend)
+
     // node::m_Guid, pin::m_PinGUID, and input_pin::m_ConnectionGUID are declared with the raw
     // strong-typed guids (not a lambda reaching into .m_Value like var::m_TypeGUID does), so they need
     // the explicit link to the wrapper structs above.
@@ -46,6 +56,7 @@ namespace xmaterial_graph
 template<> struct xproperty::settings::reflected_type<xmaterial_graph::node_guid>       { using type = xmaterial_graph::node_guid_friend; };
 template<> struct xproperty::settings::reflected_type<xmaterial_graph::pin_guid>        { using type = xmaterial_graph::pin_guid_friend; };
 template<> struct xproperty::settings::reflected_type<xmaterial_graph::connection_guid> { using type = xmaterial_graph::connection_guid_friend; };
+template<> struct xproperty::settings::reflected_type<xmaterial_graph::section_guid>    { using type = xmaterial_graph::section_guid_friend; };
 namespace xmaterial_graph
 {
 

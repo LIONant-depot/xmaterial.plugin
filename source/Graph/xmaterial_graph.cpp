@@ -224,6 +224,37 @@ namespace xmaterial_graph
         }
     }
 
+    void stack::Reindex(void) noexcept
+    {
+        m_Where.clear();
+        m_Global.clear();
+        for (int s = 0, g = 0; s < (int)m_Sections.size(); ++s)
+            for (int i = 0; i < (int)m_Sections[s].m_Steps.size(); ++i, ++g)
+            {
+                m_Where [m_Sections[s].m_Steps[i]] = { s, i };
+                m_Global[m_Sections[s].m_Steps[i]] = g;
+            }
+    }
+
+    bool stack::IsOrderValid(const graph& G, std::vector<connection_guid>* pViolations) const noexcept
+    {
+        bool bValid = true;
+        for (auto& [cid, conn] : G.m_Connections)
+        {
+            auto* pProducer = G.findNodeByPin(conn->m_OutputPinGuid);
+            auto* pConsumer = G.findNodeByPin(conn->m_InputPinGuid);
+            if (pProducer == nullptr || pConsumer == nullptr) continue;
+
+            auto P = m_Global.find(pProducer->m_Guid);
+            auto C = m_Global.find(pConsumer->m_Guid);
+            if (P == m_Global.end() || C == m_Global.end() || P->second < C->second) continue;     // not steps (comments) or fine
+
+            bValid = false;
+            if (pViolations) pViolations->push_back(cid);
+        }
+        return bValid;
+    }
+
     void graph::serialize(graph& graph, bool isReading, const std::wstring_view filepath)
     {
         xtextfile::stream TextFile;
@@ -240,12 +271,14 @@ namespace xmaterial_graph
             graph.m_InstanceNodes.clear();//make sure the node container is empty
             graph.m_PinToNode.clear();
             graph.m_Connections.clear();  //make sure the connection container is empty
+            graph.m_Stack = {};
         }
         //
         //for reading and writing of nodes
         //
         int nNodeCount = static_cast<int>(graph.m_InstanceNodes.size());
         int nConnectionsCount = static_cast<int>(graph.m_Connections.size());
+        int  Version = 2;
         xerr Error;
 
         TextFile.Record("Info"
@@ -254,6 +287,10 @@ namespace xmaterial_graph
                 false
                 || (Error = TextFile.Field("nNodes", nNodeCount))
                 || (Error = TextFile.Field("nConnections", nConnectionsCount));
+
+                // v1 files have no Version column (and the failed read must not stop the record)
+                if (TextFile.isReading()) Version = TextFile.Field("Version", Version) ? 1 : 2;
+                else                      Error   = TextFile.Field("Version", Version);
             });
 
         auto Itr = graph.m_InstanceNodes.begin();
@@ -331,6 +368,21 @@ namespace xmaterial_graph
             }
 
         }
+
+        //
+        // The organisation (v2 only, v1 files get theirs from the adapter)
+        //
+        if (Version >= 2)
+        {
+            int nSections = static_cast<int>(graph.m_Stack.m_Sections.size());
+            TextFile.Record("StackLayout", [&](xerr& Error){ Error = TextFile.Field("nSections", nSections); });
+
+            if (auto Err = xproperty::sprop::serializer::Stream(TextFile, graph.m_Stack, Context); Err)
+            {
+                assert(false);
+            }
+        }
+        if (TextFile.isReading()) graph.m_Stack.Reindex();
     }
 
     const pin* graph::findPinConst(const node& n, pin_guid pid, bool& isInput, int& idxOut, int& subOut) const
