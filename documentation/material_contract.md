@@ -431,3 +431,13 @@ Each task leaves the build green and the existing materials rendering unchanged 
 - Files store linear colors (§3). Prefer authored sRGB in files instead?
 - The 32-bit instance-id hash (`xlionrender_scene_renderer.h:175`) can make two entities share a slot - now also their entity
   parameters. Fix before or with task 10?
+
+## Owner decisions (2026-10-21)
+
+- Slot swaps may move: v1 consolidates them into one material component with the entity parameters (task 10 migrates
+  `Mesh::m_Materials`), for clarity rather than keeping two places.
+- Baking per-entity edits stays deferred until a level build step exists.
+- Colors are linear everywhere (files, GPU, HDR).
+- Fix the 32-bit instance-id hash collision before task 10.
+- 64-bit keys are `std::uint64_t` (they print as hex); fvec4 values may be written as plain user fields instead of through xproperty.
+- Fields can be reordered freely in xtextfile; a new version simply stops reading old fields.
