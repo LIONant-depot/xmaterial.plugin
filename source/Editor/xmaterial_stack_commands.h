@@ -6,6 +6,8 @@
 // All are snapshot-based graph_cmd: undo puts the file text back. Nodes are named by guid or @StepName, sections by guid or @Name.
 #include "xmaterial_graph_editing.h"
 
+#include <optional>
+
 namespace xmaterial_editor::cmds
 {
     namespace so = xmaterial_graph::stack_order;
@@ -33,6 +35,47 @@ namespace xmaterial_editor::cmds
         return {};
     }
 
+    // What -Nodes -Section/-After/-Before/-First/-Last would do: the plain order and the two resolutions (not applied). "" or why not.
+    struct place_plan
+    {
+        std::optional<order_model> m_M;
+        so::sections               m_Plain;
+        so::move_result            m_Res;
+    };
+    inline std::string PlanPlacement(graph_document& Doc, const xcmdline::parser& P, xcmdline::parser::handle hNodes, const placement_options& Place, place_plan& Plan) noexcept
+    {
+        auto& G = Doc.m_Graph;
+        G.m_Stack.Reindex();
+        std::string Text, Err;
+        GetArg(P, hNodes, Text);
+        std::vector<xmaterial_graph::node_guid> Block;
+        for (std::size_t Start = 0; Start <= Text.size();)
+        {
+            auto End = Text.find(',', Start);
+            if (End == std::string::npos) End = Text.size();
+            std::uint64_t Id = 0;
+            if (!ResolveNodeText(Doc, Text.substr(Start, End - Start), Id, &Err)) return Err;
+            if (!G.m_Stack.m_Where.contains(xmaterial_graph::node_guid{ Id })) return "not a step";
+            if (std::find(Block.begin(), Block.end(), xmaterial_graph::node_guid{ Id }) == Block.end()) Block.push_back(xmaterial_graph::node_guid{ Id });
+            Start = End + 1;
+        }
+
+        int Sec = -1, Slot = 0; bool bGiven = false;
+        if (auto E = Place.Resolve(Doc, P, Block, Sec, Slot, bGiven); !E.empty()) return E;
+        if (!bGiven) return "needs -Section (or -After/-Before)";
+
+        auto& M = Plan.m_M.emplace(G);
+        std::vector<int> Ids;
+        for (auto Guid : Block) Ids.push_back(M.m_Id[Guid]);
+        std::sort(Ids.begin(), Ids.end(), [&](int a, int b) { return G.m_Stack.m_Global[M.m_Ids[a]] < G.m_Stack.m_Global[M.m_Ids[b]]; });
+
+        Plan.m_Plain = M.m_S;                                       // the block, in its own order, at the slot
+        for (auto& s : Plan.m_Plain) std::erase_if(s, [&](int n) { return std::find(Ids.begin(), Ids.end(), n) != Ids.end(); });
+        Plan.m_Plain[Sec].insert(Plan.m_Plain[Sec].begin() + Slot, Ids.begin(), Ids.end());
+        Plan.m_Res = so::ResolveMove(M.m_S, M.m_E, Ids, Sec, Slot);
+        return {};
+    }
+
     //---- PlaceSteps: move steps (presentation only, bindings are kept)
     struct place_steps_cmd : graph_cmd
     {
@@ -46,39 +89,11 @@ namespace xmaterial_editor::cmds
         }
         std::string Apply() noexcept override
         {
-            auto& G = m_Doc.m_Graph;
-            G.m_Stack.Reindex();
-            std::string Text, Err;
-            GetArg(m_Parser, m_hNodes, Text);
-            std::vector<xmaterial_graph::node_guid> Block;
-            for (std::size_t Start = 0; Start <= Text.size();)
-            {
-                auto End = Text.find(',', Start);
-                if (End == std::string::npos) End = Text.size();
-                std::uint64_t Id = 0;
-                if (!ResolveNodeText(m_Doc, Text.substr(Start, End - Start), Id, &Err)) return Err;
-                if (!G.m_Stack.m_Where.contains(xmaterial_graph::node_guid{ Id })) return "not a step";
-                if (std::find(Block.begin(), Block.end(), xmaterial_graph::node_guid{ Id }) == Block.end()) Block.push_back(xmaterial_graph::node_guid{ Id });
-                Start = End + 1;
-            }
             const int Mode = ResolveMode(m_Parser, m_hResolve);
             if (Mode < 0) return "-Resolve takes none, dependents or nearest";
-
-            int Sec = -1, Slot = 0; bool bGiven = false;
-            if (auto E = m_Place.Resolve(m_Doc, m_Parser, Block, Sec, Slot, bGiven); !E.empty()) return E;
-            if (!bGiven) return "needs -Section (or -After/-Before)";
-
-            order_model M(G);
-            std::vector<int> Ids;
-            for (auto Guid : Block) Ids.push_back(M.m_Id[Guid]);
-            std::sort(Ids.begin(), Ids.end(), [&](int a, int b) { return G.m_Stack.m_Global[M.m_Ids[a]] < G.m_Stack.m_Global[M.m_Ids[b]]; });
-
-            so::sections Plain = M.m_S;                                 // the block, in its own order, at the slot
-            for (auto& s : Plain) std::erase_if(s, [&](int n) { return std::find(Ids.begin(), Ids.end(), n) != Ids.end(); });
-            Plain[Sec].insert(Plain[Sec].begin() + Slot, Ids.begin(), Ids.end());
-
-            const auto Res = so::ResolveMove(M.m_S, M.m_E, Ids, Sec, Slot);
-            return Finish(m_Doc, M, Plain, Res, Mode, G.m_Stack.m_Sections);
+            place_plan Plan;
+            if (auto Err = PlanPlacement(m_Doc, m_Parser, m_hNodes, m_Place, Plan); !Err.empty()) return Err;
+            return Finish(m_Doc, *Plan.m_M, Plan.m_Plain, Plan.m_Res, Mode, m_Doc.m_Graph.m_Stack.m_Sections);
         }
         xcmdline::parser::handle m_hNodes, m_hResolve;
         placement_options        m_Place;
@@ -280,6 +295,310 @@ namespace xmaterial_editor::cmds
             return {};
         }
         xcmdline::parser::handle m_hSection, m_hCollapsed;
+    };
+
+    //---- Composite commands and queries (stack_canvas.md 9.2, 9.3)
+
+    // An id made from a node's: never equal to another node's derived ids for nearby node ids
+    inline std::uint64_t DerivedId(std::uint64_t Node, std::uint64_t k) noexcept { return Node + k * 0x9E3779B97F4A7C15ull; }
+
+    // A connection of the given id from one output pin to one input pin (the input remembers it)
+    inline void MakeLink(xmaterial_graph::graph& G, std::uint64_t Id, xmaterial_graph::pin_guid Out, xmaterial_graph::pin_guid In) noexcept
+    {
+        auto& Link = G.createConnection(xmaterial_graph::connection_guid{ Id });
+        Link.m_OutputPinGuid = Out;
+        Link.m_InputPinGuid  = In;
+        if (auto* pNode = G.findNodeByPin(In)) if (const int i = pNode->getInputPinIndex(In); i >= 0) pNode->m_InputPins[i].m_ConnectionGUID = Link.m_Guid;
+    }
+
+    // -Name (made an identifier, unique), else Fallback made unique. "" or why not.
+    inline std::string NewStepName(const xmaterial_graph::graph& G, const xcmdline::parser& P, xcmdline::parser::handle hName, const std::string& Fallback, std::string& Name) noexcept
+    {
+        if (!GetArg(P, hName, Name)) { Name = UniqueStepName(G, Fallback); return {}; }
+        Name = SanitizeStepName(Name);
+        return Name.empty() ? "the name needs a letter or digit" : StepNameUsed(G, Name) ? "name already used" : "";
+    }
+
+    // The chip a consumer shows for an output pin: Step, Step.Output (several outputs), Step.x (a sub-element)
+    inline std::string ChipText(const xmaterial_graph::graph& G, xmaterial_graph::pin_guid Out) noexcept
+    {
+        auto* pNode = G.findNodeByPin(Out);
+        if (!pNode) return "?";
+        for (auto& op : pNode->m_OutputPins)
+        {
+            const std::string Base = StepLabel(*pNode) + (pNode->m_OutputPins.size() > 1 ? "." + op.m_Name : "");
+            if (op.m_PinGUID == Out) return Base;
+            for (auto& sub : op.m_SubElements) if (sub.m_PinGUID == Out) return Base + "." + sub.m_Name;
+        }
+        return "?";
+    }
+
+    //---- InsertOnConnection: a new step on a connection; only that connection goes through it
+    struct insert_on_connection_cmd : graph_cmd
+    {
+        insert_on_connection_cmd(xundo::system& System, graph_document& Doc) noexcept : graph_cmd(System, Doc, "InsertOnConnection") { RegisterArguments(); }
+        const char* getCommandHelp() const noexcept override { return "Puts a new step on a connection (undoable): the source feeds -Input, -Output feeds the old consumer; the step goes right before the consumer (an output consumer: the end of the last user section). Usage: InsertOnConnection -Connection hexguid -Prefab hexguid -Node newhexguid -Input pin name -Output pin name [-Name text]. The two new connections get ids derived from -Node."; }
+        void RegisterArguments() noexcept override
+        {
+            m_hConnection = m_Parser.addOption("Connection", "The connection, hex",              true,  1);
+            m_hPrefab     = m_Parser.addOption("Prefab",     "The node type's guid, hex",        true,  1);
+            m_hNode       = m_Parser.addOption("Node",       "The new node's guid, hex",         true,  1);
+            m_hInput      = m_Parser.addOption("Input",      "The new step's input to feed",     true,  1);
+            m_hOutput     = m_Parser.addOption("Output",     "The new step's output to use",     true,  1);
+            m_hName       = m_Parser.addOption("Name",       "The step's name (default: the type's name, made unique)", false, 1);
+        }
+        std::string Apply() noexcept override
+        {
+            std::uint64_t Conn = 0, Prefab = 0, Node = 0;
+            if (!HexArg(m_Parser, m_hConnection, Conn) || !HexArg(m_Parser, m_hPrefab, Prefab) || !HexArg(m_Parser, m_hNode, Node) || Node == 0) return "bad arguments";
+            auto& G = m_Doc.m_Graph;
+            auto It = G.m_Connections.find(xmaterial_graph::connection_guid{ Conn });
+            if (It == G.m_Connections.end()) return "no such connection";
+            auto Prefabs = G.m_PrefabNodes.find(xmaterial_graph::node_guid{ Prefab });
+            if (Prefabs == G.m_PrefabNodes.end()) return "no such node type";
+            if (m_Doc.FindNode(Node)) return "a node with that id exists";
+            const std::uint64_t Id1 = DerivedId(Node, 1), Id2 = DerivedId(Node, 2);
+            if (G.m_Connections.contains(xmaterial_graph::connection_guid{ Id1 }) || G.m_Connections.contains(xmaterial_graph::connection_guid{ Id2 })) return "the derived connection ids are taken";
+
+            std::string Name, Err, InText, OutText;
+            if (Err = NewStepName(G, m_Parser, m_hName, Prefabs->second->m_Name, Name); !Err.empty()) return Err;
+            GetArg(m_Parser, m_hInput, InText); GetArg(m_Parser, m_hOutput, OutText);
+
+            const auto SrcOut = It->second->m_OutputPinGuid, DstIn = It->second->m_InputPinGuid;
+            auto* pSrc = G.findNodeByPin(SrcOut);
+            auto* pDst = G.findNodeByPin(DstIn);
+            if (!pSrc || !pDst) return "the connection is broken";
+            bool bIn = false; int Index = 0, Sub = 0;
+            const auto& OldOut = *G.findPinConst(*pSrc, SrcOut, bIn, Index, Sub);
+            const auto& OldIn  = *G.findPinConst(*pDst, DstIn,  bIn, Index, Sub);
+
+            // everything is checked on the new node, which goes again if anything is wrong
+            auto& N = G.CreateNode(xmaterial_graph::node_guid{ Prefab }, xmaterial_graph::node_guid{ Node });
+            auto Fail = [&](std::string Why) { G.RemoveNode(N.m_Guid); return Why; };
+            std::uint64_t NewIn = 0, NewOut = 0;
+            if (N.isCommentNode() || N.isOutputNode() || N.isInputNode()) return Fail("that node type has no input and output to put on a connection");
+            if (!PinByPart(N, false, InText, NewIn, &Err) || !PinByPart(N, true, OutText, NewOut, &Err)) return Fail(Err);
+            const auto* pIn  = G.findPinConst(N, xmaterial_graph::pin_guid{ NewIn },  bIn, Index, Sub);
+            const auto* pOut = G.findPinConst(N, xmaterial_graph::pin_guid{ NewOut }, bIn, Index, Sub);
+            if (!IsPinCompatible(OldOut, *pIn, G)) return Fail(TypesDiffer(G, OldOut, *pIn));
+            if (!IsPinCompatible(*pOut, OldIn, G)) return Fail(TypesDiffer(G, *pOut, OldIn));
+
+            G.m_Stack.Reindex();
+            auto& Sections = G.m_Stack.m_Sections;
+            auto [Sec, Slot] = G.m_Stack.m_Where.at(pDst->m_Guid);
+            if (Sections[Sec].m_Kind == xmaterial_graph::section::kind::OUTPUT)                 // outputs only live in the output stack: the step goes at the end of the last user section
+            {
+                for (Sec = static_cast<int>(Sections.size()) - 1; Sec >= 0 && Sections[Sec].m_Kind != xmaterial_graph::section::kind::USER; --Sec) {}
+                if (Sec < 0) return Fail("the stack has no user section");
+                Slot = static_cast<int>(Sections[Sec].m_Steps.size());
+            }
+
+            N.m_StepName = Name;
+            N.m_Pos = { (pSrc->m_Pos.m_X + pDst->m_Pos.m_X) / 2, (pSrc->m_Pos.m_Y + pDst->m_Pos.m_Y) / 2 };
+            m_Doc.m_bPositionsChanged = true;
+            Sections[Sec].m_Steps.insert(Sections[Sec].m_Steps.begin() + Slot, N.m_Guid);
+            const xmaterial_graph::pin_guid NewInPin{ NewIn }, NewOutPin{ NewOut };
+            G.RemoveConnection(xmaterial_graph::connection_guid{ Conn });
+            MakeLink(G, Id1, SrcOut, NewInPin);
+            MakeLink(G, Id2, NewOutPin, DstIn);
+            G.m_Stack.Reindex();
+            return {};
+        }
+        xcmdline::parser::handle m_hConnection, m_hPrefab, m_hNode, m_hInput, m_hOutput, m_hName;
+    };
+
+    //---- DuplicateStep: the same type and values, every input bound to the same sources, outputs unused; right after the original
+    struct duplicate_step_cmd : graph_cmd
+    {
+        duplicate_step_cmd(xundo::system& System, graph_document& Doc) noexcept : graph_cmd(System, Doc, "DuplicateStep") { RegisterArguments(); }
+        const char* getCommandHelp() const noexcept override { return "Copies a step with its values and every input binding; its outputs feed nothing; it goes right after the original (undoable). Usage: DuplicateStep -Node hexguid|@StepName -NewNode newhexguid [-Name text]. The new connections get ids derived from -NewNode."; }
+        void RegisterArguments() noexcept override
+        {
+            m_hNode    = m_Parser.addOption("Node",    "The step to copy",                  true,  1);
+            m_hNewNode = m_Parser.addOption("NewNode", "The copy's guid, hex",              true,  1);
+            m_hName    = m_Parser.addOption("Name",    "The copy's name (default: the original's, made unique)", false, 1);
+        }
+        std::string Apply() noexcept override
+        {
+            std::uint64_t Node = 0, New = 0; std::string Err;
+            if (!ResolveNodeArg(m_Doc, m_Parser, m_hNode, Node, &Err)) return Err;
+            if (!HexArg(m_Parser, m_hNewNode, New) || New == 0) return "bad arguments";
+            auto& G = m_Doc.m_Graph;
+            auto* pSrc = m_Doc.FindNode(Node);
+            if (!pSrc || pSrc->isCommentNode()) return "not a step";
+            if (m_Doc.FindNode(New)) return "a node with that id exists";
+            if (!G.m_PrefabNodes.contains(pSrc->m_PrefabGuid)) return "its node type is gone";
+            for (std::size_t i = 0; i < pSrc->m_InputPins.size(); ++i)
+                if (G.m_Connections.contains(xmaterial_graph::connection_guid{ DerivedId(New, 3 + i) })) return "the derived connection ids are taken";
+            std::string Name;
+            if (Err = NewStepName(G, m_Parser, m_hName, StepLabel(*pSrc), Name); !Err.empty()) return Err;
+            G.m_Stack.Reindex();
+            const auto [Sec, Slot] = G.m_Stack.m_Where.at(pSrc->m_Guid);
+
+            auto& N = G.CreateNode(pSrc->m_PrefabGuid, xmaterial_graph::node_guid{ New });
+            if (N.m_InputPins.size() != pSrc->m_InputPins.size() || N.m_OutputPins.size() != pSrc->m_OutputPins.size()) { G.RemoveNode(N.m_Guid); return "that node's pins differ from its type's (a shader file?): not copied"; }
+            N.m_Params   = pSrc->m_Params;
+            N.m_StepName = Name;
+            N.m_Pos      = { pSrc->m_Pos.m_X + 40, pSrc->m_Pos.m_Y + 40 };
+            m_Doc.m_bPositionsChanged = true;
+            for (std::size_t i = 0; i < pSrc->m_InputPins.size(); ++i)
+                if (auto C = G.m_Connections.find(pSrc->m_InputPins[i].m_ConnectionGUID); C != G.m_Connections.end())
+                    MakeLink(G, DerivedId(New, 3 + i), C->second->m_OutputPinGuid, N.m_InputPins[i].m_PinGUID);
+            auto& Steps = G.m_Stack.m_Sections[Sec].m_Steps;
+            Steps.insert(Steps.begin() + Slot + 1, N.m_Guid);
+            G.m_Stack.Reindex();
+            return {};
+        }
+        xcmdline::parser::handle m_hNode, m_hNewNode, m_hName;
+    };
+
+    //---- ListStack: the stack as text, each step with what feeds it
+    struct list_stack_cmd : xundo::query_command_base
+    {
+        graph_document& m_Doc;
+        list_stack_cmd(xundo::system& System, graph_document& Doc) noexcept : query_command_base(System, "ListStack", nullptr), m_Doc(Doc) { RegisterArguments(); }
+        const char* getCommandHelp() const noexcept override { return "Lists the sections in order and each step: guid, name, type, its inputs as chips (Base <- Wetness.Darken) or their values. Usage: ListStack [-Section guid|@Name]"; }
+        void RegisterArguments() noexcept override { m_hSection = m_Parser.addOption("Section", "Only this section", false, 1); }
+        std::string Query() noexcept override
+        {
+            if (!m_Doc.isLoaded()) return "ListStack: nothing loaded";
+            auto& G = m_Doc.m_Graph;
+            std::string Only, Err;
+            int One = -1;
+            if (GetArg(m_Parser, m_hSection, Only) && (One = FindSection(G.m_Stack, Only, &Err)) < 0) return Err;
+
+            std::string Out;
+            for (int s = 0; s < static_cast<int>(G.m_Stack.m_Sections.size()); ++s)
+            {
+                auto& Sec = G.m_Stack.m_Sections[s];
+                if (One >= 0 && s != One) continue;
+                Out += std::format("section {:016X}  {}{}{}\n", Sec.m_Guid.m_Value, Sec.m_Name, Sec.m_Kind == xmaterial_graph::section::kind::OUTPUT ? "  [output]" : "", Sec.m_bCollapsed ? "  [collapsed]" : "");
+                for (auto Step : Sec.m_Steps)
+                {
+                    auto* pNode = m_Doc.FindNode(Step.m_Value);
+                    if (!pNode) continue;
+                    Out += std::format("  {:016X}  {}  ({})", Step.m_Value, StepLabel(*pNode), pNode->m_Name);
+                    bool bFirst = true;
+                    for (auto& Pin : pNode->m_InputPins)
+                    {
+                        std::string What;
+                        if (auto C = G.m_Connections.find(Pin.m_ConnectionGUID); C != G.m_Connections.end()) What = "<- " + ChipText(G, C->second->m_OutputPinGuid);
+                        else if (Pin.m_ParamIndex >= 0 && Pin.m_ParamIndex < static_cast<int>(pNode->m_Params.size()))
+                        {
+                            auto& Prop = pNode->m_Params[Pin.m_ParamIndex];
+                            auto D = std::ranges::find(G.m_Params, Prop.m_ParamID, &xmaterial::param_decl::m_ID);
+                            What = Prop.m_ParamID && D != G.m_Params.end() ? std::format("= parameter '{}'", D->m_Name) : Prop.m_Value.m_pType ? "= " + FormatValue(Prop.m_Value) : "(unconnected)";
+                        }
+                        else What = "(unconnected)";
+                        Out += std::format("{} {} {}", bFirst ? "  " : ",", Pin.m_Name, What);
+                        bFirst = false;
+                    }
+                    Out += '\n';
+                }
+            }
+            return Out;
+        }
+        xcmdline::parser::handle m_hSection;
+    };
+
+    //---- Sources: what feeds each input of a step
+    struct sources_cmd : xundo::query_command_base
+    {
+        graph_document& m_Doc;
+        sources_cmd(xundo::system& System, graph_document& Doc) noexcept : query_command_base(System, "Sources", nullptr), m_Doc(Doc) { RegisterArguments(); }
+        const char* getCommandHelp() const noexcept override { return "Lists each input of a step: the chip of its source, the connection and the source pin. Usage: Sources -Node hexguid|@StepName"; }
+        void RegisterArguments() noexcept override { m_hNode = m_Parser.addOption("Node", "The step", true, 1); }
+        std::string Query() noexcept override
+        {
+            std::uint64_t Node = 0; std::string Err;
+            if (!ResolveNodeArg(m_Doc, m_Parser, m_hNode, Node, &Err)) return Err;
+            auto* pNode = m_Doc.isLoaded() ? m_Doc.FindNode(Node) : nullptr;
+            if (!pNode) return "Sources: no such node";
+            std::string Out;
+            for (auto& Pin : pNode->m_InputPins)
+                if (auto C = m_Doc.m_Graph.m_Connections.find(Pin.m_ConnectionGUID); C != m_Doc.m_Graph.m_Connections.end())
+                    Out += std::format("{}  <- {}  connection {:016X}  source {:016X}\n", Pin.m_Name, ChipText(m_Doc.m_Graph, C->second->m_OutputPinGuid), C->first.m_Value, C->second->m_OutputPinGuid.m_Value);
+                else Out += std::format("{}  (not connected)\n", Pin.m_Name);
+            return Out.empty() ? "(no inputs)" : Out;
+        }
+        xcmdline::parser::handle m_hNode;
+    };
+
+    //---- FindUses: every input fed by a step (or by one of its outputs)
+    struct find_uses_cmd : xundo::query_command_base
+    {
+        graph_document& m_Doc;
+        find_uses_cmd(xundo::system& System, graph_document& Doc) noexcept : query_command_base(System, "FindUses", nullptr), m_Doc(Doc) { RegisterArguments(); }
+        const char* getCommandHelp() const noexcept override { return "Lists every input fed by a step, or by one of its outputs (a sub-element too): the consumer, its input, the connection. Usage: FindUses -Node hexguid|@StepName [-Output name]"; }
+        void RegisterArguments() noexcept override
+        {
+            m_hNode   = m_Parser.addOption("Node",   "The step",              true,  1);
+            m_hOutput = m_Parser.addOption("Output", "Only this output",      false, 1);
+        }
+        std::string Query() noexcept override
+        {
+            std::uint64_t Node = 0, Pin = 0; std::string Text, Err;
+            if (!ResolveNodeArg(m_Doc, m_Parser, m_hNode, Node, &Err)) return Err;
+            auto* pNode = m_Doc.isLoaded() ? m_Doc.FindNode(Node) : nullptr;
+            if (!pNode) return "FindUses: no such node";
+            auto& G = m_Doc.m_Graph;
+            std::unordered_set<std::uint64_t> Pins;                             // the output pins that count: all of the step's, or the named one and its sub-elements
+            for (auto& op : pNode->m_OutputPins) { Pins.insert(op.m_PinGUID.m_Value); for (auto& sub : op.m_SubElements) Pins.insert(sub.m_PinGUID.m_Value); }
+            if (GetArg(m_Parser, m_hOutput, Text))
+            {
+                if (!PinByPart(*pNode, true, Text, Pin, &Err)) return Err;
+                Pins = { Pin };
+                for (auto& op : pNode->m_OutputPins) if (op.m_PinGUID.m_Value == Pin) for (auto& sub : op.m_SubElements) Pins.insert(sub.m_PinGUID.m_Value);
+            }
+            std::string Out;
+            for (auto& [Id, C] : G.m_Connections)
+                if (Pins.contains(C->m_OutputPinGuid.m_Value))
+                    if (auto* pTo = G.findNodeByPin(C->m_InputPinGuid))
+                        Out += std::format("{}.{}  <- {}  connection {:016X}\n", StepLabel(*pTo), pTo->m_InputPins[pTo->getInputPinIndex(C->m_InputPinGuid)].m_Name, ChipText(G, C->m_OutputPinGuid), Id.m_Value);
+            return Out.empty() ? "(no uses)" : Out;
+        }
+        xcmdline::parser::handle m_hNode, m_hOutput;
+    };
+
+    //---- ValidatePlacement: PlaceSteps as a dry run
+    struct validate_placement_cmd : xundo::query_command_base
+    {
+        graph_document& m_Doc;
+        validate_placement_cmd(xundo::system& System, graph_document& Doc) noexcept : query_command_base(System, "ValidatePlacement", nullptr), m_Doc(Doc) { RegisterArguments(); }
+        const char* getCommandHelp() const noexcept override { return "Says whether PlaceSteps would work, changing nothing: ok, or the violations and the order each -Resolve would give. Usage: ValidatePlacement -Nodes node,node,... -Section guid|@Name [-After node | -Before node | -First 1 | -Last 1]"; }
+        void RegisterArguments() noexcept override
+        {
+            m_hNodes = m_Parser.addOption("Nodes", "The steps, comma separated", true, 1);
+            m_Place.Register(m_Parser);
+        }
+        std::string Query() noexcept override
+        {
+            if (!m_Doc.isLoaded()) return "ValidatePlacement: nothing loaded";
+            place_plan Plan;
+            if (auto Err = PlanPlacement(m_Doc, m_Parser, m_hNodes, m_Place, Plan); !Err.empty()) return Err;
+            auto& G = m_Doc.m_Graph;
+            auto& Meta = G.m_Stack.m_Sections;
+            const auto& M = *Plan.m_M;
+            if (auto Bad = M.Check(G, Plan.m_Plain, Meta); Bad.empty()) return "ok";
+            else
+            {
+                std::string Out = "violations: " + Bad + "\n";
+                for (auto [Mode, R] : { std::pair{ "dependents", &Plan.m_Res.m_Dependents }, std::pair{ "nearest", &Plan.m_Res.m_Nearest } })
+                {
+                    Out += std::format("-Resolve {}: ", Mode);
+                    if (auto B = M.Check(G, *R, Meta); !B.empty()) { Out += "fails: " + B + "\n"; continue; }
+                    for (int s = 0; s < static_cast<int>(R->size()); ++s)
+                    {
+                        Out += std::format("{}{}:", s ? " | " : "", Meta[s].m_Name);
+                        for (int n : (*R)[s]) Out += " " + StepLabel(*G.m_InstanceNodes.at(M.m_Ids[n]));
+                    }
+                    Out += '\n';
+                }
+                return Out;
+            }
+        }
+        xcmdline::parser::handle m_hNodes;
+        placement_options        m_Place;
     };
 }
 

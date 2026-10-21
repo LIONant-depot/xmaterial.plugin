@@ -8,6 +8,7 @@
 #include "source/Tools/Editor/xeditor_document_editor.h"
 #include "plugins/xmaterial.plugin/source/Graph/xmaterial_graph.h"
 #include "plugins/xmaterial.plugin/source/Graph/xmaterial_stack_adapter.h"
+#include "dependencies/xproperty/source/sprop/property_sprop_xtextfile_serializer.h"
 
 #include <charconv>
 #include <functional>
@@ -126,6 +127,31 @@ namespace xmaterial_editor
             return false;
         }
 
+        // A pin of N by name: an output (a sub-element "x" or "Output.x" too) or an input; "A" also matches "A(4)". No name: the node's single output.
+        inline bool PinByPart(const xmaterial_graph::node& N, bool bOutput, const std::string& Part, std::uint64_t& Out, std::string* pErr = nullptr) noexcept
+        {
+            auto Fail = [&](std::string Why) { if (pErr) *pErr = std::move(Why); return false; };
+            std::vector<std::pair<std::string, std::uint64_t>> Names;
+            if (bOutput)
+                for (auto& op : N.m_OutputPins)
+                {
+                    Names.push_back({ op.m_Name, op.m_PinGUID.m_Value });
+                    for (auto& sub : op.m_SubElements) { Names.push_back({ sub.m_Name, sub.m_PinGUID.m_Value }); Names.push_back({ op.m_Name + "." + sub.m_Name, sub.m_PinGUID.m_Value }); }
+                }
+            else for (auto& ip : N.m_InputPins) Names.push_back({ ip.m_Name, ip.m_PinGUID.m_Value });
+
+            if (Part.empty())
+            {
+                if (bOutput && N.m_OutputPins.size() == 1) { Out = N.m_OutputPins[0].m_PinGUID.m_Value; return true; }
+                return Fail(std::format("'{}' needs a pin: @{}.Name", StepLabel(N), StepLabel(N)));
+            }
+            int nFound = 0;
+            for (auto& [Name, Guid] : Names) if (NoSpace(Name) == NoSpace(Part) || NoSpace(Name.substr(0, Name.find('('))) == NoSpace(Part)) { Out = Guid; ++nFound; }       // "A(4)" is also "A"
+            if (nFound == 0) return Fail(std::format("'{}' has no {} pin '{}'", StepLabel(N), bOutput ? "output" : "input", Part));
+            if (nFound > 1)  return Fail(std::format("'{}' is ambiguous on '{}'", Part, StepLabel(N)));
+            return true;
+        }
+
         inline bool ResolvePinText(const graph_document& Doc, const std::string& Text, bool bOutput, std::uint64_t& Out, std::string* pErr = nullptr) noexcept
         {
             auto Fail = [&](std::string Why) { if (pErr) *pErr = std::move(Why); return false; };
@@ -135,27 +161,7 @@ namespace xmaterial_editor
             const std::string StepName = Text.substr(1, Dot == std::string::npos ? std::string::npos : Dot - 1);
             auto* pNode = FindStep(Doc, StepName);
             if (!pNode) return Fail(std::format("no step named '{}'", StepName));
-            const std::string Part = Dot == std::string::npos ? std::string{} : Text.substr(Dot + 1);
-
-            std::vector<std::pair<std::string, std::uint64_t>> Names;
-            if (bOutput)
-                for (auto& op : pNode->m_OutputPins)
-                {
-                    Names.push_back({ op.m_Name, op.m_PinGUID.m_Value });
-                    for (auto& sub : op.m_SubElements) { Names.push_back({ sub.m_Name, sub.m_PinGUID.m_Value }); Names.push_back({ op.m_Name + "." + sub.m_Name, sub.m_PinGUID.m_Value }); }
-                }
-            else for (auto& ip : pNode->m_InputPins) Names.push_back({ ip.m_Name, ip.m_PinGUID.m_Value });
-
-            if (Part.empty())
-            {
-                if (bOutput && pNode->m_OutputPins.size() == 1) { Out = pNode->m_OutputPins[0].m_PinGUID.m_Value; return true; }
-                return Fail(std::format("'{}' needs a pin: @{}.Name", Text, StepLabel(*pNode)));
-            }
-            int nFound = 0;
-            for (auto& [Name, Guid] : Names) if (NoSpace(Name) == NoSpace(Part) || NoSpace(Name.substr(0, Name.find('('))) == NoSpace(Part)) { Out = Guid; ++nFound; }       // "A(4)" is also "A"
-            if (nFound == 0) return Fail(std::format("'{}' has no {} pin '{}'", StepLabel(*pNode), bOutput ? "output" : "input", Part));
-            if (nFound > 1)  return Fail(std::format("'{}' is ambiguous on '{}'", Part, StepLabel(*pNode)));
-            return true;
+            return PinByPart(*pNode, bOutput, Dot == std::string::npos ? std::string{} : Text.substr(Dot + 1), Out, pErr);
         }
 
         inline int FindSection(const xmaterial_graph::stack& Stack, const std::string& Text, std::string* pErr = nullptr) noexcept
@@ -321,6 +327,12 @@ namespace xmaterial_editor
             return Result.ec == std::errc() && Result.ptr == Text.data() + Text.size();
         }
 
+        inline std::string TypesDiffer(const xmaterial_graph::graph& G, const xmaterial_graph::pin& Out, const xmaterial_graph::pin& In) noexcept
+        {
+            auto Name = [&](const xmaterial_graph::pin& P) { auto* p = G.findType(P.m_TypeGUID); return p ? p->m_Name : std::string("?"); };
+            return std::format("types differ ({} -> {}); use a sub-element or a conversion", Name(Out), Name(In));
+        }
+
         // A structural edit: Apply changes the graph, undo restores the snapshot taken before.
         struct graph_cmd : xundo::command_base
         {
@@ -469,7 +481,8 @@ namespace xmaterial_editor
                 auto* pOut = G.findPinConst(*pOutNode, xmaterial_graph::pin_guid{ Out }, bOutIsInput, Index, Sub);
                 auto* pIn  = G.findPinConst(*pInNode,  xmaterial_graph::pin_guid{ In },  bInIsInput,  Index, Sub);
                 if (!pOut || !pIn || bOutIsInput || !bInIsInput) return "that connects an output pin to an input pin";
-                if (!IsPinCompatible(*pOut, *pIn, G)) return "the pins' types differ (or they are on the same node)";
+                if (pOutNode == pInNode) return "the pins are on the same node";
+                if (!IsPinCompatible(*pOut, *pIn, G)) return TypesDiffer(G, *pOut, *pIn);
                 if (G.m_Connections.contains(xmaterial_graph::connection_guid{ Connection })) return "a connection with that id exists";
 
                 std::function<void()> Reorder;
@@ -679,6 +692,238 @@ namespace xmaterial_editor
             xcmdline::parser::handle m_hNode, m_hPath, m_hValue, m_hBefore;
         };
 
+        //---- Parameters (documentation/material_contract.md): an unconnected float or texture input can read a declared parameter instead of its literal.
+        inline xmaterial::param_decl* FindParam(xmaterial_graph::graph& G, xmaterial::param_id ID) noexcept
+        {
+            auto It = std::ranges::find(G.m_Params, ID, &xmaterial::param_decl::m_ID);
+            return It == G.m_Params.end() ? nullptr : &*It;
+        }
+
+        // A parameter: its id (hex) or @Name (its name, case-insensitive)
+        inline bool ResolveParamText(xmaterial_graph::graph& G, const std::string& Text, xmaterial::param_id& Out, std::string* pErr = nullptr) noexcept
+        {
+            if (!Text.empty() && Text[0] == '@')
+            {
+                for (auto& D : G.m_Params) if (Lower(D.m_Name) == Lower(Text.substr(1))) { Out = D.m_ID; return true; }
+                if (pErr) *pErr = std::format("no parameter named '{}'", Text.substr(1));
+                return false;
+            }
+            if (ParseHex(Text, Out) && FindParam(G, Out)) return true;
+            if (pErr) *pErr = std::format("'{}' is not a parameter id or @Name", Text);
+            return false;
+        }
+
+        // The inputs that read a parameter: "Step.Input", in node order
+        inline std::vector<std::string> ParamReaders(const xmaterial_graph::graph& G, xmaterial::param_id ID) noexcept
+        {
+            std::vector<std::string> Out;
+            for (auto& [Guid, pNode] : G.m_InstanceNodes)
+                for (auto& Pin : pNode->m_InputPins)
+                    if (Pin.m_ParamIndex >= 0 && Pin.m_ParamIndex < static_cast<int>(pNode->m_Params.size()) && pNode->m_Params[Pin.m_ParamIndex].m_ParamID == ID) Out.push_back(StepLabel(*pNode) + "." + Pin.m_Name);
+            return Out;
+        }
+
+        // The input pin and its node param of "-Node -Param <input name | pin guid>"
+        inline std::string ParamInput(graph_document& Doc, const xcmdline::parser& P, xcmdline::parser::handle hNode, xcmdline::parser::handle hParam, xmaterial_graph::node*& pNode, xmaterial_graph::input_pin*& pPin) noexcept
+        {
+            std::uint64_t Node = 0, Pin = 0; std::string Text, Err;
+            if (!ResolveNodeArg(Doc, P, hNode, Node, &Err)) return Err;
+            if (pNode = Doc.FindNode(Node); !pNode) return "no such node";
+            if (!GetArg(P, hParam, Text)) return "bad arguments";
+            if (!PinByPart(*pNode, false, Text, Pin, &Err) && !(ParseHex(Text, Pin) && pNode->getInputPinIndex(xmaterial_graph::pin_guid{ Pin }) >= 0)) return Err;
+            pPin = &pNode->m_InputPins[pNode->getInputPinIndex(xmaterial_graph::pin_guid{ Pin })];
+            if (pPin->m_ParamIndex < 0 || pPin->m_ParamIndex >= static_cast<int>(pNode->m_Params.size())) return std::format("'{}' has no literal to expose", pPin->m_Name);
+            return {};
+        }
+
+        //---- ExposeParam: an input becomes a parameter (default = its literal); -Id attaches it to an existing one
+        struct expose_param_cmd : graph_cmd
+        {
+            expose_param_cmd(xundo::system& System, graph_document& Doc) noexcept : graph_cmd(System, Doc, "ExposeParam") { RegisterArguments(); }
+            const char* getCommandHelp() const noexcept override { return "Makes an unconnected float or texture input read a material parameter instead of its literal (undoable). Usage: ExposeParam -Node hexguid|@StepName -Param input name|pin guid [-Id hexguid|@Name] [-Name text]. A new parameter takes the input's pin guid as its id, its literal as the default and -Name (default: the input's name); -Id attaches the input to an existing parameter of the same type."; }
+            void RegisterArguments() noexcept override
+            {
+                m_hNode  = m_Parser.addOption("Node",  "The node",                                        true,  1);
+                m_hParam = m_Parser.addOption("Param", "The input: its name or pin guid",                 true,  1);
+                m_hId    = m_Parser.addOption("Id",    "An existing parameter to read (id hex or @Name)", false, 1);
+                m_hName  = m_Parser.addOption("Name",  "The new parameter's name",                        false, 1);
+            }
+            std::string Apply() noexcept override
+            {
+                xmaterial_graph::node* pNode = nullptr; xmaterial_graph::input_pin* pPin = nullptr;
+                if (auto Err = ParamInput(m_Doc, m_Parser, m_hNode, m_hParam, pNode, pPin); !Err.empty()) return Err;
+                auto& G = m_Doc.m_Graph;
+                auto& Prop = pNode->m_Params[pPin->m_ParamIndex];
+                if (pPin->m_ConnectionGUID.m_Value != 0) return "the input is connected: disconnect it first";
+                if (Prop.m_ParamID != 0) return std::format("already reads parameter {:016X}", Prop.m_ParamID);
+                const bool bTexture = Prop.m_Type == xmaterial_graph::node_param::type::TEXTURE_RESOURCE;
+                if (Prop.m_Type != xmaterial_graph::node_param::type::FLOAT && !bTexture) return "only float and texture inputs can be parameters";
+                const auto Type = bTexture ? xmaterial::param_type::TEXTURE : xmaterial::param_type::FLOAT;
+
+                xmaterial::param_id ID = pPin->m_PinGUID.m_Value;
+                std::string Text, Err;
+                const bool bAttach = GetArg(m_Parser, m_hId, Text);
+                if (bAttach && !ResolveParamText(G, Text, ID, &Err)) return Err;
+                auto* pDecl = FindParam(G, ID);
+                if (pDecl && pDecl->m_Type != Type) return std::format("parameter '{}' has another type", pDecl->m_Name);
+
+                if (!pDecl || (!bAttach && ParamReaders(G, ID).empty()))        // new, or this input exposed again: its literal is the default
+                {
+                    if (!pDecl) pDecl = &G.m_Params.emplace_back();
+                    std::string Name;
+                    if (!GetArg(m_Parser, m_hName, Name)) Name = Prop.m_ExposeName.empty() ? Prop.m_Name : Prop.m_ExposeName;
+                    pDecl->m_ID = ID; pDecl->m_Type = Type; pDecl->m_Name = Name;
+                    if (bTexture) pDecl->m_DefaultTexture = Prop.m_Value.get<xresource::full_guid>();
+                    else          pDecl->m_Default.m_X = Prop.m_Value.get<float>();
+                }
+                Prop.m_ParamID = ID;
+                return {};
+            }
+            xcmdline::parser::handle m_hNode, m_hParam, m_hId, m_hName;
+        };
+
+        //---- UnexposeParam: the input is a literal again (the parameter's default); the declaration stays
+        struct unexpose_param_cmd : graph_cmd
+        {
+            unexpose_param_cmd(xundo::system& System, graph_document& Doc) noexcept : graph_cmd(System, Doc, "UnexposeParam") { RegisterArguments(); }
+            const char* getCommandHelp() const noexcept override { return "Makes an input a literal again, with the parameter's default as its value (undoable); the declaration stays. Usage: UnexposeParam -Node hexguid|@StepName -Param input name|pin guid"; }
+            void RegisterArguments() noexcept override
+            {
+                m_hNode  = m_Parser.addOption("Node",  "The node",                        true, 1);
+                m_hParam = m_Parser.addOption("Param", "The input: its name or pin guid", true, 1);
+            }
+            std::string Apply() noexcept override
+            {
+                xmaterial_graph::node* pNode = nullptr; xmaterial_graph::input_pin* pPin = nullptr;
+                if (auto Err = ParamInput(m_Doc, m_Parser, m_hNode, m_hParam, pNode, pPin); !Err.empty()) return Err;
+                auto& Prop = pNode->m_Params[pPin->m_ParamIndex];
+                if (Prop.m_ParamID == 0) return "the input does not read a parameter";
+                if (auto* pDecl = FindParam(m_Doc.m_Graph, Prop.m_ParamID))
+                {
+                    if (Prop.m_Type == xmaterial_graph::node_param::type::TEXTURE_RESOURCE) Prop.m_Value.set<xresource::full_guid>(pDecl->m_DefaultTexture);
+                    else                                                                    Prop.m_Value.set<float>(pDecl->m_Default.m_X);
+                }
+                Prop.m_ParamID = 0;
+                return {};
+            }
+            xcmdline::parser::handle m_hNode, m_hParam;
+        };
+
+        //---- SetParamInfo: the metadata of a parameter. A rename touches no instance (ids are the identity).
+        struct set_param_info_cmd : graph_cmd
+        {
+            set_param_info_cmd(xundo::system& System, graph_document& Doc) noexcept : graph_cmd(System, Doc, "SetParamInfo") { RegisterArguments(); }
+            const char* getCommandHelp() const noexcept override { return "Sets what a parameter says about itself (undoable). Usage: SetParamInfo -Id hexguid|@Name [-Name text] [-Group text] [-UiMin v] [-UiMax v] [-ValidMin v] [-ValidMax v] [-HDR 0|1] [-Alpha 0|1] [-EntityField NONE|TINT|PARAM0|PARAM1]. A range is 1 to 4 numbers separated by commas (one number sets all four)."; }
+            void RegisterArguments() noexcept override
+            {
+                m_hId       = m_Parser.addOption("Id",          "The parameter: id hex or @Name",      true,  1);
+                m_hName     = m_Parser.addOption("Name",        "New name (instances are untouched)",  false, 1);
+                m_hGroup    = m_Parser.addOption("Group",       "Inspector group",                     false, 1);
+                m_hUiMin    = m_Parser.addOption("UiMin",       "Slider minimum",                      false, 1);
+                m_hUiMax    = m_Parser.addOption("UiMax",       "Slider maximum",                      false, 1);
+                m_hValidMin = m_Parser.addOption("ValidMin",    "Smallest value an instance may have", false, 1);
+                m_hValidMax = m_Parser.addOption("ValidMax",    "Largest value an instance may have",  false, 1);
+                m_hHDR      = m_Parser.addOption("HDR",         "COLOR: 1 lets rgb exceed 1",          false, 1);
+                m_hAlpha    = m_Parser.addOption("Alpha",       "COLOR: 0 forces w to 1",              false, 1);
+                m_hField    = m_Parser.addOption("EntityField", "NONE, TINT, PARAM0 or PARAM1",        false, 1);
+            }
+            static bool Vec(const std::string& Text, xmaterial::float4v& Out) noexcept
+            {
+                float V[4] = {}; int n = 0;
+                for (std::size_t Start = 0; Start <= Text.size() && n < 5;)
+                {
+                    auto End = Text.find(',', Start);
+                    if (End == std::string::npos) End = Text.size();
+                    float F = 0;
+                    const auto R = std::from_chars(Text.data() + Start, Text.data() + End, F);
+                    if (R.ec != std::errc() || R.ptr != Text.data() + End) return false;
+                    if (n < 4) V[n] = F;
+                    ++n; Start = End + 1;
+                }
+                if (n < 1 || n > 4) return false;
+                if (n == 1) V[1] = V[2] = V[3] = V[0];
+                Out = { V[0], V[1], V[2], V[3] };
+                return true;
+            }
+            std::string Apply() noexcept override
+            {
+                auto& G = m_Doc.m_Graph;
+                std::string Text, Err;
+                xmaterial::param_id ID = 0;
+                GetArg(m_Parser, m_hId, Text);
+                if (!ResolveParamText(G, Text, ID, &Err)) return Err;
+                auto D = *FindParam(G, ID);                                     // a copy: nothing changes unless every option is good
+                bool bAny = false;
+
+                if (GetArg(m_Parser, m_hName,  Text)) { if (Text.empty()) return "the name is empty"; D.m_Name = Text; bAny = true; }
+                if (GetArg(m_Parser, m_hGroup, Text)) { D.m_Group = Text; bAny = true; }
+                const std::pair<xcmdline::parser::handle, xmaterial::float4v*> Ranges[] = { { m_hUiMin, &D.m_UiMin }, { m_hUiMax, &D.m_UiMax }, { m_hValidMin, &D.m_ValidMin }, { m_hValidMax, &D.m_ValidMax } };
+                for (auto& [H, pV] : Ranges) if (GetArg(m_Parser, H, Text)) { if (!Vec(Text, *pV)) return std::format("'{}' is not 1 to 4 numbers", Text); bAny = true; }
+                for (auto [H, pB] : { std::pair{ m_hHDR, &D.m_bHDR }, std::pair{ m_hAlpha, &D.m_bAlpha } })
+                    if (GetArg(m_Parser, H, Text)) { if (Text != "0" && Text != "1") return "-HDR and -Alpha take 0 or 1"; *pB = Text == "1"; bAny = true; }
+                if (GetArg(m_Parser, m_hField, Text))
+                {
+                    const auto It = std::ranges::find_if(xmaterial::entity_field_enum_v, [&](auto& E) { return Lower(E.m_pName) == Lower(Text); });
+                    if (It == xmaterial::entity_field_enum_v.end()) return "-EntityField takes NONE, TINT, PARAM0 or PARAM1";
+                    D.m_EntityField = static_cast<xmaterial::entity_field>(It->m_Value); bAny = true;
+                }
+                if (!bAny) return "nothing to set";
+                *FindParam(G, ID) = D;
+                return {};
+            }
+            xcmdline::parser::handle m_hId, m_hName, m_hGroup, m_hUiMin, m_hUiMax, m_hValidMin, m_hValidMax, m_hHDR, m_hAlpha, m_hField;
+        };
+
+        // "param link: Input -> parameter 'Name' (id)" for every input of the node that reads one
+        inline std::string ParamLinks(const xmaterial_graph::graph& G, const xmaterial_graph::node& N) noexcept
+        {
+            std::string Out;
+            for (auto& Pin : N.m_InputPins)
+                if (Pin.m_ParamIndex >= 0 && Pin.m_ParamIndex < static_cast<int>(N.m_Params.size()) && N.m_Params[Pin.m_ParamIndex].m_ParamID != 0)
+                {
+                    const auto ID = N.m_Params[Pin.m_ParamIndex].m_ParamID;
+                    auto It = std::ranges::find(G.m_Params, ID, &xmaterial::param_decl::m_ID);
+                    Out += std::format("param link: {} -> parameter '{}' ({:016X})\n", Pin.m_Name, It == G.m_Params.end() ? "?" : It->m_Name, ID);
+                }
+            return Out;
+        }
+
+        //---- ListParams: the declarations, who reads them, where the last compile put them
+        struct list_params_cmd : xundo::query_command_base
+        {
+            graph_document& m_Doc;
+            list_params_cmd(xundo::system& System, graph_document& Doc) noexcept : query_command_base(System, "ListParams", nullptr), m_Doc(Doc) {}
+            const char* getCommandHelp() const noexcept override { return "Lists the material parameters: id, name, type, entity field, the inputs that read each, and its place in the block of the last compile. Usage: ListParams"; }
+            void RegisterArguments() noexcept override {}
+            std::string Query() noexcept override
+            {
+                if (!m_Doc.isLoaded()) return "ListParams: nothing loaded";
+                auto& G = m_Doc.m_Graph;
+
+                xmaterial::manifest Last;                                       // MaterialLayout.txt, written by the compiler beside shader.txt
+                bool bLast = false;
+                if (const auto Path = m_Doc.m_LogPath + L"/MaterialLayout.txt"; std::filesystem::exists(Path))
+                {
+                    xtextfile::stream Stream; xproperty::settings::context C{};
+                    bLast = !Stream.Open(true, Path, xtextfile::file_type::TEXT) && !xproperty::sprop::serializer::Stream(Stream, Last, C);
+                }
+
+                std::string Out;
+                for (auto& D : G.m_Params)
+                {
+                    auto Readers = ParamReaders(G, D.m_ID);
+                    std::string Where = "-";
+                    if (bLast)
+                        if (auto It = std::ranges::find(Last.m_Entries, D.m_ID, &xmaterial::manifest_entry::m_ID); It != Last.m_Entries.end())
+                            Where = It->m_Type == xmaterial::param_type::TEXTURE ? std::format("sampler {}", It->m_Sampler) : std::format("byte {}", It->m_ByteOffset);
+                    Out += std::format("{:016X}  {}  {}  entity={}  offset={}  readers={}:", D.m_ID, D.m_Name, xmaterial::param_type_enum_v[int(D.m_Type)].m_pName, xmaterial::entity_field_enum_v[int(D.m_EntityField)].m_pName, Where, Readers.size());
+                    for (auto& R : Readers) Out += " " + R;
+                    Out += '\n';
+                }
+                return Out.empty() ? "(no parameters)" : Out;
+            }
+        };
+
         //---- Queries
         struct list_node_types_cmd : xundo::query_command_base
         {
@@ -749,7 +994,7 @@ namespace xmaterial_editor
                 GetArg(m_Parser, m_hFilter, Filter);
                 auto* pNode = m_Doc.isLoaded() ? m_Doc.FindNode(Node) : nullptr;
                 if (!pNode) return "NodeProperties: no such node";
-                return ListProperties(set_node_property_cmd::TargetOf(*pNode), Filter);
+                return ListProperties(set_node_property_cmd::TargetOf(*pNode), Filter) + ParamLinks(m_Doc.m_Graph, *pNode);
             }
             xcmdline::parser::handle m_hNode, m_hFilter;
         };

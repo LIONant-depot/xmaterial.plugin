@@ -37,6 +37,16 @@ namespace xmaterial_editor
         cmds::move_section_cmd          m_MoveSection;
         cmds::delete_section_cmd        m_DeleteSection;
         cmds::set_section_collapsed_cmd m_SetSectionCollapsed;
+        cmds::expose_param_cmd          m_ExposeParam;
+        cmds::unexpose_param_cmd        m_UnexposeParam;
+        cmds::set_param_info_cmd        m_SetParamInfo;
+        cmds::list_params_cmd           m_ListParams;
+        cmds::insert_on_connection_cmd  m_InsertOnConnection;
+        cmds::duplicate_step_cmd        m_DuplicateStep;
+        cmds::list_stack_cmd            m_ListStack;
+        cmds::sources_cmd               m_Sources;
+        cmds::find_uses_cmd             m_FindUses;
+        cmds::validate_placement_cmd    m_ValidatePlacement;
 
         graph_canvas                    m_Canvas;
         xeditor::inspector_panel        m_NodeInspector{ "Node Properties" };
@@ -54,6 +64,9 @@ namespace xmaterial_editor
             , m_ListNodeTypes(m_Undo, m_Document), m_ListNodes(m_Undo, m_Document), m_NodeProperties(m_Undo, m_Document)
             , m_PlaceSteps(m_Undo, m_Document), m_RenameStep(m_Undo, m_Document), m_CreateSection(m_Undo, m_Document), m_RenameSection(m_Undo, m_Document)
             , m_MoveSection(m_Undo, m_Document), m_DeleteSection(m_Undo, m_Document), m_SetSectionCollapsed(m_Undo, m_Document)
+            , m_ExposeParam(m_Undo, m_Document), m_UnexposeParam(m_Undo, m_Document), m_SetParamInfo(m_Undo, m_Document), m_ListParams(m_Undo, m_Document)
+            , m_InsertOnConnection(m_Undo, m_Document), m_DuplicateStep(m_Undo, m_Document), m_ListStack(m_Undo, m_Document), m_Sources(m_Undo, m_Document)
+            , m_FindUses(m_Undo, m_Document), m_ValidatePlacement(m_Undo, m_Document)
             , m_Canvas(m_Document, m_Undo)
         {
             xresource_editor::WireResourcePickerCallbacks(m_NodeInspector.m_Inspector);
@@ -129,6 +142,8 @@ namespace xmaterial_editor
                 }
             }
             m_NodeInspector.Show();
+            if (auto* pNode = m_InspectedNode ? m_Document.FindNode(m_InspectedNode) : nullptr)         // the inputs that read a parameter (ExposeParam)
+                if (const auto Links = cmds::ParamLinks(m_Document.m_Graph, *pNode); !Links.empty()) ImGui::TextDisabled("%s", Links.c_str());
         }
 
         void OnNodePropertyChange(xproperty::inspector&, const xproperty::ui::undo::cmd& Cmd) noexcept
