@@ -6,6 +6,7 @@
 // an undoable command, so an AI drives it from the console); the compiled material is previewed on a mesh and the shader the compiler made is shown as
 // text. Hosts include this header and open editors through xeditor::open_resource_editors.
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_graph_canvas.h"
+#include "plugins/xmaterial.plugin/source/Editor/xmaterial_stack_commands.h"
 #include "source/Tools/Editor/xeditor_mesh_preview.h"
 #include "source/Tools/Editor/xeditor_text_widget.h"
 #include "dependencies/xresource_pipeline_v2/source/editor/xresource_editor_resources.h"
@@ -29,6 +30,13 @@ namespace xmaterial_editor
         cmds::list_node_types_cmd       m_ListNodeTypes;
         cmds::list_nodes_cmd            m_ListNodes;
         cmds::node_properties_cmd       m_NodeProperties;
+        cmds::place_steps_cmd           m_PlaceSteps;
+        cmds::rename_step_cmd           m_RenameStep;
+        cmds::create_section_cmd        m_CreateSection;
+        cmds::rename_section_cmd        m_RenameSection;
+        cmds::move_section_cmd          m_MoveSection;
+        cmds::delete_section_cmd        m_DeleteSection;
+        cmds::set_section_collapsed_cmd m_SetSectionCollapsed;
 
         graph_canvas                    m_Canvas;
         xeditor::inspector_panel        m_NodeInspector{ "Node Properties" };
@@ -44,6 +52,8 @@ namespace xmaterial_editor
             , m_CreateNode(m_Undo, m_Document), m_DeleteNode(m_Undo, m_Document), m_Connect(m_Undo, m_Document), m_Disconnect(m_Undo, m_Document)
             , m_SetShaderFile(m_Undo, m_Document), m_MoveNode(m_Undo, m_Document), m_SetNodeProperty(m_Undo, m_Document)
             , m_ListNodeTypes(m_Undo, m_Document), m_ListNodes(m_Undo, m_Document), m_NodeProperties(m_Undo, m_Document)
+            , m_PlaceSteps(m_Undo, m_Document), m_RenameStep(m_Undo, m_Document), m_CreateSection(m_Undo, m_Document), m_RenameSection(m_Undo, m_Document)
+            , m_MoveSection(m_Undo, m_Document), m_DeleteSection(m_Undo, m_Document), m_SetSectionCollapsed(m_Undo, m_Document)
             , m_Canvas(m_Document, m_Undo)
         {
             xresource_editor::WireResourcePickerCallbacks(m_NodeInspector.m_Inspector);
