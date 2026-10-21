@@ -15,7 +15,8 @@
 #include "plugins/xmaterial.plugin/source/xmaterial_runtime.h"
 #include "plugins/xmaterial.plugin/source/xmaterial_xgpu_rsc_loader.cpp"        // the resource loader: compiled once, in the host's translation unit
 
-#include <regex>
+#include "plugins/xmaterial.plugin/source/Graph/xmaterial_step_names.h"
+#include <algorithm>
 
 namespace xmaterial_editor
 {
@@ -102,7 +103,7 @@ namespace xmaterial_editor
             LoadShaderText(true);
         }
 
-        // The compiler's log names the nodes it did not like (N_<node id>): they turn red and say why.
+        // The compiler's log names the nodes it did not like (their quoted GLSL names, see StepVarName): they turn red and say why.
         void OnCompileFailed() noexcept override
         {
             ClearErrors();
@@ -112,7 +113,6 @@ namespace xmaterial_editor
                 xcontainer::lock::scope Lock(*m_CompilationLog);
                 Text = m_CompilationLog->get().m_Log;
             }
-            static const std::regex NodeName(R"(N_(\d+))");
             std::size_t Start = 0;
             while (Start < Text.size())
             {
@@ -121,10 +121,19 @@ namespace xmaterial_editor
                 const std::string Line = Text.substr(Start, End - Start);
                 Start = End + 1;
 
-                std::smatch Match;
-                if (xstrtool::findI(Line, "ERROR:") == std::string::npos || !std::regex_search(Line, Match, NodeName)) continue;
+                if (xstrtool::findI(Line, "ERROR:") == std::string::npos) continue;
                 for (auto& [Id, pNode] : m_Document.m_Graph.m_InstanceNodes)
-                    if (std::to_string(Id.m_Value) == Match[1].str()) { pNode->m_HasErrMsg = true; pNode->m_ErrMsg = Line; }
+                    for (int Out = 0; Out < std::max<int>(1, (int)pNode->m_OutputPins.size()); ++Out)
+                    {
+                        // The name is quoted by the compiler, so it must end there: 'uv' or 'uv.x', not 'uv2'
+                        const std::string Var = "'" + xmaterial_graph::StepVarName(*pNode, Out);
+                        for (auto At = Line.find(Var); At != std::string::npos; At = Line.find(Var, At + 1))
+                        {
+                            const auto Stop = At + Var.size();
+                            if (Stop < Line.size() && (std::isalnum((unsigned char)Line[Stop]) || Line[Stop] == '_')) continue;
+                            pNode->m_HasErrMsg = true; pNode->m_ErrMsg = Line; break;
+                        }
+                    }
             }
         }
 

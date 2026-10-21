@@ -19,6 +19,7 @@
 
 
 #include "source/xmaterial_data_file.h"
+#include "source/Graph/xmaterial_step_names.h"
 
 #include "plugins/xmaterial_instance.plugin/source/xmaterial_intance_descriptor.h"
 
@@ -247,10 +248,7 @@ namespace xmaterial_compiler
             }
         }
 
-        std::string PinToVarName(const node& n)
-        {
-            return "N_" + std::to_string(n.m_Guid.m_Value);
-        }
+        std::string PinToVarName(const node& n, int OutIdx = 0) { return StepVarName(n, OutIdx); }
 
         std::string GetInputExpr(const graph& g, const node& n, int pinIndex, int paramIndex, bool requireConnectionOnly)
         {
@@ -284,7 +282,7 @@ namespace xmaterial_compiler
                                 }
                                 return outPin->m_DefaultExpr;
                             }
-                            auto baseVar = PinToVarName(*srcNode);
+                            auto baseVar = PinToVarName(*srcNode, idx);
                             if (sub >= 0 && sub < 4) // sub-output like .x/.y/.z/.w
                             {
                                 static const char* swizzle[4] = { "x","y","z","w" };
