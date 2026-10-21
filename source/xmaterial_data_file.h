@@ -8,7 +8,10 @@ namespace xmaterial
 {
     struct data_file
     {
-        inline static constexpr auto xserializer_version_v = 2;    // v2: second shader, the scene-linear HDR variant for xLIONRender
+        // v2: second shader, the scene-linear HDR variant for xLIONRender
+        // v3: the parameter block: layout hash + byte size + the default block (documentation/material_contract.md section 2). A v2 file (older size and version) is refused by
+        //     the serializer and loads as null, exactly like an uncompiled resource; the pipeline recompiles it because the compiler executable is newer.
+        inline static constexpr auto xserializer_version_v = 3;
 
         struct flags
         {
@@ -62,6 +65,9 @@ namespace xmaterial
         xrsc::texture_ref*  m_pDefaultTextures; 
         flags               m_Flags;
         std::uint8_t        m_nDefaultTextures;
+        std::uint16_t       m_BlockBytes;               // the material's parameter block, a multiple of 16 (0: the shader reads no parameters)
+        float*              m_pDefaultBlock;            // m_BlockBytes/4 floats: every parameter at its default (the material's own instance)
+        std::uint64_t       m_LayoutHash;               // xmaterial::Hash of the manifest: a material instance must carry the same
     };
 
     //-------------------------------------------------------------------------
@@ -91,6 +97,9 @@ namespace xserializer::io_functions
         || (Err = Stream.Serialize(Material.m_nDefaultTextures))
         || (Err = Stream.Serialize(Material.m_pShaderHDR, Material.m_ShaderSizeHDR))
         || (Err = Stream.Serialize(Material.m_ShaderSizeHDR))
+        || (Err = Stream.Serialize(Material.m_pDefaultBlock, Material.m_BlockBytes / 4u))
+        || (Err = Stream.Serialize(Material.m_BlockBytes))
+        || (Err = Stream.Serialize(Material.m_LayoutHash))
         ;
 
         return Err;

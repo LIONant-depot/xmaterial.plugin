@@ -12,6 +12,10 @@
 #include <fstream>
 #include <cerrno>   // for errno
 #include <iostream>
+#include <bit>
+#include <cmath>
+#include <map>
+#include <format>
 
 
 #include "source/xmaterial_data_file.h"
@@ -106,8 +110,143 @@ namespace xmaterial_compiler
 
 
     using namespace xmaterial_graph;
+    static std::uint64_t Fnv(const std::vector<uint32_t>& V) { std::uint64_t H = 14695981039346656037ull; for (auto w : V) for (int i = 0; i < 4; ++i) { H ^= (w >> (8 * i)) & 0xff; H *= 1099511628211ull; } return H; }
     struct implementation final : xmaterial_compiler::instance
     {
+        //-----------------------------------------------------------------
+        // Parameters (documentation/material_contract.md sections 2-4, 10)
+        //-----------------------------------------------------------------
+        std::map<xmaterial::param_id, xmaterial::param_type>    m_Reads;                // every parameter a connected input reads, and as which type
+        std::map<xmaterial::param_id, int>                      m_TexIndex;             // TEXTURE parameter -> index of the first texture that reads it
+        xmaterial::manifest                                     m_Manifest;
+        bool                                                    m_bManifest = false;
+        bool                                                    m_bFailed   = false;
+
+        void Fail(const std::string& Message) { m_bFailed = true; LogMessage(xresource_pipeline::msg_type::ERROR, Message); }
+
+        // Shortest text that parses back to the same float, always a GLSL float literal (not "1")
+        static std::string FloatLiteral(float V)
+        {
+            if (not std::isfinite(V)) return std::format("uintBitsToFloat(0x{:08x}u)", std::bit_cast<std::uint32_t>(V));
+            auto S = std::format("{}", V);
+            if (S.find_first_of(".eE") == std::string::npos) S += ".0";
+            return S;
+        }
+
+        static int Components(xmaterial::param_type T)
+        {
+            switch (T) { case xmaterial::param_type::FLOAT: return 1; case xmaterial::param_type::FLOAT2: return 2; case xmaterial::param_type::FLOAT3: return 3; default: return 4; }
+        }
+
+        static bool EntityFieldFits(xmaterial::entity_field F, xmaterial::param_type T)
+        {
+            using namespace xmaterial;
+            if (F == entity_field::TINT) return T == param_type::COLOR || T == param_type::FLOAT4 || T == param_type::FLOAT3;
+            return T == param_type::FLOAT || T == param_type::FLOAT2 || T == param_type::FLOAT3 || T == param_type::FLOAT4;      // PARAM0/1: not COLOR
+        }
+
+        // Defaults as the instance resolver will clamp them (validRange, HDR, alpha)
+        static xmaterial::float4v ResolveDefault(const xmaterial::param_decl& D)
+        {
+            float V[4] = { D.m_Default.m_X, D.m_Default.m_Y, D.m_Default.m_Z, D.m_Default.m_W };
+            const float Lo[4] = { D.m_ValidMin.m_X, D.m_ValidMin.m_Y, D.m_ValidMin.m_Z, D.m_ValidMin.m_W }, Hi[4] = { D.m_ValidMax.m_X, D.m_ValidMax.m_Y, D.m_ValidMax.m_Z, D.m_ValidMax.m_W };
+            for (int i = 0; i < 4; ++i) V[i] = std::clamp(V[i], Lo[i], Hi[i]);
+            if (D.m_Type == xmaterial::param_type::COLOR)
+            {
+                if (not D.m_bHDR) for (int i = 0; i < 3; ++i) V[i] = std::clamp(V[i], 0.0f, 1.0f);
+                if (not D.m_bAlpha) V[3] = 1.0f;
+            }
+            return { V[0], V[1], V[2], V[3] };
+        }
+
+        // Checks the reads against the declarations, packs the manifest. Everything it reports is logged with the contract's code.
+        void BuildManifest(const graph& g)
+        {
+            using namespace xmaterial;
+            m_bManifest = true;
+
+            auto Decls = g.m_Params;
+            std::vector<param_id> Used;
+            std::array<param_id, 4> Owner = {};                                     // entity field -> the parameter that has it
+
+            for (const auto& [ID, ReadType] : m_Reads)
+            {
+                auto pDecl = std::ranges::find(Decls, ID, &param_decl::m_ID);
+                if (pDecl == Decls.end())               { Fail(std::format("E_PARAM_TYPE: an input reads parameter {:016X}, which the material does not declare", ID)); continue; }
+                if (pDecl->m_Type != ReadType)          { Fail(std::format("E_PARAM_TYPE: parameter '{}' ({:016X}) is declared with another type than its input", pDecl->m_Name, ID)); continue; }
+                if (pDecl->m_Kind != param_kind::DYNAMIC){ Fail(std::format("E_PARAM_TYPE: parameter '{}' ({:016X}) is not dynamic, it can not be read yet", pDecl->m_Name, ID)); continue; }
+                Used.push_back(ID);
+
+                // Entity override: the field must fit the type and be owned once (the later ID loses), otherwise it is dropped and the material value is read
+                if (auto F = pDecl->m_EntityField; F != entity_field::NONE)
+                {
+                    auto& O = Owner[int(F)];
+                    if (pDecl->m_Type == param_type::TEXTURE || not EntityFieldFits(F, pDecl->m_Type) || O != 0)
+                    {
+                        LogMessage(xresource_pipeline::msg_type::ERROR, std::format("E_ENTITY_FIELD: parameter '{}' ({:016X}) can not use the entity field {}, the entity override is dropped", pDecl->m_Name, ID, int(F)));
+                        pDecl->m_EntityField = entity_field::NONE;
+                    }
+                    else O = ID;
+                }
+            }
+
+            for (const auto& D : Decls)
+                if (not m_Reads.contains(D.m_ID)) LogMessage(xresource_pipeline::msg_type::WARNING, std::format("W_UNUSED: parameter '{}' ({:016X}) is declared but nothing reads it", D.m_Name, D.m_ID));
+
+            m_Manifest = Pack(Decls, Used);
+
+            // The sampler is the texture's slot (1.. in texture order), not the packer's guess. Same slot for a texture read by several inputs: the first wins [ponytail: one slot per parameter]
+            for (auto& E : m_Manifest.m_Entries)
+                if (E.m_Type == param_type::TEXTURE)
+                {
+                    if (auto It = m_TexIndex.find(E.m_ID); It != m_TexIndex.end()) E.m_Sampler = std::uint8_t(It->second + 1);
+                }
+            m_Manifest.m_LayoutHash = Hash(m_Manifest);
+        }
+
+        // The GLSL that reads one parameter (an entity field, when it has one and the pass is not the LDR preview, replaces the material value)
+        std::string ReadExpr(const xmaterial::manifest_entry& E) const
+        {
+            const int         n   = Components(E.m_Type);
+            const int         c   = (E.m_ByteOffset % 16) / 4;
+            const std::string Mat = std::format("g_Mat.P[XMAT_BASE + {}u].{}", E.m_ByteOffset / 16, std::string_view("xyzw").substr(c, n));
+            if (E.m_EntityField == xmaterial::entity_field::NONE) return Mat;
+
+            static constexpr const char* Field[] = { "", "Tint", "P0", "P1" };
+            return std::format("XMAT_ENT({}u, {}, {}, {})", 1u << (int(E.m_EntityField) - 1), Field[int(E.m_EntityField)], std::string_view("xyzw").substr(0, n), Mat);
+        }
+
+        // The [TOP] declarations of a material with a block (section 2). Nothing at all when no parameter is read: those shaders do not change.
+        std::string ParamTop(void) const
+        {
+            if (m_Manifest.m_BlockBytes == 0) return {};
+
+            bool bEntity = false;
+            for (const auto& E : m_Manifest.m_Entries) bEntity |= E.m_EntityField != xmaterial::entity_field::NONE;
+
+            std::string S = "layout(std430, set = 1, binding = 9) readonly buffer MaterialParamsBuf { vec4 P[]; } g_Mat;\n#ifdef XLION_LDR_OUTPUT\n    #define XMAT_BASE 0u\n";
+            if (bEntity) S += "    #define XMAT_ENT(Bit, Field, Swz, Mat) (Mat)\n";
+            S += "#else\n    layout(push_constant) uniform XMatPush { layout(offset = 16) uint MaterialBase; } g_XMatPush;\n    #define XMAT_BASE g_XMatPush.MaterialBase\n";
+            if (bEntity)
+                S += "    struct XMatEntity { uvec4 H; vec4 Tint; vec4 P0; vec4 P1; };\n"
+                     "    layout(std430, set = 1, binding = 10) readonly buffer EntityParamsBuf { XMatEntity E[]; } g_Ent;\n"
+                     "    layout(location = 8) flat in uint InInstance;\n"
+                     "    #define XMAT_ENT(Bit, Field, Swz, Mat) ((g_Ent.E[InInstance].H.x & Bit) != 0u ? g_Ent.E[InInstance].Field.Swz : (Mat))\n";
+            S += "#endif\n";
+            return S;
+        }
+
+        // Swaps the read placeholders (\x01 ID \x02) for the reads
+        void ResolveReads(std::string& Code) const
+        {
+            for (size_t At; (At = Code.find('\x01')) != std::string::npos; )
+            {
+                const auto ID  = std::stoull(Code.substr(At + 1, 16), nullptr, 16);
+                const auto pE  = std::ranges::find(m_Manifest.m_Entries, ID, &xmaterial::manifest_entry::m_ID);
+                Code.replace(At, 18, pE == m_Manifest.m_Entries.end() ? "0.0" : ReadExpr(*pE));      // a failed parameter: the compile fails anyway
+            }
+        }
+
         std::string PinToVarName(const node& n)
         {
             return "N_" + std::to_string(n.m_Guid.m_Value);
@@ -170,11 +309,25 @@ namespace xmaterial_compiler
             if (paramIndex >= 0 && paramIndex < static_cast<int>(n.m_Params.size()))
             {
                 const auto& prop = n.m_Params[paramIndex];
+
+                // A declared parameter: the input reads the material block instead of its literal (resolved to the packed offset once every reader is known)
+                if (prop.m_ParamID != 0)
+                {
+                    const auto Type = prop.m_Type == node_param::type::FLOAT ? xmaterial::param_type::FLOAT : xmaterial::param_type::TEXTURE;
+                    if (prop.m_Type != node_param::type::FLOAT && prop.m_Type != node_param::type::TEXTURE_RESOURCE)
+                        Fail(std::format("E_PARAM_TYPE: node '{}' input '{}' reads parameter {:016X} but only float and texture inputs can", n.m_Name, prop.m_Name, prop.m_ParamID));
+                    else if (auto [It, bNew] = m_Reads.emplace(prop.m_ParamID, Type); not bNew && It->second != Type)
+                        Fail(std::format("E_PARAM_TYPE: inputs sharing parameter {:016X} disagree on the type", prop.m_ParamID));
+
+                    if (Type == xmaterial::param_type::FLOAT)
+                        return std::format("\x01{:016X}\x02", prop.m_ParamID);
+                }
+
                 if (prop.m_Value.m_pType)
                 {
                     auto guid = prop.m_Value.m_pType->m_GUID;
                     if (guid == xproperty::settings::var_type<float>::guid_v)
-                        return std::to_string(prop.m_Value.get<float>());
+                        return FloatLiteral(prop.m_Value.get<float>());
                     if (guid == xproperty::settings::var_type<int>::guid_v)
                         return std::to_string(prop.m_Value.get<int>());
                     if (guid == xproperty::settings::var_type<std::string>::guid_v)
@@ -182,6 +335,7 @@ namespace xmaterial_compiler
                     if (guid == xproperty::settings::var_type<xresource::full_guid>::guid_v)
                     {
                         g.m_FinalTextureNodes.m_Textures.emplace_back(&n, paramIndex);
+                        if (prop.m_ParamID != 0) m_TexIndex.emplace(prop.m_ParamID, int(g.m_FinalTextureNodes.m_Textures.size() - 1));
                         return std::to_string(g.m_FinalTextureNodes.m_Textures.size() - 1);
                     }
 
@@ -350,7 +504,12 @@ namespace xmaterial_compiler
                     botCode += code;
             }
 
-            ss << topCode << "\n";
+            // Now that every reader is known: pack the parameters, then turn the read placeholders into reads
+            BuildManifest(g);
+            ResolveReads(topCode);
+            ResolveReads(botCode);
+
+            ss << ParamTop() << topCode << "\n";
             ss << "void main() \n{\n";
             ss << botCode;
             ss << "}\n";
@@ -370,6 +529,13 @@ namespace xmaterial_compiler
             Graph.serialize(Graph, true, DescriptorFileName);
 
             const auto& shaderString = GenerateGLSL(Graph);
+            if (not m_bManifest) BuildManifest(Graph);                  // a shader-file material reads no parameters: its manifest is only the declarations
+
+            if (Graph.m_FinalTextureNodes.m_Textures.size() > 7)
+                Fail(std::format("E_TOO_MANY_TEXTURES: {} material textures, the samplers 1-7 are all there is", Graph.m_FinalTextureNodes.m_Textures.size()));
+
+            if (m_bFailed)
+                return xerr::create_f<state, "The material parameters are not valid (see the log for the E_ codes)">();
 
             LogMessage(xresource_pipeline::msg_type::INFO, std::format("Setting the working path to : {}", xstrtool::To(m_ProjectPaths.m_Project)));
             std::filesystem::current_path(m_ProjectPaths.m_Project);
@@ -451,7 +617,7 @@ namespace xmaterial_compiler
             //
             // Export the compiled material
             //
-            LogMessage(xresource_pipeline::msg_type::INFO, std::format("Shader compiled successfully! SPIR-V size: {} words (HDR variant {}).\n", spirv.size(), spirvHDR.size()) );
+            LogMessage(xresource_pipeline::msg_type::INFO, std::format("Shader compiled successfully! SPIR-V size: {} words (HDR variant {}). Hash {:016x}/{:016x}\n", spirv.size(), spirvHDR.size(), Fnv(spirv), Fnv(spirvHDR)) );
 
 
             //
@@ -477,6 +643,32 @@ namespace xmaterial_compiler
             MaterialDataFile.m_Flags.m_bAlpha   = false;
             MaterialDataFile.m_pDefaultTextures = Graph.m_FinalTextureNodes.m_Textures.empty()? nullptr : Textures.get();
             MaterialDataFile.m_nDefaultTextures = static_cast<std::uint8_t>(Graph.m_FinalTextureNodes.m_Textures.size());
+
+            // The parameter block: every parameter at its default, in the manifest's layout
+            std::vector<float> DefaultBlock(m_Manifest.m_BlockBytes / 4, 0.0f);
+            for (const auto& E : m_Manifest.m_Entries)
+            {
+                if (E.m_Type == xmaterial::param_type::TEXTURE) continue;
+                const auto  D = ResolveDefault(*std::ranges::find(m_Manifest.m_Decls, E.m_ID, &xmaterial::param_decl::m_ID));
+                const float V[4] = { D.m_X, D.m_Y, D.m_Z, D.m_W };
+                for (int i = 0; i < Components(E.m_Type); ++i) DefaultBlock[E.m_ByteOffset / 4 + i] = V[i];
+            }
+            MaterialDataFile.m_BlockBytes       = m_Manifest.m_BlockBytes;
+            MaterialDataFile.m_pDefaultBlock    = DefaultBlock.empty() ? nullptr : DefaultBlock.data();
+            MaterialDataFile.m_LayoutHash       = m_Manifest.m_LayoutHash;
+
+            //
+            // Save the layout manifest: the one place that says where each parameter lives (instance compiler, editor and runtime read it)
+            //
+            {
+                xtextfile::stream Stream;
+                if ( auto Err = Stream.Open(false, std::format(L"{}/{}.log/MaterialLayout.txt", m_ProjectPaths.m_ResourcesLogs, m_ResourcePartialPath), xtextfile::file_type::TEXT); Err )
+                    return xerr::create_f<state, "Fail to open the file to save the material layout">(Err);
+
+                xproperty::settings::context C;
+                if ( auto Err = xproperty::sprop::serializer::Stream( Stream, m_Manifest, C); Err )
+                    return xerr::create_f<state, "Fail to save the material layout">(Err);
+            }
 
             //
             // Save the material instance template
