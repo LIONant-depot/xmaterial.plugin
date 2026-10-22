@@ -1293,7 +1293,7 @@ namespace xmaterial_editor
             if (!pMain || !pIn || (m_Comp.m_Conn && !pConn)) { ImGui::CloseCurrentPopup(); ImGui::EndPopup(); return; }
             const int nOut = Components(G, pMain->m_TypeGUID), nIn = Components(G, pIn->m_TypeGUID);
             const char* L = ComponentLetters(pMain->m_TypeGUID);
-            auto Show = [&](const std::string& Ask) { std::string S = Ask; for (auto& c : S) if (auto k = std::string_view("xyzw").find(c); k != std::string_view::npos) c = L[k]; return "." + S; };
+            auto Show = [&](const std::string& Ask) { std::string S = Ask.size() == 1 && nIn >= 2 ? std::string(nIn, Ask[0]) : Ask; for (auto& c : S) if (auto k = std::string_view("xyzw").find(c); k != std::string_view::npos) c = L[k]; return "." + S; };
             auto Apply = [&](const std::string& Ask)
             {
                 const auto P = PickComponents(G, *pMain, Ask, *pIn);

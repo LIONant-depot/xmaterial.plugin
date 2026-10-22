@@ -5,6 +5,7 @@
 #include "xmaterial_graph_node.h"
 #include "xmaterial_stack.h"
 #include "../xmaterial_params.h"
+#include "../xmaterial_render_settings.h"
 #include "dependencies/xresource_guid/source/xresource_guid.h"
 #include "dependencies/xerr/source/xerr.h"
 #include <unordered_map>
@@ -59,27 +60,6 @@ namespace xmaterial_graph
 
     xerr RefreshShaderOnlyNode(std::wstring ShaderFileName, node& Node, std::string& Shader);
 
-/*
-    struct xxx
-    {
-        xrsc::rendering_pipeline    m_RenderingPipeline;
-
-        // BLEND options?
-
-        // SORTED OPTIONS? (alpha (back to front), alpha (post-alpha blend) vs opaque?)
-
-        // CULLING ORDER (CCW/CW/NONE)
-
-        // WIRE-FRAME, SOLID, SOLID-AA?
-
-        XPROPERTY_DEF
-        ( "connection", connection
-        , obj_member<"ConnectionGuid",  &connection::m_Guid,            member_flags<flags::DONT_SAVE>>
-        )
-    };
-    XPROPERTY_REG(connection)
-*/
-
     struct graph
     {
         sType&              CreateType              (type_guid Guid = type_guid{ xresource::guid_generator::Type64() });
@@ -105,6 +85,7 @@ namespace xmaterial_graph
         final_texture_nodes                                                 m_FinalTextureNodes;
         std::vector<xmaterial::param_decl>                                  m_Params;           // declared material parameters (file v3)
         stack                                                               m_Stack;            // organisation: sections and the order of their steps
+        xmaterial::render_settings                                          m_Render;           // the material's pipeline settings, edited on its output nodes (file v4)
         bool                                                                m_bSubgraph = false; // a MaterialSubgraph's graph (never saved: the resource type says it): Group Input/Output instead of material outputs
     };
 

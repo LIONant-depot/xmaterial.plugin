@@ -273,24 +273,35 @@ namespace xmaterial_compiler
                         const pin* outPin = g.findPinConst(*srcNode, conn.m_OutputPinGuid, dummy, idx, sub);
                         if (outPin)
                         {
-                            // The source: a direct GLSL expr (like "In.Color" or "In.UV") or the step's variable, a sub-element as .x/.y/.z/.w
+                            // The source: a direct GLSL expr (like "In.Color" or "In.UV") or the step's variable
                             std::string E = outPin->m_DefaultExpr.empty() ? PinToVarName(*srcNode, idx) : outPin->m_DefaultExpr;
-                            if (sub >= 0 && sub < 4) E += std::string(".") + "xyzw"[sub];
 
-                            // The components it gives (1 float, N vecN), then the input takes: the connection's swizzle, or the first ones of a
-                            // longer vector (truncation); a float feeding a vecN input is splatted: vecN(x) (the rules: AreTypesCompatible, xmaterial_graph_editing.h)
+                            // The components it gives (1 float, N vecN), then the input takes: the connection's swizzle, or the first ones of a longer vector
+                            // (truncation); a vector input spells every component out, whatever it takes (Vec4.xyzw, Vec2.xxxx, Albedo.xyz) inside a constructor of the
+                            // input's type: vec4(Vec2.xxxx) (the rules: AreTypesCompatible, xmaterial_graph_editing.h). A float input keeps the plain expression
                             auto* pI = g.findType(ip.m_TypeGUID);
                             int nOut = xmaterial_graph::Components(g, outPin->m_TypeGUID);
                             const int nIn = xmaterial_graph::Components(g, ip.m_TypeGUID);
+                            if (nIn >= 2)
+                            {
+                                std::string S;                                                      // the letters the input's components take
+                                if (sub >= 0 && sub < 4) S = std::string(nIn, "xyzw"[sub]);
+                                else if (!conn.m_Swizzle.empty())
+                                {
+                                    if (conn.m_Swizzle.size() > 4 || conn.m_Swizzle.find_first_not_of(std::string_view("xyzw", std::max(0, std::min(nOut, 4)))) != std::string::npos)
+                                        Fail(std::format("E_SWIZZLE: node '{}' input '{}' takes .{} of a source without those components", n.m_Name, ip.m_Name, conn.m_Swizzle));
+                                    S = conn.m_Swizzle;
+                                }
+                                else S = nOut >= nIn ? std::string("xyzw", nIn) : std::string(nIn, 'x');       // the whole (or its first ones), or a whole float splatted
+                                return pI->m_CodeString + "(" + E + "." + S + ")";
+                            }
+                            if (sub >= 0 && sub < 4) E += std::string(".") + "xyzw"[sub];
                             if (!conn.m_Swizzle.empty())
                             {
                                 if (sub >= 0 || conn.m_Swizzle.size() > 4 || conn.m_Swizzle.find_first_not_of(std::string_view("xyzw", std::max(0, std::min(nOut, 4)))) != std::string::npos)
                                     Fail(std::format("E_SWIZZLE: node '{}' input '{}' takes .{} of a source without those components", n.m_Name, ip.m_Name, conn.m_Swizzle));
                                 E += "." + conn.m_Swizzle;
-                                nOut = static_cast<int>(conn.m_Swizzle.size());
                             }
-                            else if (nIn >= 2 && nOut > nIn) { E += "." + std::string("xyzw", nIn); nOut = nIn; }
-                            if (nOut == 1 && nIn > 1) E = pI->m_CodeString + "(" + E + ")";
                             return E;
                         }
                     }

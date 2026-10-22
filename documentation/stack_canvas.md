@@ -34,7 +34,7 @@ source/Editor/xmaterial_graph_widgets.h     param widgets moved out of xmaterial
   reusable interface.
 - Move ≠ insert. Moving changes presentation and keeps bindings. Inserting on a connection routes that connection through the new step.
   Moving to another section changes organisation only. Duplicating copies bindings explicitly.
-- Type rule: a connection needs equal types, except that a float (or a sub-element such as `Vec2.x`) may feed a vec2/vec3/vec4 input, compiled as a splat `vecN(x)`; types of one GLSL type connect (`Color` and `Vector4`, both `vec4`); a longer vector feeds a shorter vector input, taking its first components (truncation, compiled `.xyz`, shown on the chip, §6.5); a narrower vector into a wider input, float to int and vector to scalar are refused (a sub-element or a swizzle, §6.5, picks components). Colour spaces are guarded: an `SColor` (sRGB-encoded) feeds only `SColor` inputs and a `Color` (linear) never feeds an `SColor` input, refused with "SColor is sRGB-encoded; convert with 'SColor To Color'" / "Color is linear; convert with 'Color To SColor'" (material_contract.md §3). The rule is `AreTypesCompatible` (types alone) under `IsPinCompatible`, its message `TypesDiffer`, all in `xmaterial_graph_editing.h`.
+- Type rule: a connection needs equal types, except that a float (or a sub-element such as `Vec2.x`) may feed a vec2/vec3/vec4 input, compiled as a splat `vec4(Vec2.xxxx)`; types of one GLSL type connect (`Color` and `Vector4`, both `vec4`); a longer vector feeds a shorter vector input, taking its first components (truncation, compiled `vec3(Albedo.xyz)`, shown on the chip, §6.5); a narrower vector into a wider input, float to int and vector to scalar are refused (a sub-element or a swizzle, §6.5, picks components). Colour spaces are guarded: an `SColor` (sRGB-encoded) feeds only `SColor` inputs and a `Color` (linear) never feeds an `SColor` input, refused with "SColor is sRGB-encoded; convert with 'SColor To Color'" / "Color is linear; convert with 'Color To SColor'" (material_contract.md §3). The rule is `AreTypesCompatible` (types alone) under `IsPinCompatible`, its message `TypesDiffer`, all in `xmaterial_graph_editing.h`.
 - No auto-wiring by type. A binding is made only by an explicit pick. If several ports fit, the user chooses.
 - The system owns every route: wires never cross steps, direction picks the side, distance picks the lane, one trunk per source output.
 - Step names are identity for people (chips, console symbols, GLSL variable names). GUIDs stay the identity for storage and undo.
@@ -341,7 +341,7 @@ waits at the bottom of column 0.
 ## 6. Source chips
 
 Every connected input row shows, after the input's name, a flat chip with the source's name: `StepName` for a single-output step,
-`StepName.Output` for multi-output (`Wetness.Roughness`), `StepName.x` for a sub-element, then the components the input takes when it does not take all of them (§6.5: `Albedo.xyz`, `Albedo.zyx`). Chips never change with zoom or distance. An
+`StepName.Output` for multi-output (`Wetness.Roughness`), `StepName.x` for a sub-element, then, for a vector input, one letter per component it receives, never shorthand (§6.5: `Vec4.xyzw`, `Vec2.xxxx`, `Albedo.xyz`, `Albedo.zyx`; a float input shows its single component, `Vec2.x`). Chips never change with zoom or distance. An
 unconnected input shows no chip: its literal sits outside the step (§4.2).
 
 | Gesture on a chip | Result | Command |
@@ -368,22 +368,22 @@ is always visible on the chip. How others do it: Unreal truncates a float4 into 
 RGB/R/G/B/A outputs on Texture Sample; Unity truncates and pads, with Split/Swizzle/Combine nodes; Godot truncates and puts an expand arrow on
 vector outputs that reveals x/y/z/w ports; Blender has Separate/Combine nodes. Here (no new node: the components are a property of the input):
 
-- **Truncation**: a longer vector feeds a shorter vector input, taking its first components; the chip shows it (`Albedo.xyz`). Widening is
+- **Truncation**: a longer vector feeds a shorter vector input, taking its first components; the chip shows it (`Albedo.xyz`; a whole vec4 into a vec4 reads `Vec4.xyzw`, a component splatted `Vec2.xxxx`; colours use `rgba`). Widening is
   refused (a component splats; a swizzle as long as the input widens explicitly: `.xyxy`). A vector never feeds a float implicitly (which
   component is a choice). SColor stays guarded (no components).
 - **Component pins**: the arrow left of a vector output's name shows its components as pins on rows of their own (`.x .y .z .w`, `.r .g .b .a`
   for a Color; view state, `stack_view::m_Open`); while one of them is connected they stay shown, so a component's route always leaves from its
   own pin. While an input is dragged over a vector output whose components are hidden, they fan out beside its pin (an overlay: the layout does
   not move): release on one to connect it.
-- **The picker**: a chip's component suffix (`.xyz`, `.a`, underlined), chip menu Components..., or `.` on a focused chip; and a drop the types
+- **The picker**: a chip's component suffix (`.xyzw`, `.xxxx`, `.a`, underlined), chip menu Components..., or `.` on a focused chip; and a drop the types
   refuse but components can fix (a Vec4 onto a float input, a Vec2 onto a vec4) opens it at the drop. It lists all of it (or its first
-  components), the other runs as long as the input (`.yzw`), each component (splatted into a vector input), and a field to type any swizzle
+  components), the other runs as long as the input (`.yzw`), each component (splatted into a vector input: `.xxxx`), and a field to type any swizzle
   (`bgr`, `xxyy`, Enter; focused when it opens, so a pick is letters + Enter).
 
 One form for each meaning (`PickComponents`, `xmaterial_graph_editing.h`), so both canvases and the compiler agree: one component (or one
 repeated) is the output's sub-element connection (what the old canvas's sub-element pins make); the first components in order are no swizzle
 (truncation or exact); anything else is `connection::m_Swizzle` (2 to 4 letters, `xyzw`, as long as the input), compiled as `.zyx` after the
-source. Commands: `Connect -Swizzle`, `SetInputSwizzle -Input -Swizzle <letters>|all` (the connection keeps its id); `InsertOnConnection`
+source. A vector input always spells every component out, in the chip and in the GLSL, inside a constructor of the input's type: `vec4(Vec2.xxxx) + vec4(Vec4.xyzw)`, `vec3(Albedo.xyz)` (only where a vector input reads another step's output, not literals or parameter reads; a float input keeps the plain expression). Commands: `Connect -Swizzle`, `SetInputSwizzle -Input -Swizzle <letters>|all` (the connection keeps its id); `InsertOnConnection`
 keeps the swizzle on the new step's input when it fits, `DuplicateStep` copies it. The file stores `Swizzle` only on connections that have one
 (like `ParamID`): files without swizzles stay byte-identical and older files read as before, so no version bump was needed.
 
@@ -639,8 +639,8 @@ segments crossing steps = 0, order invariant holds, one undo step per gesture, u
 | 9 | Invalid connection | Vec3 output onto Float input; producer below consumer; a cycle | type and cycle refused with the message, no history; order case (producer below consumer): `Connect` moves the consumer and its dependents after the producer, one undo step (§7.3's popup was not built) | history size unchanged for refusals |
 | 11 | Texture RGB into a vec3 input (§6.5) | drag the Texture's output onto the colour input | connects, chip `Albedo.xyz` | drags 1; undo steps 1 |
 | 12 | Texture alpha as a float mask | from the alpha input over the Texture's pin to the fanned `.w`; then by the drop picker; then by the arrow | chip `Albedo.w`, the output's component pins shown | fan 1 drag; picker 1 drag + 2 keys; arrow 1 click + 1 drag; undo steps 1 each |
-| 13 | Vec2.x splat into a vec4 input | from the vec4 input over the Vec2's pin to the fanned `.x` | chip `UV2.x` | drags 1; undo steps 1 |
-| 14 | Swizzle from the chip | click the suffix of `Albedo.xyz`, type `bgr`, Enter; then `w`; `SetInputSwizzle all`; wrong lengths | `Albedo.zyx` (connection id kept), `Albedo.w`, back to `Albedo.xyz`, refusals change nothing | 1 click + 4 keys; undo steps 1 each |
+| 13 | Vec2.x splat into a vec4 input | from the vec4 input over the Vec2's pin to the fanned `.x` | chip `UV2.xxxx` | drags 1; undo steps 1 |
+| 14 | Swizzle from the chip | click the suffix of `Albedo.xyz`, type `bgr`, Enter; then `w`; `SetInputSwizzle all`; wrong lengths | `Albedo.zyx` (connection id kept), `Albedo.www`, back to `Albedo.xyz`, refusals change nothing | 1 click + 4 keys; undo steps 1 each |
 | 10 | Add one node to a large material | 200 steps; background menu Add step, then one reorder drag | the unwired new step waits at the bottom of column 0, nothing else moves; the drag preview costs one layout per slot change | steps moved by the add = 0; layout ms (`[A]` budget 2 ms; ~8 ms at 200 steps in release, §4.4 ponytail) |
 
 ### Results (2026-10-22, Debug xLION.exe, `test_material_stack_canvas.py`: 10 passed in 170 s)

@@ -157,21 +157,24 @@ namespace xmaterial_editor
         return R;
     }
 
-    // The components an input takes from its source, as the chip shows them after the source: "xyz" (a swizzle or truncation), "a" (a sub-element), "" (all of it)
+    // The components an input takes from its source, as the chip shows them after the source, one letter per component of a vector input (never shorthand):
+    // "xyzw" (the whole), "xxxx" (a splat), "xyz" (truncation), "zyx" (a swizzle); a float input shows its single component ("x", "a") or nothing (all of it)
     inline std::string TakenComponents(const xmaterial_graph::graph& G, const xmaterial_graph::connection& C, const xmaterial_graph::pin& In) noexcept
     {
         auto* pMain = MainOutput(G, C.m_OutputPinGuid);
         if (!pMain) return {};
         const char* L = ComponentLetters(pMain->m_TypeGUID);
-        for (std::size_t k = 0; k < pMain->m_SubElements.size() && k < 4; ++k) if (pMain->m_SubElements[k].m_PinGUID == C.m_OutputPinGuid) return std::string(1, L[k]);
+        const int nOut = Components(G, pMain->m_TypeGUID), nIn = Components(G, In.m_TypeGUID);
+        const std::size_t nVec = nIn >= 2 ? static_cast<std::size_t>(nIn) : 1;
+        for (std::size_t k = 0; k < pMain->m_SubElements.size() && k < 4; ++k) if (pMain->m_SubElements[k].m_PinGUID == C.m_OutputPinGuid) return std::string(nVec, L[k]);
         if (!C.m_Swizzle.empty())
         {
             std::string S = C.m_Swizzle;
             for (auto& c : S) if (auto k = std::string_view("xyzw").find(c); k != std::string_view::npos) c = L[k];
             return S;
         }
-        const int nOut = Components(G, pMain->m_TypeGUID), nIn = Components(G, In.m_TypeGUID);
-        return nIn >= 2 && nOut > nIn ? std::string(L, nIn) : std::string();
+        if (nIn < 2 || nOut < 1) return {};
+        return nOut >= nIn ? std::string(L, nIn) : std::string(nIn, L[0]);          // the whole (or its first ones), or a whole float splatted
     }
 
     // Two pins can be connected when they are on different nodes and their types fit (AreTypesCompatible).

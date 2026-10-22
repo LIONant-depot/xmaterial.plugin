@@ -130,4 +130,5 @@ Normal     = Normal Map step, Strength (FLOAT, 1)
 - **No albedo map:** a shared white albedo, the diffuse colour into BaseColorFactor (the magenta placeholder for a missing file stays).
 - The alpha-test variant gets the same factors plus Alpha Cutoff (part one, Masked).
 
-Open: keep today's emission rule (ORME.a × albedo) or glTF's (EmissiveColor × an emissive map)? The first keeps the ORME layout.
+Decided (2026-10-22): emission keeps today's rule, EmissiveColor × ORME.a × Albedo, never a separate emissive map: fewer textures is the
+goal, and the ORME layout already carries it.
