@@ -1267,15 +1267,18 @@ namespace xmaterial_graph
         {
             auto& vertexInput = g.CreatePrefabNode(node_guid{ xresource::type_guid{"vertexPrefabs"}.m_Value });
             vertexInput.m_Name = "Input: Vertex Variants";
-            vertexInput.m_Code = "[TOP]<!layout(location = 0) in struct { vec4 wSpacePosition; vec4 ShadowPosition; vec4 VertColor; vec4 Tangent; vec3 Normal; vec2 UV; } In;\n#define XMAT_VARYING_IN\n!>";      // (Output: PBR's lighting then reads this In)
+            vertexInput.m_Code = "[TOP]<!layout(location = 0) in struct { vec4 wSpacePosition; vec4 ShadowPosition; vec4 VertColor; vec4 Tangent; vec3 Normal; vec2 UV; } In;\nlayout(location = 6) in vec2 InUV1;\n#define XMAT_VARYING_IN\n!>";      // (Output: PBR's lighting then reads this In)
 
-            vertexInput.m_OutputPins.resize(2);
+            vertexInput.m_OutputPins.resize(3);
             vertexInput.m_OutputPins[0].m_Name          = "Color(4)";                // linear: the geometry's COLOR0 stream (8 bit sRGB, decoded by the vertex shader); white without one
             vertexInput.m_OutputPins[0].m_TypeGUID      = typeColor.m_GUID;
             vertexInput.m_OutputPins[0].m_DefaultExpr   = "In.VertColor";
             vertexInput.m_OutputPins[1].m_Name          = "UV(2)";
             vertexInput.m_OutputPins[1].m_TypeGUID      = typeVec2.m_GUID;
             vertexInput.m_OutputPins[1].m_DefaultExpr   = "In.UV";
+            vertexInput.m_OutputPins[2].m_Name          = "UV1(2)";                  // the second UV set (the geometry's optional UV1 stream); UV0 without one
+            vertexInput.m_OutputPins[2].m_TypeGUID      = typeVec2.m_GUID;
+            vertexInput.m_OutputPins[2].m_DefaultExpr   = "InUV1";
 
             g.CompletePrefab(vertexInput);
         }
