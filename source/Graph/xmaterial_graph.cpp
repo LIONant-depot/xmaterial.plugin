@@ -381,6 +381,22 @@ namespace xmaterial_graph
         }
 
         //
+        // A connection whose pins belong to no node (hand edits, deleted nodes of older versions) is dropped, and so is any reference to a missing connection
+        //
+        if (TextFile.isReading())
+        {
+            for (auto It = graph.m_Connections.begin(); It != graph.m_Connections.end(); )
+            {
+                if (graph.findNodeByPin(It->second->m_InputPinGuid) && graph.findNodeByPin(It->second->m_OutputPinGuid)) { ++It; continue; }
+                printf("Warning: dropping the connection %016llX: its pins belong to no node\n", static_cast<unsigned long long>(It->first.m_Value));
+                It = graph.m_Connections.erase(It);
+            }
+            for (auto& [Id, pNode] : graph.m_InstanceNodes)
+                for (auto& Pin : pNode->m_InputPins)
+                    if (Pin.m_ConnectionGUID.m_Value != 0 && !graph.m_Connections.contains(Pin.m_ConnectionGUID)) Pin.m_ConnectionGUID = {};
+        }
+
+        //
         // The organisation (v2 only, v1 files get theirs from the adapter)
         //
         if (Version >= 2)

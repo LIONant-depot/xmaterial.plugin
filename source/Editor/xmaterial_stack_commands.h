@@ -482,7 +482,7 @@ namespace xmaterial_editor::cmds
                     for (auto& Pin : pNode->m_InputPins)
                     {
                         std::string What;
-                        if (auto C = G.m_Connections.find(Pin.m_ConnectionGUID); C != G.m_Connections.end()) What = "<- " + ChipText(G, C->second->m_OutputPinGuid);
+                        if (auto C = G.m_Connections.find(Pin.m_ConnectionGUID); C != G.m_Connections.end() && G.findNodeByPin(C->second->m_OutputPinGuid)) What = "<- " + ChipText(G, C->second->m_OutputPinGuid);
                         else if (Pin.m_ParamIndex >= 0 && Pin.m_ParamIndex < static_cast<int>(pNode->m_Params.size()))
                         {
                             auto& Prop = pNode->m_Params[Pin.m_ParamIndex];
@@ -516,7 +516,7 @@ namespace xmaterial_editor::cmds
             if (!pNode) return "Sources: no such node";
             std::string Out;
             for (auto& Pin : pNode->m_InputPins)
-                if (auto C = m_Doc.m_Graph.m_Connections.find(Pin.m_ConnectionGUID); C != m_Doc.m_Graph.m_Connections.end())
+                if (auto C = m_Doc.m_Graph.m_Connections.find(Pin.m_ConnectionGUID); C != m_Doc.m_Graph.m_Connections.end() && m_Doc.m_Graph.findNodeByPin(C->second->m_OutputPinGuid))
                     Out += std::format("{}  <- {}  connection {:016X}  source {:016X}\n", Pin.m_Name, ChipText(m_Doc.m_Graph, C->second->m_OutputPinGuid), C->first.m_Value, C->second->m_OutputPinGuid.m_Value);
                 else Out += std::format("{}  (not connected)\n", Pin.m_Name);
             return Out.empty() ? "(no inputs)" : Out;
