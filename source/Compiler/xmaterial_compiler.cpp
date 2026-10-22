@@ -271,6 +271,12 @@ namespace xmaterial_compiler
                         const pin* outPin = g.findPinConst(*srcNode, conn.m_OutputPinGuid, dummy, idx, sub);
                         if (outPin)
                         {
+                            // a float feeding a vecN input is splatted: vecN(x)
+                            auto Splat = [&](std::string E)
+                            {
+                                auto* pO = g.findType(outPin->m_TypeGUID); auto* pI = g.findType(ip.m_TypeGUID);
+                                return pO && pI && pO->m_GUID != pI->m_GUID && pO->m_CodeString == "float" ? pI->m_CodeString + "(" + E + ")" : E;
+                            };
 
                             if (!outPin->m_DefaultExpr.empty())
                             {
@@ -278,17 +284,17 @@ namespace xmaterial_compiler
                                 if (sub >= 0 && sub < 4)
                                 {
                                     static const char* swizzle[4] = { "x","y","z","w" };
-                                    return outPin->m_DefaultExpr + "." + swizzle[sub];
+                                    return Splat(outPin->m_DefaultExpr + "." + swizzle[sub]);
                                 }
-                                return outPin->m_DefaultExpr;
+                                return Splat(outPin->m_DefaultExpr);
                             }
                             auto baseVar = PinToVarName(*srcNode, idx);
                             if (sub >= 0 && sub < 4) // sub-output like .x/.y/.z/.w
                             {
                                 static const char* swizzle[4] = { "x","y","z","w" };
-                                return baseVar + "." + swizzle[sub];
+                                return Splat(baseVar + "." + swizzle[sub]);
                             }
-                            return baseVar;
+                            return Splat(baseVar);
                         }
                     }
                 }

@@ -68,13 +68,13 @@ namespace xmaterial_editor
         }
     };
 
-    // Two pins can be connected when they are on different nodes and carry the same type.
+    // Two pins can be connected when they are on different nodes and carry the same type, or a float feeds a vec2/vec3/vec4 (a splat: the compiler emits vecN(x)).
     inline bool IsPinCompatible(const xmaterial_graph::pin& Out, const xmaterial_graph::pin& In, const xmaterial_graph::graph& G) noexcept
     {
         if (G.findNodeByPin(In.m_PinGUID) == G.findNodeByPin(Out.m_PinGUID)) return false;
         auto* pOut = G.findType(Out.m_TypeGUID);
         auto* pIn  = G.findType(In.m_TypeGUID);
-        return pOut && pIn && pOut->m_GUID == pIn->m_GUID;
+        return pOut && pIn && (pOut->m_GUID == pIn->m_GUID || (pOut->m_CodeString == "float" && pIn->m_CodeString.starts_with("vec")));
     }
 
     //--------------------------------------------------------------------------------------------
