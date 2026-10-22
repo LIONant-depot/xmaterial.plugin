@@ -99,18 +99,21 @@ static built Migrate(const material& M)
     for (std::size_t k = 0; k < Cat.size(); ++k)
     {
         const int s = Cat[k], g = Group(s);
-        if (B.m_In.empty() || B.m_SectionNames.back() != Names[g]) { B.m_In.push_back({ 100 + B.m_In.size(), {} }); B.m_SectionNames.push_back(Names[g]); }
+        if (B.m_In.empty() || B.m_SectionNames.back() != Names[g]) { B.m_In.push_back({ 100 + B.m_In.size(), {}, g == 2 }); B.m_SectionNames.push_back(Names[g]); }
         auto& N = M.m_Nodes[Steps[s]];
         float TextW = 7.0f * N.m_Name.size();
-        int Row = (int)N.m_In.size();
-        for (auto& n : N.m_InNames) TextW = std::max(TextW, 7.0f * n.size() + 80);
+        float InW = 0, OutW = 0;
+        int Row = 0;
+        for (auto& n : N.m_InNames) InW = std::max(InW, 7.0f * n.size() + 80);
         OutRow[s].assign(N.m_Out.size(), -1);
-        for (int o = 0; o < (int)N.m_Out.size(); ++o) if (o == 0 || Used.count({ s, o })) { OutRow[s][o] = Row++; if (o < (int)N.m_OutNames.size()) TextW = std::max(TextW, 7.0f * N.m_OutNames[o].size()); }
+        for (int o = 0; o < (int)N.m_Out.size(); ++o) if (o == 0 || Used.count({ s, o })) { OutRow[s][o] = Row++; if (o < (int)N.m_OutNames.size()) OutW = std::max(OutW, 7.0f * N.m_OutNames[o].size()); }
+        TextW = std::max(TextW, InW + OutW + sl::geo::MID_GAP);
+        Row = std::max(Row, (int)N.m_In.size());
         Global[s] = (int)B.m_StepNames.size();
         B.m_StepNames.push_back(N.m_Name);
         B.m_In.back().m_Steps.push_back({ 1000 + (std::uint64_t)s, sl::StepW(TextW), std::max(1, Row) });
     }
-    if (B.m_SectionNames.empty() || B.m_SectionNames.back() != "Output") { B.m_In.push_back({ 999, {} }); B.m_SectionNames.push_back("Output"); }
+    if (B.m_SectionNames.empty() || B.m_SectionNames.back() != "Output") { B.m_In.push_back({ 999, {}, true }); B.m_SectionNames.push_back("Output"); }
     for (auto& [f, o, t, i, Pin] : Links) B.m_E.push_back({ Global[f], OutRow[f][o], Global[t], i, Pin, B.m_E.size() + 1 });
     return B;
 }
@@ -121,12 +124,6 @@ static void Svg(const built& B, const sr::result& R, const std::string& Path)
     std::ostringstream S;
     S << "<svg xmlns='http://www.w3.org/2000/svg' width='" << L.m_Width << "' height='" << L.m_Height + 20 << "' font-family='Segoe UI,Arial' font-size='11'>\n";
     S << "<rect width='100%' height='100%' fill='#1e1f22'/>\n";
-    for (std::size_t s = 0; s < L.m_Sections.size(); ++s)
-    {
-        auto& b = L.m_Sections[s];
-        S << "<rect x='" << b.m_X << "' y='" << b.m_Y << "' width='" << b.m_W << "' height='" << b.m_H << "' rx='6' fill='#26282c' stroke='#4a4d55'/>\n";
-        S << "<text x='" << b.m_X + 8 << "' y='" << b.m_Y + 18 << "' fill='#9aa0aa' font-weight='bold'>" << B.m_SectionNames[s] << "</text>\n";
-    }
     for (std::size_t g = 0; g < L.m_Steps.size(); ++g)
     {
         auto& b = L.m_Steps[g];
@@ -157,20 +154,16 @@ int main(int argc, char** argv)
     {
         if (F.path().filename() != "Descriptor.txt") continue;
         const auto B = Migrate(Parse(F.path()));
-        for (float W : { 1600.0f, 800.0f })
-        {
-            sr::view_memory VM;
-            const auto R = sr::Build(B.m_In, B.m_E, W, VM);
-            sr::CheckRoutes(R, B.m_E);
-            int Hw = 0, Ch = 0, MaxL = 0;
-            for (int c = 0; c < R.m_Layout.m_K; ++c) { Hw += R.m_LanesL[c] + R.m_LanesR[c]; MaxL = std::max({ MaxL, R.m_LanesL[c], R.m_LanesR[c] }); for (int n : R.m_ChannelLanes[c]) Ch += n; }
-            std::printf("%s @%4.0f: steps %zu routes %zu outputs %zu | columns %d | highway lanes %d (max %d) channel lanes %d | crossings %zu junctions %zu | through steps %d\n",
-                F.path().parent_path().filename().string().c_str(), W, B.m_StepNames.size(), B.m_E.size(), R.m_Sources.size(), R.m_Layout.m_K, Hw, MaxL, Ch,
-                R.m_Crossings.size(), R.m_Junctions.size(), R.m_StepHits);
-            if (W == 1600.0f && B.m_E.size() > Most) { Most = B.m_E.size(); Largest = B; LargestR = R; }
-        }
+        const auto R = sr::Build(B.m_In, B.m_E);
+        sr::CheckRoutes(R, B.m_E, B.m_In);
+        int Lanes = 0, MaxL = 0;
+        for (int n : R.m_Lanes) { Lanes += n; MaxL = std::max(MaxL, n); }
+        std::printf("%s: steps %zu routes %zu outputs %zu | columns %d | gutter lanes %d (max %d) | crossings %zu junctions %zu | length %.0f ink %.0f | through steps %d\n",
+            F.path().parent_path().filename().string().c_str(), B.m_StepNames.size(), B.m_E.size(), R.m_Sources.size(), R.m_Layout.m_K, Lanes, MaxL,
+            R.m_Crossings.size(), R.m_Junctions.size(), R.m_Length, R.m_Ink, R.m_StepHits);
+        if (B.m_E.size() > Most) { Most = B.m_E.size(); Largest = B; LargestR = R; }
     }
-    std::fputs(sr::Stats(LargestR, Largest.m_SectionNames).c_str(), stdout);
+    std::fputs(sr::Stats(LargestR).c_str(), stdout);
     const std::string Path = argc > 2 ? argv[2] : (std::filesystem::temp_directory_path() / "stack_routes.svg").string();
     Svg(Largest, LargestR, Path);
     std::printf("svg: %s\nstack routes self-check: OK\n", Path.c_str());

@@ -2,273 +2,363 @@
 #define XMATERIAL_STACK_LAYOUT_H
 #pragma once
 
-// Layout of the material stack (documentation/stack_canvas.md section 4): pass A (step boxes), B (sections into columns), C (Y), E (X).
-// Pure: the input is ordered sections of step sizes, the output is boxes. No ImGui, no graph, no editor state; the caller measures text.
-// The router (xmaterial_stack_routes.h) runs pass D between B and C/E and feeds its lane counts back into PassC and PassE; Build here is
-// the layout with base gaps (no routes).
+// Layout of the material stack (documentation/stack_canvas.md section 4): a layered layout by dependency depth. Column = longest path from
+// the inputs (steps with no inputs in column 0, the output section in the last column), so every connection flows left to right. A wire
+// that skips columns gets a slot (a "dummy") in every column it crosses, so it passes between steps, never behind one. The order in a column
+// starts from the reading order (sections, then steps) and is refined by barycentre sweeps (fewest crossings wins); steps then slide up and
+// down to the median of what they connect to (least wire, straight wires where possible) without overlapping.
+// Pure: ordered sections of step sizes and the edges in, columns, items and y out. No ImGui, no graph, no editor state; the caller measures
+// text. X needs the router's gutter widths (xmaterial_stack_routes.h calls PlaceX).
+// Sections are reading order only here: they decide ties, never columns.
 
 #include <vector>
+#include <map>
 #include <cstdint>
 #include <algorithm>
 #include <cmath>
 
 namespace xmaterial_editor::stack_layout
 {
-    namespace geo       // port geometry from E27 NodeOS_CanvasSupport.h:230-257, plus the stack's section frames
+    namespace geo
     {
-        constexpr float HEADER_H         = 26.0f;
-        constexpr float ROW_H            = 20.0f;
-        constexpr float NODE_PAD_BOTTOM  = 12.0f;
-        constexpr float NODE_GAP         = 28.0f;
-        constexpr float TOP              = 10.0f;
-        constexpr float PORT_PAD         = 14.0f;
-        constexpr float ICON_CLEARANCE   = 16.0f;
-        constexpr float LANE_GAP         = 14.0f;
-        constexpr float COLUMN_MARGIN    = 60.0f;
-        constexpr float MARGIN           = 20.0f;   // left and right of the whole stack
-        constexpr float MIN_STEP_W       = 160.0f;
-        constexpr float SECTION_HEADER_H = 28.0f;   // the section's name; holds its top slot
-        constexpr float SECTION_FOOTER   = 6.0f;
-        constexpr float SECTION_GAP      = 24.0f;
-        constexpr float FRAME_PAD        = 8.0f;    // a section frame reaches this far past the column width
-        constexpr float HYSTERESIS       = 24.0f;   // the column count changes only once the width is this far past a threshold
-        constexpr float REPACK_BUDGET    = 1.25f;   // a kept partition may make a column this much taller than the optimum
+        constexpr float HEADER_H        = 26.0f;
+        constexpr float ROW_H           = 20.0f;
+        constexpr float NODE_PAD_BOTTOM = 8.0f;
+        constexpr float NODE_GAP        = 24.0f;    // between two steps of a column
+        constexpr float DUMMY_GAP       = 14.0f;    // between a wire passing a column and a step
+        constexpr float DUMMY_SEP       = 12.0f;    // between two wires passing a column
+        constexpr float TOP             = 10.0f;
+        constexpr float PORT_PAD        = 12.0f;
+        constexpr float MID_GAP         = 16.0f;    // between the input and the output half of a step
+        constexpr float ICON_CLEARANCE  = 14.0f;    // a gutter's first lane from the column edge
+        constexpr float LANE_GAP        = 10.0f;
+        constexpr float COLUMN_MARGIN   = 56.0f;    // the narrowest gutter
+        constexpr float MARGIN          = 20.0f;    // left and right of the whole layout
+        constexpr float MIN_STEP_W      = 110.0f;
+        constexpr int   ORDER_SWEEPS    = 8;
+        constexpr int   PLACE_SWEEPS    = 12;
     }
 
-    // Pass A: a step box. Rows: one per input, one per used output (the first output always). TextW = its widest header or row content.
+    // A step box: inputs on the left half, outputs on the right half, row r of each side at RowY(r). TextW = header or the widest
+    // input + output pair content (the caller adds PORT_PAD and MID_GAP through StepW).
     inline float StepW (float TextW) noexcept { return std::max(geo::MIN_STEP_W, TextW + 2 * geo::PORT_PAD); }
     inline float StepH (int nRows)   noexcept { return geo::HEADER_H + nRows * geo::ROW_H + geo::NODE_PAD_BOTTOM; }
     inline float RowY  (int Row)     noexcept { return geo::HEADER_H + (Row + 0.5f) * geo::ROW_H; }       // a row's ports, from the step's top
 
-    struct step_in      { std::uint64_t m_Id = 0; float m_W = geo::MIN_STEP_W; int m_nRows = 1; };
-    struct section_in   { std::uint64_t m_Id = 0; std::vector<step_in> m_Steps; };
+    // A connection: global step indices (order invariant: From before To), the rows of its two ports, the source output it leaves from (a
+    // pin id; a sub-element is its own output, so its own trunk). m_Id is the caller's (the connection guid).
+    struct edge         { int m_From = 0, m_FromRow = 0, m_To = 0, m_ToRow = 0; std::uint64_t m_Source = 0, m_Id = 0; };
+    struct step_in      { std::uint64_t m_Id = 0; float m_W = geo::MIN_STEP_W; int m_nRows = 1; float m_LitW = 0; };     // LitW: literal fields left of the step
+    struct section_in   { std::uint64_t m_Id = 0; std::vector<step_in> m_Steps; bool m_bOutput = false; };
     using  input        = std::vector<section_in>;      // in order, OUTPUT last; a step's global index is its position in the concatenation
 
-    struct memory       // view state (4.3, 4.4): never saved
-    {
-        int                         m_K     = 0;        // the column count the width rule picked last time (hysteresis)
-        int                         m_PartK = 0;        // m_Breaks was made for this many columns
-        std::vector<std::uint64_t>  m_Breaks;           // id of the first section of every column after the first
-        float                       m_Tallest = 0;      // its tallest column (base heights) when it was last used
-    };
-
-    struct box { float m_X = 0, m_Y = 0, m_W = 0, m_H = 0; };
+    struct box  { float m_X = 0, m_Y = 0, m_W = 0, m_H = 0; };
+    struct item { int m_Step = -1, m_Source = -1, m_Column = 0; float m_Y = 0; };   // a step, or a dummy: where source m_Source crosses a column
+    struct link { int m_L = 0, m_LRow = -1, m_R = 0, m_RRow = -1, m_Source = 0; };  // items of columns c and c+1; rows -1 at a dummy
 
     struct result
     {
-        int                             m_K      = 1;
-        float                           m_CW     = 0, m_Width = 0, m_Height = 0;
-        std::vector<int>                m_SectionColumn;    // per section
-        std::vector<std::vector<int>>   m_ColumnSteps;      // per column: global step indices, top to bottom
-        std::vector<int>                m_Column, m_Pos;    // per global step: its column, its position in that column
-        std::vector<box>                m_Steps;            // per global step
-        std::vector<box>                m_Sections;         // per section: its frame
-        std::vector<std::vector<float>> m_GapTop;           // per column, per gap (0 = above the first step, g = below step g-1): top of its channel band
-        std::vector<float>              m_X;                // per column: centre
+        int                             m_K = 0;
+        float                           m_Width = 0, m_Height = 0;
+        std::vector<int>                m_Column;       // per global step
+        std::vector<box>                m_Steps;        // per global step
+        std::vector<float>              m_LitW;         // per global step
+        std::vector<char>               m_Fed;          // per global step: some input connected
+        std::vector<item>               m_Items;
+        std::vector<std::vector<int>>   m_Order;        // per column: items, top to bottom
+        std::vector<std::vector<link>>  m_Links;        // per gutter g (between columns g and g+1)
+        std::vector<std::vector<int>>   m_Chain;        // per edge: its items column by column (from step, dummies, to step); empty = not drawn
+        std::vector<std::uint64_t>      m_Sources;      // distinct source outputs, ascending
+        std::vector<int>                m_EdgeSource;   // per edge: index into m_Sources
+        std::vector<float>              m_X, m_Band, m_W;   // per column: left edge, literal band, widest step (steps start at m_X + m_Band)
     };
 
-    inline float ColumnWidth(const input& In) noexcept
+    inline float PortY(const result& R, int Item, int Row) noexcept { const auto& I = R.m_Items[Item]; return I.m_Y + (I.m_Step >= 0 ? RowY(Row) : 0.0f); }
+    inline float ItemH(const result& R, int Item, const std::vector<int>& Rows) noexcept { const auto& I = R.m_Items[Item]; return I.m_Step >= 0 ? StepH(Rows[I.m_Step]) : 0.0f; }
+    inline float Gap(const result& R, int a, int b) noexcept
     {
-        float CW = geo::MIN_STEP_W;
-        for (auto& S : In) for (auto& s : S.m_Steps) CW = std::max(CW, s.m_W);
-        return CW;
+        const bool da = R.m_Items[a].m_Step < 0, db = R.m_Items[b].m_Step < 0;
+        return da && db ? geo::DUMMY_SEP : da || db ? geo::DUMMY_GAP : geo::NODE_GAP;
     }
 
-    // Columns that fit Width with no lanes: 2*MARGIN + K*(CW + 2*ICON_CLEARANCE) + (K-1)*COLUMN_MARGIN <= Width, clamped to 1..sections
-    inline int Fit(float Width, float CW, int nSections) noexcept
+    // Crossings between two neighbouring columns: two links cross when their port order flips (links sharing a port never cross)
+    inline int Crossings(const result& R, int g, const std::vector<int>& Pos) noexcept
     {
-        const int K = static_cast<int>(std::floor((Width - 2 * geo::MARGIN + geo::COLUMN_MARGIN) / (CW + 2 * geo::ICON_CLEARANCE + geo::COLUMN_MARGIN)));
-        return std::clamp(K, 1, std::max(1, nSections));
-    }
-
-    // Pass B's column count with hysteresis: it moves only when Width is HYSTERESIS past a threshold, so resize jitter never flips columns
-    inline int ChooseK(float Width, float CW, int nSections, memory& M) noexcept
-    {
-        int K = Fit(Width, CW, nSections);
-        if (M.m_K > 0)
-        {
-            const int Prev = std::clamp(M.m_K, 1, std::max(1, nSections));
-            const int Up   = Fit(Width - geo::HYSTERESIS, CW, nSections);
-            const int Down = Fit(Width + geo::HYSTERESIS, CW, nSections);
-            K = Up > Prev ? Up : Down < Prev ? Down : Prev;
-        }
-        return M.m_K = K;
-    }
-
-    // A section's height with base gaps: header, steps each with the gap below it, footer, the gap to the next section
-    inline float SectionH(const section_in& S) noexcept
-    {
-        float H = geo::SECTION_HEADER_H + geo::SECTION_FOOTER + geo::SECTION_GAP + (S.m_Steps.empty() ? geo::NODE_GAP : 0);
-        for (auto& s : S.m_Steps) H += StepH(s.m_nRows) + geo::NODE_GAP;
-        return H;
-    }
-
-    // Linear partition (DP, O(K n^2)): K contiguous runs, none empty, minimising the tallest. Returns the first section of each run.
-    inline std::vector<int> Partition(const std::vector<float>& H, int K) noexcept
-    {
-        const int n = static_cast<int>(H.size());
-        std::vector<float> Sum(n + 1, 0);
-        for (int i = 0; i < n; ++i) Sum[i + 1] = Sum[i] + H[i];
-        std::vector<std::vector<float>> Best(K + 1, std::vector<float>(n + 1, 1e30f));     // Best[k][i]: tallest run when the first i sections make k runs
-        std::vector<std::vector<int>>   From(K + 1, std::vector<int>(n + 1, 0));            // where that k-th run starts
-        Best[0][0] = 0;
-        for (int k = 1; k <= K; ++k)
-            for (int i = k; i <= n; ++i)
-                for (int j = k - 1; j < i; ++j)
-                    if (const float v = std::max(Best[k - 1][j], Sum[i] - Sum[j]); v < Best[k][i]) { Best[k][i] = v; From[k][i] = j; }
-        std::vector<int> Starts(K, 0);
-        for (int k = K, i = n; k > 0; --k) { Starts[k - 1] = From[k][i]; i = From[k][i]; }
-        return Starts;
-    }
-
-    // Pass B: the column of every section. The remembered partition is kept while K is the same, its break sections still exist in order,
-    // and its tallest column is no taller than REPACK_BUDGET times the optimum or than it was last time (shrinking never re-partitions):
-    // adding a step or collapsing a section never moves other sections.
-    inline std::vector<int> Columns(const input& In, int K, const memory& M, bool bRepartition = false) noexcept
-    {
-        const int n = static_cast<int>(In.size());
-        if (n == 0) return {};
-        std::vector<float> H(n);
-        for (int s = 0; s < n; ++s) H[s] = SectionH(In[s]);
-        auto Tallest = [&](const std::vector<int>& Starts)
-        {
-            float T = 0;
-            for (int k = 0; k < static_cast<int>(Starts.size()); ++k)
+        const auto& L = R.m_Links[g];
+        int n = 0;
+        for (std::size_t i = 0; i < L.size(); ++i)
+            for (std::size_t j = i + 1; j < L.size(); ++j)
             {
-                float C = 0;
-                for (int s = Starts[k]; s < (k + 1 < static_cast<int>(Starts.size()) ? Starts[k + 1] : n); ++s) C += H[s];
-                T = std::max(T, C);
+                const long a0 = Pos[L[i].m_L] * 256L + L[i].m_LRow, b0 = Pos[L[j].m_L] * 256L + L[j].m_LRow;
+                const long a1 = Pos[L[i].m_R] * 256L + L[i].m_RRow, b1 = Pos[L[j].m_R] * 256L + L[j].m_RRow;
+                n += (a0 < b0 && a1 > b1) || (a0 > b0 && a1 < b1);
             }
-            return T;
-        };
-
-        std::vector<int> Starts = Partition(H, K);
-        if (!bRepartition && M.m_PartK == K && static_cast<int>(M.m_Breaks.size()) == K - 1)
-        {
-            std::vector<int> Kept{ 0 };
-            for (auto Id : M.m_Breaks)
-            {
-                auto It = std::find_if(In.begin(), In.end(), [&](const section_in& S) { return S.m_Id == Id; });
-                const int s = static_cast<int>(It - In.begin());
-                if (It == In.end() || s <= Kept.back()) { Kept.clear(); break; }
-                Kept.push_back(s);
-            }
-            if (!Kept.empty() && Tallest(Kept) <= std::max(geo::REPACK_BUDGET * Tallest(Starts), M.m_Tallest)) Starts = std::move(Kept);
-        }
-
-        std::vector<int> Col(n, 0);
-        for (int k = 0; k < K; ++k)
-            for (int s = Starts[k]; s < (k + 1 < K ? Starts[k + 1] : n); ++s) Col[s] = k;
-        return Col;
+        return n;
     }
 
-    inline void Remember(const input& In, const std::vector<int>& Col, int K, memory& M) noexcept
-    {
-        M.m_PartK = K;
-        M.m_Breaks.clear();
-        for (int s = 1; s < static_cast<int>(In.size()); ++s) if (Col[s] != Col[s - 1]) M.m_Breaks.push_back(In[s].m_Id);
-        std::vector<float> H(K, 0);
-        for (int s = 0; s < static_cast<int>(In.size()); ++s) H[Col[s]] += SectionH(In[s]);
-        M.m_Tallest = In.empty() ? 0 : *std::max_element(H.begin(), H.end());
-    }
-
-    // Pass C (port of E27 spine_layout + GapRelY, NodeOS_UI_Canvas.h:98-141, with the channel term): per column, the band of gap 0, then per
-    // section its header, each step followed by the band of the gap below it, the footer, SECTION_GAP. A band is NODE_GAP + (lanes-1)*LANE_GAP
-    // tall (ChannelLanes[c][g], missing = 0), so channel lanes never reach a step. Offset[c] (missing = 0) shifts a whole column down.
-    inline result PassC(const input& In, const std::vector<int>& Col, int K, const std::vector<std::vector<int>>& ChannelLanes = {}, const std::vector<float>& Offset = {}) noexcept
+    // Columns, dummies, order, y. Deterministic: the same input always gives the same layout, and an unwired new step goes to the bottom
+    // of column 0, so it moves nothing else.
+    inline result Layer(const input& In, const std::vector<edge>& E) noexcept
     {
         result R;
-        R.m_K = K;
-        R.m_CW = ColumnWidth(In);
-        R.m_SectionColumn = Col;
-        R.m_ColumnSteps.resize(K);
-        R.m_GapTop.resize(K);
-        R.m_Sections.resize(In.size());
-        int nSteps = 0;
-        for (auto& S : In) nSteps += static_cast<int>(S.m_Steps.size());
-        R.m_Column.resize(nSteps); R.m_Pos.resize(nSteps); R.m_Steps.resize(nSteps);
+        std::vector<int> Rows;
+        std::vector<char> bOut;
+        for (auto& S : In) for (auto& s : S.m_Steps) { Rows.push_back(std::max(1, s.m_nRows)); bOut.push_back(S.m_bOutput); R.m_LitW.push_back(s.m_LitW); }
+        const int N = static_cast<int>(Rows.size()), nE = static_cast<int>(E.size());
 
-        std::vector<int> First(In.size() + 1, 0);
-        for (std::size_t s = 0; s < In.size(); ++s) First[s + 1] = First[s] + static_cast<int>(In[s].m_Steps.size());
+        for (auto& e : E) R.m_Sources.push_back(e.m_Source);
+        std::sort(R.m_Sources.begin(), R.m_Sources.end());
+        R.m_Sources.erase(std::unique(R.m_Sources.begin(), R.m_Sources.end()), R.m_Sources.end());
+        for (auto& e : E) R.m_EdgeSource.push_back(static_cast<int>(std::lower_bound(R.m_Sources.begin(), R.m_Sources.end(), e.m_Source) - R.m_Sources.begin()));
 
-        for (int c = 0; c < K; ++c)
+        // Columns: longest path from the inputs (the order invariant makes every valid edge point forward, so one pass in order); outputs last
+        std::vector<char> Valid(nE);
+        std::vector<std::vector<int>> Outs(N);
+        for (int i = 0; i < nE; ++i)
+            if ((Valid[i] = E[i].m_From >= 0 && E[i].m_To < N && E[i].m_From < E[i].m_To)) Outs[E[i].m_From].push_back(i);
+        R.m_Column.assign(N, 0);
+        R.m_Fed.assign(N, 0);
+        for (int i = 0; i < nE; ++i) if (Valid[i]) R.m_Fed[E[i].m_To] = 1;
+        int Last = 0;
+        for (int v = 0; v < N; ++v)
         {
-            auto Band = [&](int g)
-            {
-                const int L = c < static_cast<int>(ChannelLanes.size()) && g < static_cast<int>(ChannelLanes[c].size()) ? ChannelLanes[c][g] : 0;
-                return geo::NODE_GAP + std::max(0, L - 1) * geo::LANE_GAP;
-            };
-            float y = geo::TOP + (c < static_cast<int>(Offset.size()) ? Offset[c] : 0);
-            auto& Gaps = R.m_GapTop[c];
-            auto& Steps = R.m_ColumnSteps[c];
-            Gaps.push_back(y);
-            y += Band(0);
-            for (std::size_t s = 0; s < In.size(); ++s)
-            {
-                if (Col[s] != c) continue;
-                const float Top = y;
-                y += geo::SECTION_HEADER_H;
-                for (std::size_t i = 0; i < In[s].m_Steps.size(); ++i)
-                {
-                    const int g = First[s] + static_cast<int>(i);
-                    const auto& St = In[s].m_Steps[i];
-                    R.m_Column[g] = c;
-                    R.m_Pos[g]    = static_cast<int>(Steps.size());
-                    R.m_Steps[g]  = { 0, y, St.m_W, StepH(St.m_nRows) };
-                    Steps.push_back(g);
-                    y += R.m_Steps[g].m_H;
-                    Gaps.push_back(y);
-                    y += Band(static_cast<int>(Steps.size()));
-                }
-                if (In[s].m_Steps.empty()) y += geo::NODE_GAP;                 // the empty section's slot
-                y += geo::SECTION_FOOTER;
-                R.m_Sections[s] = { 0, Top, 0, y - Top };
-                y += geo::SECTION_GAP;
-            }
-            R.m_Height = std::max(R.m_Height, y);
+            if (!bOut[v]) Last = std::max(Last, R.m_Column[v] + 1);
+            for (int i : Outs[v]) R.m_Column[E[i].m_To] = std::max(R.m_Column[E[i].m_To], R.m_Column[v] + 1);
         }
+        for (int v = 0; v < N; ++v) if (bOut[v]) R.m_Column[v] = Last;
+        R.m_K = N == 0 ? 0 : *std::max_element(R.m_Column.begin(), R.m_Column.end()) + 1;
+
+        // Items: every step, and one dummy per (source, column crossed): all wires of one output share it. Links between neighbours.
+        for (int v = 0; v < N; ++v) R.m_Items.push_back({ v, -1, R.m_Column[v] });
+        std::map<std::pair<int,int>, int> Dummy;                    // (source, column) -> item
+        R.m_Links.assign(std::max(0, R.m_K - 1), {});
+        R.m_Chain.assign(nE, {});
+        for (int i = 0; i < nE; ++i)
+        {
+            if (!Valid[i]) continue;
+            const auto& e = E[i];
+            const int s = R.m_EdgeSource[i];
+            auto& Ch = R.m_Chain[i];
+            Ch.push_back(e.m_From);
+            for (int c = R.m_Column[e.m_From] + 1; c < R.m_Column[e.m_To]; ++c)
+            {
+                auto [It, bNew] = Dummy.try_emplace({ s, c }, static_cast<int>(R.m_Items.size()));
+                if (bNew) R.m_Items.push_back({ -1, s, c });
+                Ch.push_back(It->second);
+            }
+            Ch.push_back(e.m_To);
+            for (std::size_t k = 0; k + 1 < Ch.size(); ++k)
+            {
+                const link l{ Ch[k], k == 0 ? e.m_FromRow : -1, Ch[k + 1], k + 2 == Ch.size() ? e.m_ToRow : -1, s };
+                auto& G = R.m_Links[R.m_Items[Ch[k]].m_Column];
+                if (std::none_of(G.begin(), G.end(), [&](const link& o) { return o.m_L == l.m_L && o.m_LRow == l.m_LRow && o.m_R == l.m_R && o.m_RRow == l.m_RRow; })) G.push_back(l);
+            }
+        }
+        const int nI = static_cast<int>(R.m_Items.size());
+
+        // Order: reading order (a dummy right after its source step), unwired steps last; then barycentre sweeps, keeping the best order
+        std::vector<char> Wired(nI, 0);
+        for (auto& G : R.m_Links) for (auto& l : G) Wired[l.m_L] = Wired[l.m_R] = 1;
+        std::vector<int> SrcStep(R.m_Sources.size(), 0);
+        for (int i = 0; i < nE; ++i) SrcStep[R.m_EdgeSource[i]] = E[i].m_From;
+        auto Reading = [&](int it) { const auto& I = R.m_Items[it]; return I.m_Step >= 0 ? (Wired[it] ? I.m_Step : N + I.m_Step) : SrcStep[I.m_Source] + 0.5; };
+        R.m_Order.assign(R.m_K, {});
+        for (int it = 0; it < nI; ++it) R.m_Order[R.m_Items[it].m_Column].push_back(it);
+        for (auto& O : R.m_Order) std::stable_sort(O.begin(), O.end(), [&](int a, int b) { return Reading(a) < Reading(b); });
+
+        std::vector<int> Pos(nI);
+        auto Index = [&] { for (auto& O : R.m_Order) for (int k = 0; k < static_cast<int>(O.size()); ++k) Pos[O[k]] = k; };
+        auto Total = [&] { int n = 0; for (int g = 0; g + 1 < R.m_K; ++g) n += Crossings(R, g, Pos); return n; };
+        // Sort column c by the mean position of its neighbours in column c-1 (bLeft) or c+1; ports split a step's position by row. An item
+        // with no neighbour there keeps its place; unwired steps stay last.
+        auto Sweep = [&](int c, bool bLeft)
+        {
+            std::vector<double> Sum(nI, 0), Cnt(nI, 0);
+            if (bLeft ? c > 0 : c + 1 < R.m_K)
+                for (auto& l : R.m_Links[bLeft ? c - 1 : c])
+                {
+                    const int Me = bLeft ? l.m_R : l.m_L, Other = bLeft ? l.m_L : l.m_R, Row = bLeft ? l.m_LRow : l.m_RRow;
+                    Sum[Me] += Pos[Other] + 0.02 * (Row + 1); Cnt[Me] += 1;
+                }
+            auto& O = R.m_Order[c];
+            std::vector<double> Key(nI);
+            for (int it : O) Key[it] = !Wired[it] ? 1e9 + Pos[it] : Cnt[it] ? Sum[it] / Cnt[it] : Pos[it];
+            std::stable_sort(O.begin(), O.end(), [&](int a, int b) { return Key[a] < Key[b]; });
+            for (int k = 0; k < static_cast<int>(O.size()); ++k) Pos[O[k]] = k;
+        };
+        Index();
+        for (int c = 1; c < R.m_K; ++c) Sweep(c, true);                // dummies and steps find their first place from the left
+        auto Best = R.m_Order;
+        int BestN = Total();
+        for (int p = 0; p < geo::ORDER_SWEEPS && BestN > 0; ++p)
+        {
+            if (p % 2 == 0) for (int c = R.m_K - 2; c >= 0; --c) Sweep(c, false);
+            else            for (int c = 1; c < R.m_K; ++c)      Sweep(c, true);
+            if (const int n = Total(); n < BestN) { BestN = n; Best = R.m_Order; }
+        }
+        R.m_Order = std::move(Best);
+        Index();
+        // Transpose: swap two neighbours of a column while that lowers the crossings of the column's two gutters (unwired steps stay last)
+        // ponytail: recounts both gutters per try, O(items * links^2) a pass: ~8 ms at 200 steps (release); count only the pair's links if it shows
+        auto Local = [&](int c) { return (c > 0 ? Crossings(R, c - 1, Pos) : 0) + (c + 1 < R.m_K ? Crossings(R, c, Pos) : 0); };
+        for (bool bMore = BestN > 0; bMore; )
+        {
+            bMore = false;
+            for (int c = 0; c < R.m_K; ++c)
+                for (int k = 0; k + 1 < static_cast<int>(R.m_Order[c].size()); ++k)
+                {
+                    auto& O = R.m_Order[c];
+                    if (!Wired[O[k]] || !Wired[O[k + 1]]) continue;
+                    const int Before = Local(c);
+                    auto Swap = [&] { std::swap(O[k], O[k + 1]); Pos[O[k]] = k; Pos[O[k + 1]] = k + 1; };
+                    Swap();
+                    if (Local(c) < Before) bMore = true; else Swap();
+                }
+        }
+
+        // Y: per column, the least total |wire dy| (each item's wanted tops are its neighbours' ports minus its own) with items in order and
+        // no overlap: isotonic L1 regression by pooling adjacent violators. Any value between a pool's lower and upper median is optimal; it
+        // takes the one of the two nearer to where it is (a want met exactly is a straight wire; staying put keeps sweeps from drifting).
+        // ponytail: Gauss-Seidel sweeps find a good local optimum, not the global one (Brandes-Koepf alignment if layouts look ragged)
+        std::vector<std::vector<std::pair<int,int>>> Touch(nI);        // item -> (gutter, link index)
+        for (int g = 0; g + 1 < R.m_K; ++g) for (int k = 0; k < static_cast<int>(R.m_Links[g].size()); ++k) { Touch[R.m_Links[g][k].m_L].push_back({ g, k }); Touch[R.m_Links[g][k].m_R].push_back({ g, k }); }
+        auto Offsets = [&](int c)
+        {
+            const auto& O = R.m_Order[c];
+            std::vector<float> Off(O.size(), 0);
+            for (std::size_t k = 1; k < O.size(); ++k) Off[k] = Off[k - 1] + ItemH(R, O[k - 1], Rows) + Gap(R, O[k - 1], O[k]);
+            return Off;
+        };
+        for (int c = 0; c < R.m_K; ++c) { const auto Off = Offsets(c); for (std::size_t k = 0; k < Off.size(); ++k) R.m_Items[R.m_Order[c][k]].m_Y = Off[k]; }
+        auto PlaceColumn = [&](int c)
+        {
+            const auto& O = R.m_Order[c];
+            const auto Off = Offsets(c);
+            struct pool { std::vector<float> m_V; float m_M = 0, m_Cur = 0; int m_First = 0, m_N = 0; };
+            std::vector<pool> P;
+            for (int k = 0; k < static_cast<int>(O.size()); ++k)
+            {
+                pool p; p.m_First = k; p.m_N = 1; p.m_Cur = R.m_Items[O[k]].m_Y - Off[k];
+                for (auto [g, li] : Touch[O[k]])
+                {
+                    const auto& l = R.m_Links[g][li];
+                    const bool bL = l.m_L == O[k];
+                    p.m_V.push_back(PortY(R, bL ? l.m_R : l.m_L, bL ? l.m_RRow : l.m_LRow) - (PortY(R, O[k], bL ? l.m_LRow : l.m_RRow) - R.m_Items[O[k]].m_Y) - Off[k]);
+                }
+                auto Median = [&](pool& q)
+                {
+                    if (q.m_V.empty()) return;
+                    std::sort(q.m_V.begin(), q.m_V.end());
+                    const float Lo = q.m_V[(q.m_V.size() - 1) / 2], Hi = q.m_V[q.m_V.size() / 2], Cur = q.m_Cur / q.m_N;
+                    q.m_M = std::abs(Cur - Lo) <= std::abs(Cur - Hi) ? Lo : Hi;
+                };
+                Median(p);
+                if (p.m_V.empty()) p.m_M = P.empty() ? R.m_Items[O[k]].m_Y - Off[k] : P.back().m_M;      // nothing wanted: follow the one above
+                P.push_back(std::move(p));
+                while (P.size() > 1 && P[P.size() - 2].m_M > P.back().m_M)
+                {
+                    auto q = std::move(P.back()); P.pop_back();
+                    auto& t = P.back();
+                    t.m_V.insert(t.m_V.end(), q.m_V.begin(), q.m_V.end());
+                    t.m_Cur += q.m_Cur; t.m_N += q.m_N;
+                    if (t.m_V.empty()) t.m_M = q.m_M; else Median(t);
+                }
+            }
+            for (std::size_t p = 0; p < P.size(); ++p)
+                for (int k = P[p].m_First; k < (p + 1 < P.size() ? P[p + 1].m_First : static_cast<int>(O.size())); ++k) R.m_Items[O[k]].m_Y = P[p].m_M + Off[k];
+        };
+        for (int p = 0; p < geo::PLACE_SWEEPS; ++p)
+            for (int k = 0; k < R.m_K; ++k) PlaceColumn(p % 2 ? R.m_K - 1 - k : k);
+
+        // Straighten: L1 has many equal optima, so an item moves to one of its wants when that fits between its neighbours and adds no wire
+        // length but makes one more wire straight
+        for (int p = 0; p < 3; ++p)
+            for (int c = 0; c < R.m_K; ++c)
+            {
+                const auto& O = R.m_Order[c];
+                for (int k = 0; k < static_cast<int>(O.size()); ++k)
+                {
+                    auto& I = R.m_Items[O[k]];
+                    std::vector<float> W;
+                    for (auto [g, li] : Touch[O[k]])
+                    {
+                        const auto& l = R.m_Links[g][li];
+                        const bool bL = l.m_L == O[k];
+                        W.push_back(PortY(R, bL ? l.m_R : l.m_L, bL ? l.m_RRow : l.m_LRow) - (PortY(R, O[k], bL ? l.m_LRow : l.m_RRow) - I.m_Y));
+                    }
+                    const float Lo = k > 0 ? R.m_Items[O[k - 1]].m_Y + ItemH(R, O[k - 1], Rows) + Gap(R, O[k - 1], O[k]) : -1e30f;
+                    const float Hi = k + 1 < static_cast<int>(O.size()) ? R.m_Items[O[k + 1]].m_Y - ItemH(R, O[k], Rows) - Gap(R, O[k], O[k + 1]) : 1e30f;
+                    auto Cost = [&](float y) { float n = 0; for (float w : W) n += std::abs(y - w); return n; };
+                    auto Met  = [&](float y) { return std::count(W.begin(), W.end(), y); };
+                    float Best = I.m_Y;
+                    for (float w : W)
+                        if (w >= Lo && w <= Hi && (Cost(w) < Cost(Best) - 0.01f || (Cost(w) <= Cost(Best) + 0.01f && Met(w) > Met(Best)))) Best = w;
+                    I.m_Y = Best;
+                }
+            }
+
+        // Shift everything so the top item sits at TOP (only wired items count: an unwired step at a column's bottom never moves the rest)
+        float Min = 1e30f;
+        for (int it = 0; it < nI; ++it) if (Wired[it]) Min = std::min(Min, R.m_Items[it].m_Y);
+        if (Min == 1e30f) Min = 0;
+        for (auto& I : R.m_Items) I.m_Y += geo::TOP - Min;
+        R.m_Steps.resize(N);
+        for (int v = 0; v < N; ++v) R.m_Steps[v] = { 0, R.m_Items[v].m_Y, 0, StepH(Rows[v]) };
+        int v = 0;
+        for (auto& S : In) for (auto& s : S.m_Steps) R.m_Steps[v++].m_W = s.m_W;
+        for (auto& b : R.m_Steps) R.m_Height = std::max(R.m_Height, b.m_Y + b.m_H + geo::TOP);
+        for (auto& I : R.m_Items) R.m_Height = std::max(R.m_Height, I.m_Y + geo::TOP);
         return R;
     }
 
-    // How far a column side reaches from its centre: half the column, the icon clearance, then one LANE_GAP per highway lane past the first
-    inline float Extent(const result& R, int Lanes) noexcept { return R.m_CW * 0.5f + geo::ICON_CLEARANCE + std::max(0, Lanes - 1) * geo::LANE_GAP; }
-
-    // Pass E (port of E27 Pass C, NodeOS_UI_Canvas.h:479-518, left to right instead of root-outward): column centres from the lane extents
-    // of the gutter between them (LanesL/LanesR[c], missing = 0); steps centred on their column.
-    inline void PassE(result& R, const std::vector<int>& LanesL = {}, const std::vector<int>& LanesR = {}) noexcept
+    // X: columns left to right, each a literal band then its steps, then the gutter to the next (GutterW[g], from the router). A step with
+    // a connected input starts at the band (inputs line up); one without (an input, a constant, a sampler) ends at the column's right edge,
+    // so its wires leave from there
+    inline void PlaceX(result& R, const std::vector<float>& GutterW) noexcept
     {
-        auto L  = [&](int c) { return c < static_cast<int>(LanesL.size()) ? LanesL[c] : 0; };
-        auto Rr = [&](int c) { return c < static_cast<int>(LanesR.size()) ? LanesR[c] : 0; };
-        R.m_X.assign(R.m_K, 0);
-        R.m_X[0] = geo::MARGIN + Extent(R, L(0));
-        for (int c = 0; c + 1 < R.m_K; ++c) R.m_X[c + 1] = R.m_X[c] + Extent(R, Rr(c)) + geo::COLUMN_MARGIN + Extent(R, L(c + 1));
-        R.m_Width = R.m_X[R.m_K - 1] + Extent(R, Rr(R.m_K - 1)) + geo::MARGIN;
-        for (std::size_t g = 0; g < R.m_Steps.size(); ++g) R.m_Steps[g].m_X = R.m_X[R.m_Column[g]] - R.m_Steps[g].m_W * 0.5f;
-        for (std::size_t s = 0; s < R.m_Sections.size(); ++s)
+        R.m_X.assign(R.m_K, 0); R.m_Band.assign(R.m_K, 0); R.m_W.assign(R.m_K, 0);
+        for (int v = 0; v < static_cast<int>(R.m_Steps.size()); ++v)
         {
-            R.m_Sections[s].m_X = R.m_X[R.m_SectionColumn[s]] - R.m_CW * 0.5f - geo::FRAME_PAD;
-            R.m_Sections[s].m_W = R.m_CW + 2 * geo::FRAME_PAD;
+            R.m_Band[R.m_Column[v]] = std::max(R.m_Band[R.m_Column[v]], R.m_LitW[v]);
+            R.m_W[R.m_Column[v]]    = std::max(R.m_W[R.m_Column[v]], R.m_Steps[v].m_W);
+        }
+        float x = geo::MARGIN;
+        for (int c = 0; c < R.m_K; ++c)
+        {
+            R.m_X[c] = x;
+            x += R.m_Band[c] + R.m_W[c] + (c + 1 < R.m_K ? GutterW[c] : 0);
+        }
+        R.m_Width = x + geo::MARGIN;
+        for (int v = 0; v < static_cast<int>(R.m_Steps.size()); ++v)
+        {
+            const int c = R.m_Column[v];
+            R.m_Steps[v].m_X = R.m_X[c] + R.m_Band[c] + (R.m_Fed[v] ? 0.0f : R.m_W[c] - R.m_Steps[v].m_W);
         }
     }
 
-    // X of a highway lane (E27 HighwayX, line 521): lane 0 nearest the column
-    inline float HighwayX(const result& R, int Column, int Side, int Lane) noexcept      // Side: 0 = left of the column, 1 = right
-    {
-        const float D = R.m_CW * 0.5f + geo::ICON_CLEARANCE + Lane * geo::LANE_GAP;
-        return Side ? R.m_X[Column] + D : R.m_X[Column] - D;
-    }
+    inline float ColumnRight(const result& R, int c) noexcept { return R.m_X[c] + R.m_Band[c] + R.m_W[c]; }
 
-    // Passes A..E with base gaps (no routes): columns, partition memory, hysteresis. The router's Build adds the lanes.
-    inline result Build(const input& In, float Width, memory& M, bool bRepartition = false) noexcept
+    // Moves an item Dy down, else Dy up, where that fits between its neighbours in its column; else Dy down, pushing the items below it
+    inline void Nudge(result& R, int Item, float Dy) noexcept
     {
-        const float CW = ColumnWidth(In);
-        for (int K = ChooseK(Width, CW, static_cast<int>(In.size()), M); ; --K)
+        auto H = [&](int it) { return R.m_Items[it].m_Step >= 0 ? R.m_Steps[R.m_Items[it].m_Step].m_H : 0.0f; };
+        auto Set = [&](int it, float y)
         {
-            auto Col = Columns(In, K, M, bRepartition);
-            auto R   = PassC(In, Col, K);
-            PassE(R);
-            if (R.m_Width <= Width + geo::HYSTERESIS || K == 1) { Remember(In, Col, K, M); return R; }      // the slack keeps ChooseK's hysteresis
-        }
+            auto& I = R.m_Items[it];
+            I.m_Y = y;
+            if (I.m_Step >= 0) R.m_Steps[I.m_Step].m_Y = y;
+            R.m_Height = std::max(R.m_Height, y + H(it) + geo::TOP);
+        };
+        const auto& O = R.m_Order[R.m_Items[Item].m_Column];
+        const int k = static_cast<int>(std::find(O.begin(), O.end(), Item) - O.begin());
+        const float y = R.m_Items[Item].m_Y;
+        const float Lo = k > 0 ? R.m_Items[O[k - 1]].m_Y + H(O[k - 1]) + Gap(R, O[k - 1], Item) : -1e30f;
+        const float Hi = k + 1 < static_cast<int>(O.size()) ? R.m_Items[O[k + 1]].m_Y - H(Item) - Gap(R, Item, O[k + 1]) : 1e30f;
+        if (y + Dy <= Hi)      { Set(Item, y + Dy); return; }
+        if (y - Dy >= Lo)      { Set(Item, y - Dy); return; }
+        Set(Item, y + Dy);
+        for (int j = k + 1; j < static_cast<int>(O.size()); ++j)
+            Set(O[j], std::max(R.m_Items[O[j]].m_Y, R.m_Items[O[j - 1]].m_Y + H(O[j - 1]) + Gap(R, O[j - 1], O[j])));
     }
 }
 

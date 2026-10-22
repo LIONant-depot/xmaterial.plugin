@@ -2,11 +2,13 @@
 #define XMATERIAL_STACK_CANVAS_H
 #pragma once
 
-// The Material Stack canvas (documentation/stack_canvas.md sections 4-6, 10): the graph read as a recipe, sections flowing into columns
-// left to right, every step placed and every route drawn by the router (xmaterial_stack_layout.h, xmaterial_stack_routes.h). Drawn with
-// ImDrawList, no node editor: right drag pans, the wheel zooms (0.5-1.5) under the cursor, Home resets. Routes are dimmed in their type's
-// colour; a selected step lights its inputs and consumers, a selected route its path from the source (the other branches of that output at
-// 0.6), U / D trace the selected step upstream / downstream. The widgets of unconnected inputs edit through SetNodeProperty, like everywhere.
+// The Material Stack canvas (documentation/stack_canvas.md sections 4-6, 10): the graph in columns by dependency depth, flowing left to
+// right, every step placed and every route drawn by the layout and router (xmaterial_stack_layout.h, xmaterial_stack_routes.h). Drawn with
+// ImDrawList, no node editor, in the old canvas's flat look: inputs on a step's left, outputs on its right, the literal of an unconnected
+// input outside the step on the left (gone once connected). Right drag pans, the wheel zooms (0.5-1.5) under the cursor, Home resets.
+// Routes are dimmed in their type's colour; a selected step lights its inputs and consumers, a selected route its path from the source (the
+// other branches of that output at 0.75), U / D trace the selected step upstream / downstream. Literals edit through SetNodeProperty, like
+// everywhere. Sections are not drawn: they are reading order, and depth columns spread a section over several columns.
 // Selection, trace, pan and zoom are view state: never saved, never a command.
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_graph_widgets.h"
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_stack_commands.h"
@@ -16,37 +18,37 @@
 
 namespace xmaterial_editor
 {
-    namespace stack_style       // E27's theme (NodeOS_Types.h), a shade lighter so the dimmed routes still read
+    namespace stack_style       // the old canvas's flat theme (xmaterial_graph_canvas.h): grey inputs half, black outputs half, kind headers
     {
-        constexpr ImU32 Canvas        = IM_COL32( 24,  25,  28, 255);
-        constexpr ImU32 Grid          = IM_COL32( 29,  30,  34, 255);
-        constexpr ImU32 GridMajor     = IM_COL32( 34,  35,  40, 255);
-        constexpr ImU32 Section       = IM_COL32( 31,  33,  37, 255);
-        constexpr ImU32 SectionBorder = IM_COL32( 46,  49,  55, 255);
-        constexpr ImU32 StepBody      = IM_COL32( 44,  46,  52, 255);
-        constexpr ImU32 StepHeader    = IM_COL32( 54,  57,  65, 255);
-        constexpr ImU32 StepBorder    = IM_COL32( 14,  15,  17, 255);
-        constexpr ImU32 Divider       = IM_COL32( 60,  64,  72, 255);
-        constexpr ImU32 Text          = IM_COL32(226, 232, 240, 255);
-        constexpr ImU32 TextDim       = IM_COL32(156, 163, 176, 255);
-        constexpr ImU32 TextMuted     = IM_COL32(104, 112, 126, 255);
-        constexpr ImU32 Chip          = IM_COL32( 30,  32,  36, 255);
+        constexpr ImU32 Canvas        = IM_COL32( 30,  31,  34, 255);
+        constexpr ImU32 Grid          = IM_COL32( 36,  37,  41, 255);
+        constexpr ImU32 GridMajor     = IM_COL32( 42,  43,  48, 255);
+        constexpr ImU32 InputsHalf    = IM_COL32( 62,  62,  64, 255);     // the old (96,96,96,128) over its node background
+        constexpr ImU32 OutputsHalf   = IM_COL32( 30,  30,  31, 255);     // the old (32,32,32,128)
+        constexpr ImU32 HeaderStep    = IM_COL32( 64,  64,  66, 255);     // the old headers at alpha 128: function, exposed, input, output
+        constexpr ImU32 HeaderExposed = IM_COL32(114, 114,  64, 255);
+        constexpr ImU32 HeaderInput   = IM_COL32( 26,  80,  28, 255);
+        constexpr ImU32 HeaderOutput  = IM_COL32( 88,  38,  90, 255);
+        constexpr ImU32 StepBorder    = IM_COL32( 40,  40,  40, 255);
+        constexpr ImU32 Text          = IM_COL32(220, 220, 220, 255);
+        constexpr ImU32 TextDim       = IM_COL32(150, 150, 154, 255);
+        constexpr ImU32 Chip          = IM_COL32( 40,  40,  42, 255);
+        constexpr ImU32 Literal       = IM_COL32( 70,  70,  72, 255);
+        constexpr ImU32 LiteralLink   = IM_COL32( 64, 200,  64, 255);     // the old canvas's literal dot and link
         constexpr ImU32 Selected      = IM_COL32( 74, 144, 226, 255);
         constexpr ImU32 Related       = IM_COL32(140, 170, 205, 255);
         constexpr ImU32 Error         = IM_COL32(230,  72,  72, 255);
-        constexpr ImU32 KindInput     = IM_COL32( 92, 170, 110, 255);
-        constexpr ImU32 KindOutput    = IM_COL32(170, 104, 196, 255);
-        constexpr ImU32 KindStep      = IM_COL32( 96, 104, 120, 255);
-        constexpr ImU32 KindExposed   = IM_COL32(214, 190,  92, 255);
 
-        constexpr float ROUND      = 4.0f;
-        constexpr float PIN_R      = 4.0f;
-        constexpr float ROW_GAP    = 12.0f;     // between an input's name and its chip or widget
-        constexpr float CHIP_PAD   = 6.0f;
-        constexpr float CHIP_H     = 16.0f;
-        constexpr float NUM_W      = 64.0f;
-        constexpr float BUTTON_MIN = 72.0f, BUTTON_MAX = 150.0f;
-        constexpr float DIM = 0.35f, DIM_TRACE = 0.15f, SIBLING = 0.6f, HOVER = 0.8f;      // route alphas (5.6)
+        constexpr float ROUND      = 3.5f;
+        constexpr float PIN_R      = 4.5f;
+        constexpr float ROW_GAP    = 8.0f;      // between an input's name and its chip
+        constexpr float CHIP_PAD   = 4.0f;
+        constexpr float CHIP_H     = 15.0f;
+        constexpr float NUM_W      = 48.0f;
+        constexpr float BUTTON_MIN = 64.0f, BUTTON_MAX = 120.0f;
+        constexpr float LIT_PAD    = 4.0f;      // inside a literal's box
+        constexpr float LIT_LINK   = 16.0f;     // from a literal's box to its pin
+        constexpr float DIM = 0.55f, DIM_TRACE = 0.15f, SIBLING = 0.75f, HOVER = 0.9f;     // route alphas (5.6)
         constexpr float WIRE_W = 1.5f, LIT_W = 2.5f;                                        // route widths, screen px
         constexpr float ZOOM_MIN = 0.5f, ZOOM_MAX = 1.5f;
         constexpr float PICK = 5.0f;                                                        // a click this close to a route picks it, screen px
@@ -61,6 +63,7 @@ namespace xmaterial_editor
         {
             m_View.m_Measure = [this](const std::string& s) { return Measure(s); };
             m_View.m_InputW  = [this](const xmaterial_graph::node& N, const xmaterial_graph::input_pin& P) { return InputW(N, P); };
+            m_View.m_LitW    = [this](const xmaterial_graph::node& N, const xmaterial_graph::input_pin& P) { return LitW(N, P); };
         }
         stack_canvas(const stack_canvas&) = delete;
 
@@ -102,8 +105,7 @@ namespace xmaterial_editor
             const ImVec2 Avail = ImGui::GetContentRegionAvail();
             if (Avail.x < 16 || Avail.y < 16) return;
             const ImVec2 Max{ m_Origin.x + Avail.x, m_Origin.y + Avail.y };
-            m_View.m_Width = Avail.x;
-            Relayout(Avail.x);
+            Relayout();
             if (m_SelStep && !m_StepIndex.contains(m_SelStep)) Select(0, 0);           // an undo or a delete took it
             if (m_SelConn && EdgeOf(m_SelConn) < 0) m_SelConn = 0;
 
@@ -145,7 +147,6 @@ namespace xmaterial_editor
             m_HoverEdge = ImGui::IsItemHovered() ? RouteAt(IO.MousePos) : -1;
             if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) Select(0, m_HoverEdge >= 0 ? m_In.m_Edges[m_HoverEdge].m_Id : 0);
 
-            DrawSections(D);
             const auto Lit = Lighting();
             DrawRoutes(D, Lit);
             m_HoverStep = 0;
@@ -177,12 +178,24 @@ namespace xmaterial_editor
 
         static bool HasParam(const node& N, const xmaterial_graph::input_pin& P) noexcept { return P.m_ParamIndex >= 0 && P.m_ParamIndex < static_cast<int>(N.m_Params.size()); }
 
-        // The width of what sits right of an input's name: its chip, its widget or its default value
-        float RightW(const node& N, const xmaterial_graph::input_pin& P) const noexcept
+        // An input row inside the step: its name, then the chip of its source when connected
+        float ChipW(const xmaterial_graph::input_pin& P) const noexcept
+        {
+            auto* pC = ConnectionOf(P);
+            return pC ? Measure(cmds::ChipText(m_Doc.m_Graph, pC->m_OutputPinGuid)) + 2 * stack_style::CHIP_PAD : 0.0f;
+        }
+        float InputW(const node&, const xmaterial_graph::input_pin& P) const noexcept { const float C = ChipW(P); return Measure(P.m_Name) + (C > 0 ? stack_style::ROW_GAP + C : 0.0f); }
+
+        // The literal left of an unconnected input (the old canvas's): a box with a label and the widget, then a link to the pin. 0 = none.
+        static std::string LitLabel(const node& N, const xmaterial_graph::input_pin& P) noexcept
+        {
+            using type = xmaterial_graph::node_param::type;
+            const auto T = N.m_Params[P.m_ParamIndex].m_Type;
+            return T == type::TEXTURE_RESOURCE ? "Rsc" : T == type::FILE ? "File" : P.m_Name.substr(0, 1);
+        }
+        float WidgetW(const node& N, const xmaterial_graph::input_pin& P) const noexcept
         {
             namespace st = stack_style;
-            if (auto* pC = ConnectionOf(P)) return Measure(cmds::ChipText(m_Doc.m_Graph, pC->m_OutputPinGuid)) + 2 * st::CHIP_PAD;
-            if (!HasParam(N, P)) return Measure(P.m_DefaultExpr);
             const auto& Param = N.m_Params[P.m_ParamIndex];
             using type = xmaterial_graph::node_param::type;
             switch (Param.m_Type)
@@ -193,11 +206,15 @@ namespace xmaterial_editor
             default:                          return 0;
             }
         }
-
-        float InputW(const node& N, const xmaterial_graph::input_pin& P) const noexcept { return Measure(P.m_Name) + stack_style::ROW_GAP + RightW(N, P); }
+        float LitW(const node& N, const xmaterial_graph::input_pin& P) const noexcept
+        {
+            namespace st = stack_style;
+            if (ConnectionOf(P) || !HasParam(N, P) || WidgetW(N, P) == 0) return 0;
+            return st::LIT_PAD + Measure(LitLabel(N, P)) + 4 + WidgetW(N, P) + st::LIT_PAD + st::LIT_LINK;
+        }
 
         //------------------------------------------------------------------------------------------
-        // Layout: rebuilt only when what it reads changes (the stack, the rows, the widths, the edges) or the width moves by a bucket (4)
+        // Layout: rebuilt only when what it reads changes (the stack, the rows, the widths, the edges); the view width plays no part (4)
         //------------------------------------------------------------------------------------------
         static bool Same(const stack_routes::graph_input& A, const stack_routes::graph_input& B) noexcept
         {
@@ -205,8 +222,8 @@ namespace xmaterial_editor
             for (std::size_t s = 0; s < A.m_In.size(); ++s)
             {
                 const auto& a = A.m_In[s].m_Steps; const auto& b = B.m_In[s].m_Steps;
-                if (A.m_In[s].m_Id != B.m_In[s].m_Id || a.size() != b.size()) return false;
-                for (std::size_t i = 0; i < a.size(); ++i) if (a[i].m_Id != b[i].m_Id || a[i].m_W != b[i].m_W || a[i].m_nRows != b[i].m_nRows) return false;
+                if (A.m_In[s].m_Id != B.m_In[s].m_Id || A.m_In[s].m_bOutput != B.m_In[s].m_bOutput || a.size() != b.size()) return false;
+                for (std::size_t i = 0; i < a.size(); ++i) if (a[i].m_Id != b[i].m_Id || a[i].m_W != b[i].m_W || a[i].m_nRows != b[i].m_nRows || a[i].m_LitW != b[i].m_LitW) return false;
             }
             for (std::size_t i = 0; i < A.m_Edges.size(); ++i)
             {
@@ -216,14 +233,12 @@ namespace xmaterial_editor
             return true;
         }
 
-        void Relayout(float Width) noexcept
+        void Relayout() noexcept
         {
-            auto In = stack_routes::FromGraph(m_Doc.m_Graph, m_View.m_Measure, m_View.m_InputW);
-            const int  Bucket  = static_cast<int>(std::floor(Width / stack_layout::geo::HYSTERESIS));
-            const bool bForgot = m_View.m_Memory.m_Lanes.empty() && !m_R.m_Memo.empty();          // a load, an undo or RepackRoutes cleared the lanes
-            if (m_bLaidOut && Bucket == m_Bucket && !bForgot && Same(In, m_In)) return;
-            m_In = std::move(In); m_Bucket = Bucket; m_bLaidOut = true;
-            m_R  = stack_routes::Build(m_In.m_In, m_In.m_Edges, Width, m_View.m_Memory);
+            auto In = stack_routes::FromGraph(m_Doc.m_Graph, m_View.m_Measure, m_View.m_InputW, m_View.m_LitW);
+            if (m_bLaidOut && Same(In, m_In)) return;
+            m_In = std::move(In); m_bLaidOut = true;
+            m_R  = stack_routes::Build(m_In.m_In, m_In.m_Edges);
 
             auto& G = m_Doc.m_Graph;
             m_StepIndex.clear();
@@ -237,8 +252,6 @@ namespace xmaterial_editor
                 }
             m_SourceWires.assign(m_R.m_Sources.size(), {});
             for (int w = 0; w < static_cast<int>(m_R.m_Wires.size()); ++w) m_SourceWires[m_R.m_Wires[w].m_Source].push_back(w);
-            m_EdgeAtInput.clear();
-            for (int e = 0; e < static_cast<int>(m_In.m_Edges.size()); ++e) m_EdgeAtInput[static_cast<std::int64_t>(m_In.m_Edges[e].m_To) << 20 | m_In.m_Edges[e].m_ToRow] = e;
         }
 
         int EdgeOf(std::uint64_t Connection) const noexcept
@@ -286,24 +299,6 @@ namespace xmaterial_editor
             {
                 const float y = Snap(ToScreen(0, i * Step).y);
                 D->AddLine({ m_Origin.x, y }, { Max.x, y }, i % 4 ? st::Grid : st::GridMajor);
-            }
-        }
-
-        void DrawSections(ImDrawList* D) const noexcept
-        {
-            namespace st = stack_style;
-            const auto& Secs = m_Doc.m_Graph.m_Stack.m_Sections;
-            for (std::size_t s = 0; s < m_R.m_Layout.m_Sections.size() && s < m_In.m_In.size(); ++s)
-            {
-                const auto& b  = m_R.m_Layout.m_Sections[s];
-                const ImVec2 P0 = ToScreen(b.m_X, b.m_Y), P1 = ToScreen(b.m_X + b.m_W, b.m_Y + b.m_H);
-                const bool bOutput = s < Secs.size() && Secs[s].m_Kind == xmaterial_graph::section::kind::OUTPUT;
-                D->AddRectFilled(P0, P1, st::Section, Len(6));
-                D->AddRect(P0, P1, st::SectionBorder, Len(6), 0, 1.0f);
-                const float ty = P0.y + (Len(stack_layout::geo::SECTION_HEADER_H) - FontPx()) * 0.5f;
-                Text(D, { P0.x + Len(10), ty }, bOutput ? Alpha(st::KindOutput, 0.95f) : st::TextDim, m_In.m_SectionNames[s]);
-                const std::string Count = std::to_string(m_In.m_In[s].m_Steps.size());
-                Text(D, { P1.x - Len(10) - TextW(Count), ty }, st::TextMuted, Count);
             }
         }
 
@@ -410,11 +405,11 @@ namespace xmaterial_editor
             return Best;
         }
 
-        void Pin(ImDrawList* D, ImVec2 C, ImU32 Color, bool bConnected) const noexcept
+        void Pin(ImDrawList* D, ImVec2 C, ImU32 Color, bool bConnected) const noexcept      // the old canvas's: filled when connected
         {
-            const float r = std::max(3.0f, Len(stack_style::PIN_R));
-            D->AddCircleFilled(C, r, bConnected ? Color : stack_style::Chip);
-            D->AddCircle(C, r, Color, 0, 1.5f);
+            const float r = std::max(2.5f, Len(stack_style::PIN_R));
+            if (bConnected) D->AddCircleFilled(C, r, Color);
+            else            { D->AddCircleFilled(C, r, stack_style::OutputsHalf); D->AddCircle(C, r, Color, 0, 1.5f); }
         }
 
         void DrawStep(ImDrawList* D, int g, ImVec2 ViewMax) noexcept
@@ -426,28 +421,28 @@ namespace xmaterial_editor
             auto& N = *pN;
             const auto& b = m_R.m_Layout.m_Steps[g];
             const ImVec2 P0 = ToScreen(b.m_X, b.m_Y), P1 = ToScreen(b.m_X + b.m_W, b.m_Y + b.m_H);
-            if (P1.x < m_Origin.x || P1.y < m_Origin.y || P0.x > ViewMax.x || P0.y > ViewMax.y) return;       // culled
+            if (P1.x < m_Origin.x || P1.y < m_Origin.y || P0.x - Len(m_R.m_Layout.m_LitW[g]) > ViewMax.x || P0.y > ViewMax.y) return;       // culled
 
             const bool bSelected = N.m_Guid.m_Value == m_SelStep;
             const int  SelEdge   = EdgeOf(m_SelConn);
             const bool bRelated  = SelEdge >= 0 && (m_In.m_Edges[SelEdge].m_From == g || m_In.m_Edges[SelEdge].m_To == g);
             const float R = Len(st::ROUND);
 
-            // Box: shadow, body, header, the kind's accent, border
-            D->AddRectFilled({ P0.x + 2, P0.y + 3 }, { P1.x + 2, P1.y + 3 }, IM_COL32(0, 0, 0, 70), R);
-            D->AddRectFilled(P0, P1, st::StepBody, R);
+            // Box, flat: the header in the kind's colour, the inputs half grey, the outputs half black (the old canvas)
+            float InW = 0;
+            for (auto& P : N.m_InputPins) InW = std::max(InW, InputW(N, P));
             const float HeaderB = P0.y + Len(geo::HEADER_H);
-            D->AddRectFilled(P0, { P1.x, HeaderB }, st::StepHeader, R, ImDrawFlags_RoundCornersTop);
+            const float Split   = N.m_InputPins.empty() ? P0.x : N.m_OutputPins.empty() ? P1.x : std::min(P1.x, P0.x + Len(geo::PORT_PAD + InW + geo::MID_GAP * 0.5f));
             const bool bExposed = std::ranges::any_of(N.m_Params, [](auto& P) { return P.m_bExpose || P.m_ParamID != 0; });
-            const ImU32 Kind = N.isInputNode() ? st::KindInput : N.isOutputNode() ? st::KindOutput : bExposed ? st::KindExposed : st::KindStep;
-            D->AddRectFilled(P0, { P0.x + Len(3), P1.y }, Kind, R, ImDrawFlags_RoundCornersLeft);
-            D->AddLine({ P0.x, Snap(HeaderB) }, { P1.x, Snap(HeaderB) }, st::StepBorder);
+            D->AddRectFilled(P0, { P1.x, HeaderB }, N.isInputNode() ? st::HeaderInput : N.isOutputNode() ? st::HeaderOutput : bExposed ? st::HeaderExposed : st::HeaderStep, R, ImDrawFlags_RoundCornersTop);
+            if (Split > P0.x) D->AddRectFilled({ P0.x, HeaderB }, { Split, P1.y }, st::InputsHalf, R, ImDrawFlags_RoundCornersBottomLeft);
+            if (Split < P1.x) D->AddRectFilled({ Split, HeaderB }, P1, st::OutputsHalf, R, ImDrawFlags_RoundCornersBottomRight);
 
             // Header: the step's name, its type dimmed when it says something more
             const float ty = P0.y + (Len(geo::HEADER_H) - FontPx()) * 0.5f;
             const std::string Name = cmds::StepLabel(N);
             Text(D, { P0.x + Len(geo::PORT_PAD), ty }, st::Text, Name);
-            if (cmds::NoSpace(Name) != cmds::NoSpace(N.m_Name)) Text(D, { P1.x - Len(geo::PORT_PAD) - TextW(N.m_Name), ty }, st::TextMuted, N.m_Name);
+            if (cmds::NoSpace(Name) != cmds::NoSpace(N.m_Name)) Text(D, { P1.x - Len(geo::PORT_PAD) - TextW(N.m_Name), ty }, st::TextDim, N.m_Name);
 
             // Selection: the whole box is the step's button (widgets drawn later win the overlap)
             ImGui::PushID(static_cast<int>(N.m_Guid.m_Value ^ (N.m_Guid.m_Value >> 32)));
@@ -458,41 +453,36 @@ namespace xmaterial_editor
             if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) Select(N.m_Guid.m_Value, 0);
             if (N.m_HasErrMsg && !N.m_ErrMsg.empty() && ImGui::IsItemHovered()) xeditor::hint::Text("%s", N.m_ErrMsg.c_str());
 
-            // Input rows: pin, name, then the chip of its source, its widget or its default value
-            const float xL = P0.x + Len(geo::PORT_PAD), xR = P1.x - Len(geo::PORT_PAD);
-            const float FrameH = std::min(Len(geo::ROW_H - 2), FontPx() + Len(4));
+            // Input rows (left): pin on the left edge, name, the chip of its source; an unconnected input's literal outside, left of its pin
+            const float FrameH = std::min(Len(geo::ROW_H - 3), FontPx() + Len(3));
             int Row = 0;
             ImGui::PushFont(nullptr, ImGui::GetCurrentContext()->FontSizeBase * m_Zoom);
-            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, { Len(5), std::max(0.0f, (FrameH - FontPx()) * 0.5f) });
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, Len(3));
-            ImGui::PushStyleColor(ImGuiCol_FrameBg, st::Chip);
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, { Len(4), std::max(0.0f, (FrameH - FontPx()) * 0.5f) });
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, Len(2));
+            ImGui::PushStyleColor(ImGuiCol_FrameBg, st::OutputsHalf);
             for (auto& P : N.m_InputPins)
             {
-                const float cy = P0.y + Len(stack_layout::RowY(Row));
-                const auto  E  = m_EdgeAtInput.find(static_cast<std::int64_t>(g) << 20 | Row);
-                const bool  bRightSide = E != m_EdgeAtInput.end() && !m_R.m_Routes[E->second].m_Points.empty() && m_R.m_Routes[E->second].m_Points.back().m_X > b.m_X + b.m_W * 0.5f;    // a same-column route arrives on the right
+                const float cy = P0.y + Len(stack_layout::RowY(Row++));
                 const auto* pC = ConnectionOf(P);
-                Pin(D, { bRightSide ? P1.x : P0.x, cy }, TypeColor(P.m_TypeGUID), pC != nullptr);
-                Text(D, { xL, cy - FontPx() * 0.5f }, pC ? st::Text : st::TextDim, P.m_Name);
-
-                const float W = Len(RightW(N, P));
+                Text(D, { P0.x + Len(geo::PORT_PAD), cy - FontPx() * 0.5f }, pC ? st::Text : st::TextDim, P.m_Name);
                 if (pC)
                 {
                     const std::string Chip = cmds::ChipText(m_Doc.m_Graph, pC->m_OutputPinGuid);
-                    const ImVec2 C0{ xR - W, cy - Len(st::CHIP_H) * 0.5f }, C1{ xR, cy + Len(st::CHIP_H) * 0.5f };
-                    const auto* pSrc = m_Doc.m_Graph.findNodeByPin(pC->m_OutputPinGuid);
-                    bool bIn; int i, Sub;
-                    const auto* pOut = pSrc ? m_Doc.m_Graph.findPinConst(*pSrc, pC->m_OutputPinGuid, bIn, i, Sub) : nullptr;
-                    const ImU32 SrcColor = pOut ? TypeColor(pOut->m_TypeGUID) : st::TextDim;
-                    D->AddRectFilled(C0, C1, st::Chip, Len(3));
-                    D->AddRect(C0, C1, Alpha(SrcColor, 0.55f), Len(3), 0, 1.0f);
-                    Text(D, { C0.x + Len(st::CHIP_PAD), cy - FontPx() * 0.5f }, st::Text, Chip);
+                    const float x = P0.x + Len(geo::PORT_PAD + Measure(P.m_Name) + st::ROW_GAP);
+                    const ImVec2 C0{ x, cy - Len(st::CHIP_H) * 0.5f }, C1{ x + Len(ChipW(P)), cy + Len(st::CHIP_H) * 0.5f };
+                    D->AddRectFilled(C0, C1, st::Chip, Len(2));
+                    Text(D, { C0.x + Len(st::CHIP_PAD), cy - FontPx() * 0.5f }, st::TextDim, Chip);
                 }
-                else if (HasParam(N, P))
+                else if (const float LW = LitW(N, P); LW > 0)
                 {
                     using type = xmaterial_graph::node_param::type;
                     const int iParam = P.m_ParamIndex;
-                    ImGui::SetCursorScreenPos({ xR - W, cy - FrameH * 0.5f });
+                    const ImVec2 B0{ P0.x - Len(LW), cy - FrameH * 0.5f - Len(1) }, B1{ P0.x - Len(st::LIT_LINK), cy + FrameH * 0.5f + Len(1) };
+                    D->AddRectFilled(B0, B1, st::Literal, Len(2));
+                    D->AddRect(B0, B1, st::StepBorder, Len(2));
+                    Text(D, { B0.x + Len(st::LIT_PAD), cy - FontPx() * 0.5f }, st::TextDim, LitLabel(N, P));
+                    const float W = Len(WidgetW(N, P));
+                    ImGui::SetCursorScreenPos({ B1.x - Len(st::LIT_PAD) - W, cy - FrameH * 0.5f });
                     switch (N.m_Params[iParam].m_Type)
                     {
                     case type::FLOAT: case type::INT:
@@ -503,24 +493,25 @@ namespace xmaterial_editor
                     case type::FILE:             if (auto H = graph_widgets::FileButton(m_Undo, N, iParam, { W, FrameH }); !H.empty()) xeditor::hint::Text("%s", H.c_str()); break;
                     default: break;
                     }
+                    D->AddLine({ B1.x, cy }, { P0.x, cy }, st::LiteralLink, std::max(1.0f, Len(1.5f)));
+                    D->AddCircleFilled({ B1.x, cy }, std::max(2.0f, Len(3.0f)), st::LiteralLink);
                 }
-                else if (!P.m_DefaultExpr.empty()) Text(D, { xR - W, cy - FontPx() * 0.5f }, st::TextMuted, P.m_DefaultExpr);
-                ++Row;
+                Pin(D, { P0.x, cy }, TypeColor(P.m_TypeGUID), pC != nullptr);
             }
             ImGui::PopStyleColor();
             ImGui::PopStyleVar(2);
             ImGui::PopFont();
             ImGui::PopID();
 
-            // Output rows (the first always, the others when used): name right aligned, pin on the right edge
-            if (Row > 0 && !N.m_OutputPins.empty()) D->AddLine({ P0.x + Len(8), Snap(P0.y + Len(geo::HEADER_H + Row * geo::ROW_H)) }, { P1.x - Len(8), Snap(P0.y + Len(geo::HEADER_H + Row * geo::ROW_H)) }, st::Divider);
+            // Output rows (right; the first always, the others when used): name right aligned, pin on the right edge
+            Row = 0;
             for (std::size_t o = 0; o < N.m_OutputPins.size(); ++o)
             {
                 const auto& Op = N.m_OutputPins[o];
                 const bool bUsed = IsUsed(Op);
                 if (o > 0 && !bUsed) continue;
                 const float cy = P0.y + Len(stack_layout::RowY(Row++));
-                Text(D, { xR - TextW(Op.m_Name), cy - FontPx() * 0.5f }, bUsed ? st::Text : st::TextDim, Op.m_Name);
+                Text(D, { P1.x - Len(geo::PORT_PAD) - TextW(Op.m_Name), cy - FontPx() * 0.5f }, bUsed ? st::Text : st::TextDim, Op.m_Name);
                 Pin(D, { P1.x, cy }, TypeColor(Op.m_TypeGUID), bUsed);
             }
 
@@ -528,7 +519,7 @@ namespace xmaterial_editor
             const ImU32 Border = N.m_HasErrMsg ? st::Error : bSelected ? st::Selected : bRelated ? st::Related : st::StepBorder;
             if (bSelected) D->AddRect({ P0.x - 3, P0.y - 3 }, { P1.x + 3, P1.y + 3 }, Alpha(st::Selected, 0.25f), R + 3, 0, 3.0f);
             D->AddRect(P0, P1, Border, R, 0, bSelected || N.m_HasErrMsg ? 2.0f : bRelated ? 1.5f : 1.0f);
-            if (!m_InTrace.empty() && !m_InTrace[g]) D->AddRectFilled({ P0.x - 1, P0.y - 1 }, { P1.x + 3, P1.y + 4 }, Alpha(st::Canvas, 0.6f), R);       // outside the trace
+            if (!m_InTrace.empty() && !m_InTrace[g]) D->AddRectFilled({ P0.x - Len(m_R.m_Layout.m_LitW[g]) - 1, P0.y - 1 }, { P1.x + 3, P1.y + 4 }, Alpha(st::Canvas, 0.6f), R);       // outside the trace
         }
 
         bool IsUsed(const xmaterial_graph::output_pin& Op) const noexcept
@@ -562,9 +553,7 @@ namespace xmaterial_editor
         stack_routes::graph_input                   m_In;
         stack_routes::result                        m_R;
         bool                                        m_bLaidOut = false;
-        int                                         m_Bucket   = 0;
         std::unordered_map<std::uint64_t, int>      m_StepIndex;        // node guid -> global step
-        std::unordered_map<std::int64_t, int>       m_EdgeAtInput;      // (global step << 20 | row) -> edge
         std::vector<ImU32>                          m_SourceColor;      // per source output: its type's colour
         std::vector<std::vector<int>>               m_SourceWires;      // per source output: its wires
 

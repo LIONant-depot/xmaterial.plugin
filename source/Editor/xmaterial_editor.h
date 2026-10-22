@@ -49,7 +49,7 @@ namespace xmaterial_editor
         cmds::sources_cmd               m_Sources;
         cmds::find_uses_cmd             m_FindUses;
         cmds::validate_placement_cmd    m_ValidatePlacement;
-        cmds::stack_view                m_StackView;            // layout + lane memory (view state, never saved)
+        cmds::stack_view                m_StackView;            // how the stack canvas measures (view state, never saved)
         cmds::layout_stats_cmd          m_LayoutStats;
         cmds::route_info_cmd            m_RouteInfo;
         cmds::repack_routes_cmd         m_RepackRoutes;
@@ -100,7 +100,7 @@ namespace xmaterial_editor
 
         ~session() noexcept override { xresource::g_Mgr.ReleaseRef(m_MaterialRef); }
 
-        void OnDocumentReplaced() noexcept override { m_InspectedNode = 0; m_NodeInspector.Clear(); m_StackView.m_Memory = {}; }
+        void OnDocumentReplaced() noexcept override { m_InspectedNode = 0; m_NodeInspector.Clear(); }
 
         void OnCompiled() noexcept override
         {

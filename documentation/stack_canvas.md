@@ -1,7 +1,7 @@
 # The material stack canvas (spec)
 
 A second presentation of the material graph: the material reads like a recipe, in user-named **sections** (Coordinates, Normal, Surface
-color, Experiments, Output) that flow into **columns** left to right, each read top to bottom. The system places every step and owns every
+color, Experiments, Output), shown in **columns** by dependency depth, flowing left to right (§4). The system places every step and owns every
 route. It edits the same `xmaterial_graph::graph` through the same undo system as the old canvas, and every gesture is a console command, so an
 AI drives it exactly as a person does.
 
@@ -11,8 +11,8 @@ Status: spec. `[A]` marks an assumption not verified in code. `[Q]` marks an ope
 source/Graph/xmaterial_stack.h              sections, the stack, serialize hooks              (new, no ImGui)
 source/Graph/xmaterial_stack_adapter.h      v1 graph -> stack (stable topological sort)       (new, no ImGui)
 source/Graph/xmaterial_step_names.h         step name -> GLSL identifier, shared with compiler (new)
-source/Editor/xmaterial_stack_layout.h      passes A..F: placement, columns, Y, X              (new, pure)
-source/Editor/xmaterial_stack_routes.h      highways, channels, lanes, route geometry          (new, pure)
+source/Editor/xmaterial_stack_layout.h      depth columns, order, Y, X                         (new, pure)
+source/Editor/xmaterial_stack_routes.h      gutter lanes, route geometry                       (new, pure)
 source/Editor/xmaterial_stack_commands.h    stack commands and queries                         (new)
 source/Editor/xmaterial_stack_canvas.h      drawing + gestures (ImDrawList, no node editor)    (new)
 source/Editor/xmaterial_graph_widgets.h     param widgets moved out of xmaterial_graph_canvas.h (new, moved code)
@@ -34,6 +34,7 @@ source/Editor/xmaterial_graph_widgets.h     param widgets moved out of xmaterial
   reusable interface.
 - Move ≠ insert. Moving changes presentation and keeps bindings. Inserting on a connection routes that connection through the new step.
   Moving to another section changes organisation only. Duplicating copies bindings explicitly.
+- Type rule: a connection needs equal types, except that a float (or a sub-element such as `Vec2.x`) may feed a vec2/vec3/vec4 input, compiled as a splat `vecN(x)`; mismatched vector widths, float to int and vector to scalar are refused (`IsPinCompatible`).
 - No auto-wiring by type. A binding is made only by an explicit pick. If several ports fit, the user chooses.
 - The system owns every route: wires never cross steps, direction picks the side, distance picks the lane, one trunk per source output.
 - Step names are identity for people (chips, console symbols, GLSL variable names). GUIDs stay the identity for storage and undo.
@@ -114,8 +115,8 @@ them (§8).
 
 ### 2.3 View state (never saved, never a command)
 
-Selection (step, connection, chip focus), hover, trace mode, navigation history, scroll/zoom, lane memory (§5.5), column partition memory
-(§4.4), the previewed step (§9.5).
+Selection (step, connection, chip focus), hover, trace mode, navigation history, scroll/zoom, the previewed step (§9.5). The layout keeps no
+memory (§5.5).
 
 ### 2.4 Saved file (v2)
 
@@ -229,137 +230,119 @@ All in `xmaterial_stack.h`, pure functions over `graph` + `stack`.
 
 ## 4. Layout algorithm (`xmaterial_stack_layout.h`)
 
-Pure function: `layout Build(const graph&, const stack&, float ViewWidth, const view_memory&)`. No ImGui calls except text measurement
-through an injected `measure` callback, so it runs headless in the self-check. Rebuilt only when the document revision or the width bucket
-changes (cache key: `graph_document` revision counter + `floor(ViewWidth/24)`).
+**Supersedes the section-flow columns** (sections partitioned into columns by height, each read top to bottom) per owner feedback
+2026-10-21: columns now come from dependency depth, the flow is left to right, steps slide up and down to keep wires short. Sections stay
+the reading order on disk and in every command; the canvas does not draw them (a depth column holds steps of several sections and a section
+spreads over several columns, so frames would overlap; labelled groups can come back once they fit the layering).
 
-### 4.1 Passes (order is required, as in E27 `NodeOS_UI_Canvas.h` Pass A:94 / B:143 / C:479)
+Pure functions: `Layer(input, edges)` then the router's lanes, then `PlaceX`. No ImGui; text is measured by injected callbacks, so it runs
+headless in the self-check. Rebuilt only when what it reads changes (steps, rows, widths, literals, edges); the view width plays no part.
+Deterministic and memoryless: the same graph always gives the same picture, a load included.
 
-| Pass | Does | Depends on |
-|---|---|---|
-| A step boxes | per step: width, height, visible rows | node, connections |
-| B columns | partition sections into columns | A heights, width, memory |
-| D routes | highways, channels, lanes in **discrete keys** | B, order |
-| C Y | stack sections and steps per column; channel gaps grow with lanes | A, D channel lane counts |
-| E X | column X from widest step + gutter lane extents | A, D gutter lane counts |
-| F geometry | polylines, junctions, crossing gaps, slots, chips | C, D, E |
+### 4.1 Passes
 
-D runs before C/E because lanes are assigned on discrete keys `(column position, row)` that do not move when gaps grow: inserting space never
-changes which intervals overlap, so lane assignment is independent of pixels and stable.
+| Pass | Does |
+|---|---|
+| A step boxes | per step: width, rows, literal width |
+| B columns | longest path from the inputs; dummies for wires that skip columns |
+| C order | reading order, then barycentre sweeps and transposes (fewest crossings) |
+| D y | per column, least total wire `|dy|` without overlap; straighten |
+| E lanes | per gutter (§5); untangle |
+| F x, geometry | columns from widths and lane counts; polylines, junctions, crossing gaps |
 
 ### 4.2 Pass A: step boxes
 
-Rows, top to bottom: header (step name, then type name dimmed if different), one row per input (connected: source chip; unconnected: param
-widget if `m_ParamIndex >= 0`, else the default text), one row per **used** output plus the first output always. Sub-element pins
-(`x/y/z/w`) are never rows: a connection from a sub-element shows as `UV.x` on the consumer's chip. Width = max(text, widgets, 160), height =
-`HEADER_H + rows * ROW_H + NODE_PAD_BOTTOM` (port geo constants from `NodeOS_CanvasSupport.h:230-257`). A collapsed section is one box:
-header + summary line + one row per boundary input and output (§7.6).
+Inputs on the left half, outputs on the right half (the old canvas), side by side: input i and output o share row height, `RowY(r)` from the
+top. Header: step name, then the type dimmed if different. An input row holds its name and, when connected, its source chip (§6). Outputs:
+the first always, the others when used; sub-element pins (`x/y/z/w`) are never rows (a connection from one shows as `UV.x` on the chip).
+Width = max(header, widest input + `MID_GAP` + widest output) + padding; height = `HEADER_H + max(inputs, outputs) * ROW_H + pad`. The
+literal of an unconnected input with a parameter is drawn outside, left of its pin (label, widget, a link to the pin; gone once connected);
+its width is the step's `LitW`.
 
-### 4.3 Pass B: column wrapping
+### 4.3 Pass B: columns by depth
 
-- Column width `CW` = widest step overall (uniform columns read best; `[Q]` per-column widths later?). Minimum gutter `G0 = 2*ICON_CLEARANCE +
-  COLUMN_MARGIN`.
-- `K = clamp(floor((ViewWidth + G0) / (CW + G0)), 1, nSections)`. Narrow window => one column.
-- Partition the ordered sections into `K` contiguous runs minimising the tallest run (linear-partition DP, O(K·n²), n = sections). Sections
-  never split. OUTPUT ends the last column.
-- After E: if the real width (with lane extents) > ViewWidth and K > 1, K -= 1 and redo B..E (at most K times).
-- Hysteresis: K changes only when ViewWidth crosses the threshold by > 24 px.
+- Column = longest path from a step with no connected input: inputs, constants, samplers sit in column 0. The order invariant makes every
+  edge point forward, so one pass in order computes it. The OUTPUT section's steps go to the last column (one past the deepest other step).
+- Every connection therefore goes right (`column(to) > column(from)`): there are no same-column or leftward routes, so outputs stay on the
+  right and inputs on the left (the owner's "move a leftward output to the bottom" rule is never needed).
+- A wire that skips columns gets a dummy (a slot of height 0) in each column it crosses, one per (source output, column): all wires of one
+  output share it. Dummies are ordered and placed like steps, so a long wire passes between steps, never behind one.
+- An unwired step goes to the bottom of column 0: adding one moves nothing else.
 
-### 4.4 Stability of the column partition
+### 4.4 Pass C: order in a column
 
-Keep the previous partition (view memory) while K is unchanged and no column exceeds the tallest-run optimum by > 25%. A step added or a
-section collapsed therefore never moves other sections between columns. Re-partition on K change, on request (`RepackRoutes -Columns`), or
-past the 25% budget.
+Start from the reading order (sections, then steps; a dummy right after its source). Sweep: sort each column by the mean position of its
+neighbours in the previous column (left to right) or the next (right to left), ports splitting a step by row; keep the order with fewest
+crossings over 8 sweeps. Then transpose: swap two neighbours while that lowers the crossings of the column's two gutters. Ties keep the
+reading order, so small edits keep the picture.
 
-### 4.5 Pass C: Y
+### 4.5 Pass D: y
 
-Per column: `y = TOP`; per section: header (`SECTION_HEADER_H`, holds the section's top slot), then each step at `y`, with the gap below it
-`= NODE_GAP + max(0, channelLanes - 1) * LANE_GAP` (channel lanes from D), then the section's bottom slot, then `SECTION_GAP`. Port of
-`spine_layout` + `GapRelY` (`NodeOS_UI_Canvas.h:98-141`), with the channel term added.
+Per column, items in order, gaps `NODE_GAP` between steps, `DUMMY_GAP` between a step and a passing wire, `DUMMY_SEP` between wires. Each
+item wants its neighbours' port y minus its own port offset; the column takes the least total `|dy|` without overlap (isotonic L1 regression,
+pool adjacent violators; a pool takes the end of its median interval nearer where it is). Alternating sweeps over the columns, then
+straighten: an item moves to one of its wants when that fits and adds no length but makes one more wire straight. Steps are not stacked from
+the top: each sits level with what it connects to.
 
-### 4.6 Pass E: X
+### 4.6 Pass F: x
 
-Port of Pass C (`NodeOS_UI_Canvas.h:479-518`), but left to right from column 0 instead of root-outward (no root column here):
-`X[0] = MARGIN + Extent(0,'L')`; `X[k+1] = X[k] + Extent(k,'R') + COLUMN_MARGIN + Extent(k+1,'L')` with
-`Extent(c,s) = CW/2 + ICON_CLEARANCE + max(0, lanes(c,s)-1) * LANE_GAP` (`HighwayBaseOf`/`Extent`, lines 486-498). Steps are centred on
-`X[c]` (as E27). `HighwayX` (line 521) is ported as is.
+Columns left to right: a literal band (widest `LitW`), the steps, the gutter (`max(COLUMN_MARGIN, 2*ICON_CLEARANCE + (lanes-1)*LANE_GAP)`).
+A step with a connected input starts at the band (inputs line up); one without ends at the column's right edge (its wires leave from there).
 
-## 5. Highway routing (`xmaterial_stack_routes.h`)
+## 5. Routing (`xmaterial_stack_routes.h`)
 
 ### 5.1 Vocabulary
 
-- **Highway**: vertical lanes beside a column, `H(c,'L')` and `H(c,'R')`. The gutter between columns c and c+1 holds `H(c,'R')` then
-  `H(c+1,'L')`.
-- **Channel**: horizontal lanes in a gap of a column: `CH(c,g)` where g = the gap after step g, or a section header/footer gap. Channels let a
-  route cross a column without crossing a step.
-- **Trunk**: all branches of one source **output** on one highway or channel. Key = (lane container, source output pin guid). A sub-element
-  is its own output (`UV.x` and `UV.y` are two trunks). Different outputs never merge.
-- **Key**: discrete vertical coordinate `(column position of the step, row index)`; compares lexicographically, maps monotonically to Y.
+- **Gutter**: the space between columns g and g+1; vertical runs live only here.
+- **Trunk**: all runs of one source **output** in one gutter: one vertical lane spanning its runs. A sub-element is its own output (`UV.x`
+  and `UV.y` are two trunks). Different outputs never merge.
+- **Lane**: an x in a gutter; lane 0 leftmost.
 
-### 5.2 Route shapes (port of `OwnerColumnOf` 180, `LinkSide` 316, `LinkSides` 328, `PortSides` 341)
+### 5.2 Route shape
 
-The order invariant means a consumer is always below its producer in the same column, or in a later column.
+A route leaves the producer's output to the right, and in each gutter it crosses turns once onto its trunk's lane, runs to the y of the next
+dummy (or the consumer's input), and goes on right; through a column it passes at its dummy's y. Where the y already matches, the run is
+straight and takes no lane: when nothing is in the way a route goes nearly directly, with at most two bends per gutter; it detours only
+where Pass D had to move a dummy around a step. Horizontal runs lie in rows, dummy slots and gutters, so nothing crosses a step or a literal
+by construction (the self-check asserts it).
 
-| Case | Route | Pin sides |
-|---|---|---|
-| same column (always downward) | out stub -> `H(c,'R')` down -> in stub | both on R (E27: down = R); the input glyph flips to the right edge for that link |
-| next column, consumer lower (down-right) | stub -> `H(cp,'R')` down to the consumer's key -> horizontal across the gutter into the consumer | out R, in L |
-| next column, consumer higher (up-right) | horizontal across the gutter at the producer's key -> `H(cq,'L')` up -> in stub | out R, in L |
-| two or more columns apart | `H(cp,'R')` to the chosen channel of column cp+1 -> through `CH` -> jog on the next highway to the next channel -> ... -> `H(cq,'L')` to the consumer | out R, in L |
+### 5.3 Lanes
 
-E27's rule kept: the vertical run lives in the source's column when right and down agree, else in the target's (`OwnerColumnOf`). A pin used
-in several directions shows one glyph per side in use (`PortSides`/`SidesOf`, 341-365). Channel choice per intermediate column: the gap whose
-**base** Y (Pass C with no channel growth) is closest to the straight line from producer to consumer; section header/footer gaps and the
-gaps above the first / below the last step always exist. `[Q]` all same-column routes land on `H(c,'R')`, so left highways carry only up-right
-arrivals; accept, or put same-column routes on L (input side)?
+Per gutter: trunks with a vertical run are ordered left to right, each inserted where it adds the fewest crossings, then neighbours swapped
+while that helps. Two trunks cross only when one's runs to the right pass the other's vertical or the other's runs from the left pass its
+vertical, so the order of a pair alone decides its crossings: nested routes nest (a source farther from its turn takes the outer lane) and
+never cross when they need not. Runs of two outputs on one y would merge: that order costs heavily. Each trunk then takes one lane right of
+the overlapping trunks before it (the order of non-overlapping trunks changes no crossing).
 
-### 5.3 Lane assignment: full pack (port of lane packing, `NodeOS_UI_Canvas.h:395-472`)
-
-Per lane container (each highway, each channel):
-1. Build trunks: group branch spans by source output (E27 `span_group`, 431-445), interval = [min key, max key] over all branches.
-   Channels: every haul spans the full channel width, so the interval is the column itself.
-2. Sort trunks by span length ascending, then start key, then guid (deterministic). Short hops get the lane nearest the column; long spans go
-   outer ("distance picks the lane").
-3. Greedy interval partitioning: first lane with no overlapping interval of another trunk; else a new lane (E27 451-470).
-4. Crossing minimisation: `C = Σ over stubs (horizontal segment from step edge to its lane at key y) of the number of other trunks in nearer
-   lanes active at y`, plus, for gutter-crossing horizontals, the lanes of the far highway they pass. Repeat: swap adjacent lanes (whole lanes)
-   if C drops, or move one trunk to another lane where it fits if C drops; stop when no move helps or after `4 * lanes` passes. Lane count
-   never grows here.
+Untangle: when two outputs' runs meet on one y in either order (two aligned steps swapping rows, or a straight run), the step or dummy at
+the right end moves `MIN_SEP + 2` down (up if there is no room; else down, pushing the column below). Bounded; anything left is reported as
+merged runs.
 
 ### 5.4 Drawing junctions and crossings
 
-- A trunk's vertical run spans its interval. Each branch leaves at its key. **Junction dot** where a branch leaves a trunk that continues past
-  that point; a plain corner at the trunk's ends. Dots only ever join one source output with itself.
-- **Crossing** (two different trunks): the vertical is drawn continuous; the horizontal is broken with a 4 px gap each side (screen space),
-  meeting at a right angle. Never a dot at a crossing. Channel horizontals vs gutter verticals use the same rule.
-- Wires never cross steps by construction (stubs only between a step edge and its gutter, horizontals only in gutters and channels). The
-  self-check asserts no segment intersects a step rectangle.
+- A dot where a branch leaves a trunk that continues, or crosses its own trunk; a plain corner at a trunk's ends. Dots only ever join one
+  output with itself.
+- Crossing (two outputs): the vertical continuous, the horizontal broken 4 px each side, at a right angle. Never a dot at a crossing.
 
-### 5.5 Stability (lane memory)
+### 5.5 Stability
 
-View memory `map<trunk key, lane>` per container, cleared on load (so a load is a deterministic full pack).
-1. Drop trunks that no longer exist.
-2. Kept trunks, in previous (lane, start) order: keep the lane if it still has no overlap; else treat as new.
-3. New trunks, short first: first free lane from 0 ("a new route takes a free lane").
-4. If a container exceeds the budget (`MAX_LANES = 6` per highway or gutter width > `3 * COLUMN_MARGIN`; channels: 4 lanes) => full pack of
-   that container only.
-5. `RepackRoutes` (button + command) => full pack of everything (and `-Columns` re-partitions, §4.4).
-
-`[Q]` lanes are not saved, so a reload may differ from what was on screen before saving. Persist a lane hint in StackLayout if that matters.
+No lane, column or offset memory: every layout is a full, deterministic pack (`RepackRoutes` has no effect and stays for scripts;
+`LayoutStats -Width` is ignored). Small edits keep the picture because ranks are local, ties follow the reading order and an unwired new step
+waits at the bottom of column 0.
 
 ### 5.6 Emphasis
 
-- Normal: every route drawn, dimmed (alpha 0.35, type colour `sType::m_Color`, 1.5 px).
-- Selected connection (route click or chip select): the whole path from source to that consumer at full alpha, 2.5 px, on its own lanes
-  (nothing moves); the other branches of the same trunk at 0.6.
-- Selected step: its direct input routes and consumer routes lit.
-- Trace upstream/downstream (menu or `U` / `D`): transitive closure lit, the rest dimmed to 0.15.
+- Normal: every route drawn in its type colour at alpha 0.55, 1.5 px.
+- Selected connection: its path from the source at full alpha, 2.5 px (nothing moves); the other branches of that output at 0.75.
+- Selected step: its input and consumer routes lit.
+- Trace upstream/downstream (`U` / `D`): transitive closure lit, the rest dimmed to 0.15.
 - Collapsed section: internal routes hidden; boundary routes end at the box rows.
 
 ## 6. Source chips
 
-Every connected input row shows a chip with the source's name: `StepName` for a single-output step, `StepName.Output` for multi-output
-(`Wetness.Roughness`), `StepName.x` for a sub-element. Chips never change with zoom or distance (no semantic zoom; no hiding).
+Every connected input row shows, after the input's name, a flat chip with the source's name: `StepName` for a single-output step,
+`StepName.Output` for multi-output (`Wetness.Roughness`), `StepName.x` for a sub-element. Chips never change with zoom or distance. An
+unconnected input shows no chip: its literal sits outside the step (§4.2).
 
 | Gesture on a chip | Result | Command |
 |---|---|---|
@@ -487,9 +470,9 @@ the new node's guid, like pin guids today.
 | `Sources -Node` | each input: chip text, connection guid, source pin guid |
 | `FindUses -Node [-Output <name>]` | every consumer input of that step (or one output) |
 | `ValidatePlacement -Nodes -Section (-After\|-Before...)` | dry run: `ok`, or the violations and the order each `-Resolve` would produce |
-| `LayoutStats` | columns, sections per column, lanes per highway/channel, crossings, segments crossing steps (must be 0), widest gutter, layout ms |
-| `RouteInfo -Connection` | container chain, lanes, junctions, crossings on that route |
-| `RepackRoutes [-Columns]` | view: full lane pack (and column re-partition) |
+| `LayoutStats` | columns, steps and passing wires per column, lanes per gutter, crossings, junctions, route length, segments crossing steps (must be 0), layout ms |
+| `RouteInfo -Connection` | columns, the lane per gutter (or straight), junctions, crossings on that route |
+| `RepackRoutes` | no effect since the depth layout (§5.5); kept for scripts |
 | `PreviewStep -Node [-Output] \| -Off` | view: the one intermediate preview (§10.4) |
 | `SelectStep -Node`, `TraceRoute -Node (-Up\|-Down)` | view: so an AI can drive emphasis and screenshots |
 
@@ -511,8 +494,12 @@ slots between steps and chips. Draw it ourselves with `ImDrawList`, as E27 does:
 
 ### 10.2 Draw order
 
-background -> section frames and headers -> routes (dimmed) -> steps -> chips -> lit routes (on top of dimmed ones, below steps) -> slots ->
-drag ghost / previews -> popups.
+background -> routes (dimmed) -> lit routes (on top of dimmed ones, below steps) -> steps (header, inputs half, outputs half, chips, literals
+left of the step) -> slots -> drag ghost / previews -> popups. No section frames (§4).
+
+Look (owner feedback 2026-10-21): the old canvas's flat, quiet style: no shadows or accent bars; header in the kind's colour (function grey, exposed olive, input green,
+output purple), inputs half grey, outputs half black; pins in the type colour, filled when connected, ringed when not; literals as in the
+old canvas (label, widget, a green dot and link to the pin).
 
 ### 10.3 GLSL names
 
