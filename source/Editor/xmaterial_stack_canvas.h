@@ -202,7 +202,11 @@ namespace xmaterial_editor
                 }
                 if (ImGui::IsKeyPressed(ImGuiKey_Tab, false)) FocusChip(IO.KeyShift ? -1 : 1);
                 if ((ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)) && m_SelConn) GoToSource(m_SelConn);
-                if (ImGui::IsKeyPressed(ImGuiKey_Delete, false) && m_SelConn) Disconnect(m_SelConn);
+                if (ImGui::IsKeyPressed(ImGuiKey_Delete, false))                        // a selected connection (or focused chip) disconnects; selected steps go
+                {
+                    if (m_SelConn) Disconnect(m_SelConn);
+                    else if (m_SelStep) DeleteSelected(ToWorld(IO.MousePos));
+                }
                 if (IO.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_LeftArrow, false)) Back();
             }
 
@@ -1135,6 +1139,17 @@ namespace xmaterial_editor
         }
 
         void Disconnect(std::uint64_t Connection) noexcept { xeditor::Run(m_Undo, std::format("Disconnect -Connection {:016X}", Connection)); }
+
+        // The selected step and the Ctrl+click group, in one undo step (a collapsed box is not a node: it stays; DeleteNode refuses the last output)
+        void DeleteSelected(ImVec2 At) noexcept
+        {
+            std::vector<std::string> Cmds;
+            if (m_Doc.FindNode(m_SelStep)) Cmds.push_back(std::format("DeleteNode -Node {:016X}", m_SelStep));
+            for (auto Id : m_Group) if (Id != m_SelStep && m_Doc.FindNode(Id)) Cmds.push_back(std::format("DeleteNode -Node {:016X}", Id));
+            if (Cmds.empty()) return;
+            if (!xeditor::RunGroup(m_Undo, Cmds.size() == 1 ? "Delete step" : "Delete steps", Cmds)) Note("not deleted (the last output node cannot go)", At);
+            else { m_Group.clear(); Select(0, 0); }
+        }
 
         void Note(std::string Text, ImVec2 AtWorld) noexcept { m_NoteText = std::move(Text); m_NoteAt = AtWorld; m_NoteUntil = ImGui::GetTime() + 3.0; }
         void DrawNote(ImDrawList* D, ImVec2 AtWorld, const std::string& S) const noexcept           // a refusal, flat, at the drop

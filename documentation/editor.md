@@ -47,7 +47,7 @@ as the console command named in documentation/stack_canvas.md section 7.2.
 Keys (the panel focused, no text being typed): `U` / `D` trace upstream / downstream from the selected step (again to stop), `P` preview the selected
 step's output on the mesh, `T` shows or hides the previews in steps (a Sampler 2D's texture, and a Texture step's fed by one; a constant colour's
 swatch; also in the background menu), `Esc` stops, in order, a drag, the preview, the trace, the selection; `Tab` / `Shift+Tab` move focus along the chips,
-`Enter` goes to the source of the selected route, `Del` disconnects it, `Alt+Left` goes back. The preview and the trace are view state (never
+`Enter` goes to the source of the selected route, `Del` disconnects it (with a step selected, `Del` deletes it and any Ctrl+click group in one undo step; the last output node is refused), `Alt+Left` goes back. The preview and the trace are view state (never
 saved, never in the history); the asset is never written by a preview.
 
 The same view state is scriptable: `SelectStep`, `TraceRoute`, `PreviewStep`, `LayoutStats`, `RouteInfo` (below). The smoke tests
