@@ -22,6 +22,7 @@ namespace xmaterial
                 struct
                 {
                     bool m_bAlpha:1;
+                    bool m_bSamplersFrom1:1;    // a graph material: the HDR shader's textures are samplers 1.. (xLIONRender keeps 0), the texture list has no slot-0 entry
                 };
             };
         };

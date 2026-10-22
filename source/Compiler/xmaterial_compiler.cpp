@@ -122,6 +122,7 @@ namespace xmaterial_compiler
         xmaterial::manifest                                     m_Manifest;
         bool                                                    m_bManifest = false;
         bool                                                    m_bFailed   = false;
+        bool                                                    m_bSamplers = false;    // a graph texture was emitted: its sampler binding is shifted in the HDR variant (data_file::flags::m_bSamplersFrom1)
 
         void Fail(const std::string& Message) { m_bFailed = true; LogMessage(xresource_pipeline::msg_type::ERROR, Message); }
 
@@ -317,7 +318,10 @@ namespace xmaterial_compiler
                 // A declared parameter: the input reads the material block instead of its literal (resolved to the packed offset once every reader is known)
                 if (prop.m_ParamID != 0)
                 {
-                    const auto Type = prop.m_Type == node_param::type::FLOAT ? xmaterial::param_type::FLOAT : xmaterial::param_type::TEXTURE;
+                    // A vector parameter (COLOR, FLOAT2..4) is read by the float inputs of one Vec node, each as its own component (ExposeParam -Type)
+                    const auto pVec = std::ranges::find(g.m_Params, prop.m_ParamID, &xmaterial::param_decl::m_ID);
+                    const bool bComp = prop.m_Type == node_param::type::FLOAT && pVec != g.m_Params.end() && pVec->m_Type != xmaterial::param_type::FLOAT && pVec->m_Type != xmaterial::param_type::TEXTURE;
+                    const auto Type = bComp ? pVec->m_Type : prop.m_Type == node_param::type::FLOAT ? xmaterial::param_type::FLOAT : xmaterial::param_type::TEXTURE;
                     if (prop.m_Type != node_param::type::FLOAT && prop.m_Type != node_param::type::TEXTURE_RESOURCE)
                         Fail(std::format("E_PARAM_TYPE: node '{}' input '{}' reads parameter {:016X} but only float and texture inputs can", n.m_Name, prop.m_Name, prop.m_ParamID));
                     else if (auto [It, bNew] = m_Reads.emplace(prop.m_ParamID, Type); not bNew && It->second != Type)
@@ -325,6 +329,12 @@ namespace xmaterial_compiler
 
                     if (Type == xmaterial::param_type::FLOAT)
                         return std::format("\x01{:016X}\x02", prop.m_ParamID);
+                    if (bComp)
+                    {
+                        int Comp = 0;
+                        for (int i = 0; i < paramIndex; ++i) Comp += n.m_Params[i].m_ParamID == prop.m_ParamID;
+                        return std::format("(\x01{:016X}\x02)[{}]", prop.m_ParamID, Comp);
+                    }
                 }
 
                 if (prop.m_Value.m_pType)
@@ -340,7 +350,8 @@ namespace xmaterial_compiler
                     {
                         g.m_FinalTextureNodes.m_Textures.emplace_back(&n, paramIndex);
                         if (prop.m_ParamID != 0) m_TexIndex.emplace(prop.m_ParamID, int(g.m_FinalTextureNodes.m_Textures.size() - 1));
-                        return std::to_string(g.m_FinalTextureNodes.m_Textures.size() - 1);
+                        m_bSamplers = true;
+                        return std::format("XMAT_SAMPLER({})", g.m_FinalTextureNodes.m_Textures.size() - 1);
                     }
 
 
@@ -513,6 +524,8 @@ namespace xmaterial_compiler
             ResolveReads(topCode);
             ResolveReads(botCode);
 
+            // xLIONRender keeps sampler 0 (the shadow atlas): the HDR variant binds a graph's textures from 1, the editors' LDR one from 0
+            if (m_bSamplers) ss << "#ifdef XLION_LDR_OUTPUT\n    #define XMAT_SAMPLER(i) (i)\n#else\n    #define XMAT_SAMPLER(i) ((i) + 1)\n#endif\n";
             ss << ParamTop() << topCode << "\n";
             ss << "void main() \n{\n";
             ss << botCode;
@@ -645,6 +658,7 @@ namespace xmaterial_compiler
             MaterialDataFile.m_pShaderHDR       = spirvHDR.data();
             MaterialDataFile.m_ShaderSizeHDR    = static_cast<std::uint32_t>(spirvHDR.size());
             MaterialDataFile.m_Flags.m_bAlpha   = false;
+            MaterialDataFile.m_Flags.m_bSamplersFrom1 = m_bSamplers;
             MaterialDataFile.m_pDefaultTextures = Graph.m_FinalTextureNodes.m_Textures.empty()? nullptr : Textures.get();
             MaterialDataFile.m_nDefaultTextures = static_cast<std::uint8_t>(Graph.m_FinalTextureNodes.m_Textures.size());
 

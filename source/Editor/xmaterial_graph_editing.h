@@ -8,6 +8,7 @@
 #include "source/Tools/Editor/xeditor_document_editor.h"
 #include "plugins/xmaterial.plugin/source/Graph/xmaterial_graph.h"
 #include "plugins/xmaterial.plugin/source/Graph/xmaterial_stack_adapter.h"
+#include "plugins/xmaterial_instance.plugin/source/xmaterial_instance_migrate.h"
 #include "dependencies/xproperty/source/sprop/property_sprop_xtextfile_serializer.h"
 
 #include <charconv>
@@ -740,18 +741,60 @@ namespace xmaterial_editor
         struct expose_param_cmd : graph_cmd
         {
             expose_param_cmd(xundo::system& System, graph_document& Doc) noexcept : graph_cmd(System, Doc, "ExposeParam") { RegisterArguments(); }
-            const char* getCommandHelp() const noexcept override { return "Makes an unconnected float or texture input read a material parameter instead of its literal (undoable). Usage: ExposeParam -Node hexguid|@StepName -Param input name|pin guid [-Id hexguid|@Name] [-Name text]. A new parameter takes the input's pin guid as its id, its literal as the default and -Name (default: the input's name); -Id attaches the input to an existing parameter of the same type."; }
+            const char* getCommandHelp() const noexcept override { return "Makes an unconnected float or texture input read a material parameter instead of its literal (undoable). Usage: ExposeParam -Node hexguid|@StepName -Param input name|pin guid [-Id hexguid|@Name] [-Name text] [-Type COLOR|FLOAT2|FLOAT3|FLOAT4]. A new parameter takes the input's pin guid as its id, its literal as the default and -Name (default: the input's name); -Id attaches the input to an existing parameter of the same type. -Type exposes a Vec2/Vec3/Vec4 node's inputs together as one vector parameter (each input reads one component; a COLOR needs a Vec3 or Vec4)."; }
             void RegisterArguments() noexcept override
             {
                 m_hNode  = m_Parser.addOption("Node",  "The node",                                        true,  1);
                 m_hParam = m_Parser.addOption("Param", "The input: its name or pin guid",                 true,  1);
                 m_hId    = m_Parser.addOption("Id",    "An existing parameter to read (id hex or @Name)", false, 1);
                 m_hName  = m_Parser.addOption("Name",  "The new parameter's name",                        false, 1);
+                m_hType  = m_Parser.addOption("Type",  "A vector parameter: COLOR, FLOAT2, FLOAT3 or FLOAT4", false, 1);
+            }
+            // -Type: the float inputs of a Vec node, in order, become the components of one parameter (the compiler reads input i as component i)
+            std::string ExposeVector(xmaterial_graph::node& Node, const std::string& TypeText) noexcept
+            {
+                auto& G = m_Doc.m_Graph;
+                const auto It = std::ranges::find_if(xmaterial::param_type_enum_v, [&](auto& E) { return Lower(E.m_pName) == Lower(TypeText); });
+                if (It == xmaterial::param_type_enum_v.end() || It->m_Value == int(xmaterial::param_type::FLOAT) || It->m_Value == int(xmaterial::param_type::TEXTURE)) return "-Type takes COLOR, FLOAT2, FLOAT3 or FLOAT4";
+                const auto Type = static_cast<xmaterial::param_type>(It->m_Value);
+                const int  Size = Type == xmaterial::param_type::FLOAT2 ? 2 : Type == xmaterial::param_type::FLOAT3 ? 3 : 4;
+
+                std::vector<xmaterial_graph::node_param*> Comps;
+                for (auto& Pin : Node.m_InputPins)
+                {
+                    if (Pin.m_ConnectionGUID.m_Value != 0 || Pin.m_ParamIndex < 0 || Pin.m_ParamIndex >= static_cast<int>(Node.m_Params.size())) return "every input of the node must be an unconnected float";
+                    auto& P = Node.m_Params[Pin.m_ParamIndex];
+                    if (P.m_Type != xmaterial_graph::node_param::type::FLOAT || P.m_ParamID != 0) return "every input of the node must be an unconnected float that reads no parameter";
+                    Comps.push_back(&P);
+                }
+                const int n = static_cast<int>(Comps.size());
+                if (n < 2 || n > 4 || (Type == xmaterial::param_type::COLOR ? n < 3 : n != Size)) return std::format("a {} parameter needs a Vec node with {} inputs", It->m_pName, Type == xmaterial::param_type::COLOR ? "3 or 4" : std::to_string(Size));
+
+                xmaterial::param_id ID = Node.m_InputPins[0].m_PinGUID.m_Value;
+                std::string Text, Err;
+                const bool bAttach = GetArg(m_Parser, m_hId, Text);
+                if (bAttach && !ResolveParamText(G, Text, ID, &Err)) return Err;
+                auto* pDecl = FindParam(G, ID);
+                if (pDecl && pDecl->m_Type != Type) return std::format("parameter '{}' has another type", pDecl->m_Name);
+                if (pDecl && n > Size) return "the node has more inputs than the parameter has components";
+                if (!pDecl)
+                {
+                    pDecl = &G.m_Params.emplace_back();
+                    if (!GetArg(m_Parser, m_hName, Text)) Text = StepLabel(Node);
+                    pDecl->m_ID = ID; pDecl->m_Type = Type; pDecl->m_Name = Text;
+                    float V[4] = { 0, 0, 0, Type == xmaterial::param_type::COLOR ? 1.f : 0.f };
+                    for (int i = 0; i < n; ++i) V[i] = Comps[i]->m_Value.get<float>();
+                    pDecl->m_Default = { V[0], V[1], V[2], V[3] };
+                    if (Type == xmaterial::param_type::COLOR && n == 3) pDecl->m_bAlpha = false;
+                }
+                for (auto* pP : Comps) pP->m_ParamID = ID;
+                return {};
             }
             std::string Apply() noexcept override
             {
                 xmaterial_graph::node* pNode = nullptr; xmaterial_graph::input_pin* pPin = nullptr;
                 if (auto Err = ParamInput(m_Doc, m_Parser, m_hNode, m_hParam, pNode, pPin); !Err.empty()) return Err;
+                if (std::string TypeText; GetArg(m_Parser, m_hType, TypeText)) return ExposeVector(*pNode, TypeText);
                 auto& G = m_Doc.m_Graph;
                 auto& Prop = pNode->m_Params[pPin->m_ParamIndex];
                 if (pPin->m_ConnectionGUID.m_Value != 0) return "the input is connected: disconnect it first";
@@ -779,7 +822,7 @@ namespace xmaterial_editor
                 Prop.m_ParamID = ID;
                 return {};
             }
-            xcmdline::parser::handle m_hNode, m_hParam, m_hId, m_hName;
+            xcmdline::parser::handle m_hNode, m_hParam, m_hId, m_hName, m_hType;
         };
 
         //---- UnexposeParam: the input is a literal again (the parameter's default); the declaration stays
@@ -801,6 +844,12 @@ namespace xmaterial_editor
                 if (auto* pDecl = FindParam(m_Doc.m_Graph, Prop.m_ParamID))
                 {
                     if (Prop.m_Type == xmaterial_graph::node_param::type::TEXTURE_RESOURCE) Prop.m_Value.set<xresource::full_guid>(pDecl->m_DefaultTexture);
+                    else if (pDecl->m_Type != xmaterial::param_type::FLOAT)                 // a vector parameter: every input of the node that reads it, each its component
+                    {
+                        const float V[4] = { pDecl->m_Default.m_X, pDecl->m_Default.m_Y, pDecl->m_Default.m_Z, pDecl->m_Default.m_W };
+                        int i = 0;
+                        for (auto& P : pNode->m_Params) if (P.m_ParamID == pDecl->m_ID && P.m_Type == xmaterial_graph::node_param::type::FLOAT) { P.m_Value.set<float>(V[i++ & 3]); P.m_ParamID = 0; }
+                    }
                     else                                                                    Prop.m_Value.set<float>(pDecl->m_Default.m_X);
                 }
                 Prop.m_ParamID = 0;
@@ -872,6 +921,123 @@ namespace xmaterial_editor
                 return {};
             }
             xcmdline::parser::handle m_hId, m_hName, m_hGroup, m_hUiMin, m_hUiMax, m_hValidMin, m_hValidMax, m_hHDR, m_hAlpha, m_hField;
+        };
+
+        //---- The migration ops (documentation/material_contract.md section 6): a graph edit that may also rewrite the instance files of the material. The undo puts both back.
+        struct migration_cmd : graph_cmd
+        {
+            using graph_cmd::graph_cmd;
+            std::wstring  Descriptors() const noexcept { return xmaterial_instance::DescriptorsOf(m_Doc.m_DescriptorPath); }
+            std::uint64_t Material()    const noexcept { return m_Doc.m_Guid.m_Instance.m_Value; }
+            void BackupCurrenState(xundo::undo_file& File) noexcept override { graph_cmd::BackupCurrenState(File); xeditor::WriteString(File, xmaterial_instance::Snapshot(Descriptors(), Material())); }
+            void Undo(xundo::undo_file& File) noexcept override
+            {
+                graph_cmd::Undo(File);
+                xmaterial_instance::Restore(Descriptors(), m_Doc.m_LibraryGuid, xeditor::ReadString(File));
+            }
+        };
+
+        //---- SetParamDefault: the default of a parameter. Inherit: every instance that did not set it follows. PreserveLook: the instances made directly from the material that did not set it
+        // get the old default written first, so they look as before (deeper ones inherit it through them).
+        struct set_param_default_cmd : migration_cmd
+        {
+            set_param_default_cmd(xundo::system& System, graph_document& Doc) noexcept : migration_cmd(System, Doc, "SetParamDefault") { RegisterArguments(); }
+            const char* getCommandHelp() const noexcept override { return "Sets the default of a parameter (undoable). Usage: SetParamDefault -Id hexguid|@Name -Value 1 to 4 comma separated numbers [-Policy Inherit|PreserveLook]. Inherit (default): instances that did not set it follow the new default. PreserveLook: instances made directly from the material that did not set it keep the old value (written as an override). Not for TEXTURE parameters."; }
+            void RegisterArguments() noexcept override
+            {
+                m_hId     = m_Parser.addOption("Id",     "The parameter: id hex or @Name",       true,  1);
+                m_hValue  = m_Parser.addOption("Value",  "The new default, 1 to 4 numbers",      true,  1);
+                m_hPolicy = m_Parser.addOption("Policy", "Inherit (default) or PreserveLook",    false, 1);
+            }
+            std::string Apply() noexcept override
+            {
+                auto& G = m_Doc.m_Graph;
+                std::string Text, Err;
+                xmaterial::param_id ID = 0;
+                GetArg(m_Parser, m_hId, Text);
+                if (!ResolveParamText(G, Text, ID, &Err)) return Err;
+                auto& D = *FindParam(G, ID);
+                if (D.m_Type == xmaterial::param_type::TEXTURE) return "a texture has no value default";
+                xmaterial::float4v New;
+                GetArg(m_Parser, m_hValue, Text);
+                if (!set_param_info_cmd::Vec(Text, New)) return std::format("'{}' is not 1 to 4 numbers", Text);
+                bool bPreserve = false;
+                if (GetArg(m_Parser, m_hPolicy, Text))
+                {
+                    const auto P = Lower(Text);
+                    if (P == "preservelook" || P == "preserve") bPreserve = true;
+                    else if (P != "inherit")                    return "-Policy takes Inherit or PreserveLook";
+                }
+                if (bPreserve)
+                {
+                    auto Files = xmaterial_instance::ReadInstances(Descriptors(), Material());
+                    xmaterial_instance::PreserveLookFiles(Files, Material(), D, D.m_Default);
+                    xmaterial_instance::WriteChanged(Descriptors(), m_Doc.m_LibraryGuid, Files);
+                }
+                D.m_Default = New;
+                return {};
+            }
+            xcmdline::parser::handle m_hId, m_hValue, m_hPolicy;
+        };
+
+        //---- RetypeParam: the parameter keeps its id and gets another type. With -Convert the default and the overrides of the old type are converted (the instance files are rewritten);
+        // without it the overrides become W_ORPHAN_TYPE (kept, not applied) until they are set again.
+        struct retype_param_cmd : migration_cmd
+        {
+            retype_param_cmd(xundo::system& System, graph_document& Doc) noexcept : migration_cmd(System, Doc, "RetypeParam") { RegisterArguments(); }
+            const char* getCommandHelp() const noexcept override { return "Changes the type of a parameter, keeping its id (undoable). Usage: RetypeParam -Id hexguid|@Name -Type FLOAT|FLOAT2|FLOAT3|FLOAT4|COLOR|TEXTURE [-Convert Splat|Truncate]. With -Convert the default and the instances' values of the old type are converted: the leading components stay, the rest is zero (Splat: filled with the first), and the instance files are rewritten; not between TEXTURE and the others. Without it the instances' values become W_ORPHAN_TYPE. Inputs that read the parameter must be changed to match (the compiler reports E_PARAM_TYPE)."; }
+            void RegisterArguments() noexcept override
+            {
+                m_hId      = m_Parser.addOption("Id",      "The parameter: id hex or @Name",   true,  1);
+                m_hType    = m_Parser.addOption("Type",    "The new type",                     true,  1);
+                m_hConvert = m_Parser.addOption("Convert", "Splat or Truncate",                false, 1);
+            }
+            std::string Apply() noexcept override
+            {
+                auto& G = m_Doc.m_Graph;
+                std::string Text, Err;
+                xmaterial::param_id ID = 0;
+                GetArg(m_Parser, m_hId, Text);
+                if (!ResolveParamText(G, Text, ID, &Err)) return Err;
+                auto& D = *FindParam(G, ID);
+                GetArg(m_Parser, m_hType, Text);
+                const auto It = std::ranges::find_if(xmaterial::param_type_enum_v, [&](auto& E) { return Lower(E.m_pName) == Lower(Text); });
+                if (It == xmaterial::param_type_enum_v.end()) return "-Type takes FLOAT, FLOAT2, FLOAT3, FLOAT4, COLOR or TEXTURE";
+                const auto To = static_cast<xmaterial::param_type>(It->m_Value), From = D.m_Type;
+                if (To == From) return "the parameter already has that type";
+                bool bConvert = false, bSplat = false;
+                if (GetArg(m_Parser, m_hConvert, Text))
+                {
+                    const auto C = Lower(Text);
+                    if (C != "splat" && C != "truncate")                                                return "-Convert takes Splat or Truncate";
+                    if (To == xmaterial::param_type::TEXTURE || From == xmaterial::param_type::TEXTURE) return "a texture cannot be converted to or from a value";
+                    bConvert = true; bSplat = C == "splat";
+                }
+                if (bConvert)
+                {
+                    auto Files = xmaterial_instance::ReadInstances(Descriptors(), Material());
+                    xmaterial_instance::RetypeFiles(Files, ID, From, To, bSplat);
+                    xmaterial_instance::WriteChanged(Descriptors(), m_Doc.m_LibraryGuid, Files);
+                    D.m_Default = xmaterial_instance::Convert(D.m_Default, From, To, bSplat);
+                }
+                D.m_Type = To;
+                return {};
+            }
+            xcmdline::parser::handle m_hId, m_hType, m_hConvert;
+        };
+
+        //---- PurgeUnusedParams: the declarations no input reads (the only way a declaration goes). Instance values for them stay: they are orphans (W_ORPHAN_ID), cleared with ClearOverride.
+        struct purge_unused_params_cmd : migration_cmd
+        {
+            purge_unused_params_cmd(xundo::system& System, graph_document& Doc) noexcept : migration_cmd(System, Doc, "PurgeUnusedParams") { RegisterArguments(); }
+            const char* getCommandHelp() const noexcept override { return "Deletes the parameter declarations that no input reads (undoable). Instances' values for them stay as orphans. Usage: PurgeUnusedParams"; }
+            void RegisterArguments() noexcept override {}
+            std::string Apply() noexcept override
+            {
+                auto& G = m_Doc.m_Graph;
+                const auto n = std::erase_if(G.m_Params, [&](auto& D) { return ParamReaders(G, D.m_ID).empty(); });
+                return n ? std::string{} : "every parameter is read";
+            }
         };
 
         // "param link: Input -> parameter 'Name' (id)" for every input of the node that reads one

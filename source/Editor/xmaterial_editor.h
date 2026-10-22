@@ -43,6 +43,9 @@ namespace xmaterial_editor
         cmds::unexpose_param_cmd        m_UnexposeParam;
         cmds::set_param_info_cmd        m_SetParamInfo;
         cmds::list_params_cmd           m_ListParams;
+        cmds::set_param_default_cmd     m_SetParamDefault;
+        cmds::retype_param_cmd          m_RetypeParam;
+        cmds::purge_unused_params_cmd   m_PurgeUnusedParams;
         cmds::insert_on_connection_cmd  m_InsertOnConnection;
         cmds::duplicate_step_cmd        m_DuplicateStep;
         cmds::list_stack_cmd            m_ListStack;
@@ -76,6 +79,7 @@ namespace xmaterial_editor
             , m_PlaceSteps(m_Undo, m_Document), m_RenameStep(m_Undo, m_Document), m_CreateSection(m_Undo, m_Document), m_RenameSection(m_Undo, m_Document)
             , m_MoveSection(m_Undo, m_Document), m_DeleteSection(m_Undo, m_Document), m_SetSectionCollapsed(m_Undo, m_Document)
             , m_ExposeParam(m_Undo, m_Document), m_UnexposeParam(m_Undo, m_Document), m_SetParamInfo(m_Undo, m_Document), m_ListParams(m_Undo, m_Document)
+            , m_SetParamDefault(m_Undo, m_Document), m_RetypeParam(m_Undo, m_Document), m_PurgeUnusedParams(m_Undo, m_Document)
             , m_InsertOnConnection(m_Undo, m_Document), m_DuplicateStep(m_Undo, m_Document), m_ListStack(m_Undo, m_Document), m_Sources(m_Undo, m_Document)
             , m_FindUses(m_Undo, m_Document), m_ValidatePlacement(m_Undo, m_Document)
             , m_LayoutStats(m_Undo, m_Document, m_StackView), m_RouteInfo(m_Undo, m_Document, m_StackView)
@@ -196,7 +200,7 @@ namespace xmaterial_editor
                     if (auto* pTexture = xresource::g_Mgr.getResource(Entry)) { Bindings.emplace_back(*pTexture); continue; }
                 Bindings.emplace_back(m_Preview.DefaultTexture());
             }
-            m_Preview.SetMaterial(pMaterial->getShader(), Bindings);
+            m_Preview.SetMaterial(pMaterial->getShader(), Bindings, { pMaterial->m_pDefaultBlock, std::size_t(pMaterial->m_BlockBytes) / 4 });
         }
 
         // The shader text: the file of a shader-file node, or what the compiler made from the graph (left in its log).
