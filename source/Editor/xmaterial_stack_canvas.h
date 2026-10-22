@@ -16,7 +16,7 @@
 // into empty space opens a search of what fits (a ghost of the new step, a port chooser when several fit); the background menu adds a step.
 // Every edit is a command (one undo step); nothing is wired without an explicit pick.
 // Moves and collapse (section 7.3, 7.6): drag a step's header to a column (any it may sit in) and a height: the person decides, the place is
-// saved (PlaceStep) and the layout keeps it, previewed while dragging; Clean graph (top right, background menu) forgets every place
+// saved (PlaceStep) and the layout keeps it, previewed while dragging; Clean graph (the toolbar, background menu) forgets every place
 // (CleanGraph). Ctrl+click adds steps to the selection; the step
 // menu's Collapse puts them (and every step on a path between them) in a new collapsed section: one box with a row per source crossing in
 // and per output crossing out. Double click a box (or its menu) to expand it. Bindings never change.
@@ -29,6 +29,7 @@
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_stack_routes.h"
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_subgraph_commands.h"
 #include "dependencies/xeditor/include/xeditor/hint.h"
+#include "source/Tools/Editor/xeditor_camera_toolbar.h"
 #include "dependencies/imgui/imgui_internal.h"
 
 #include <limits>
@@ -161,7 +162,20 @@ namespace xmaterial_editor
             return "not on the canvas";
         }
 
+        // The toolbar (the Level editor's, its place remembered per material) over the canvas
         void Render() noexcept
+        {
+            if (m_Toolbar.m_Items.empty())
+            {
+                m_Toolbar.m_Items.push_back({ "Graph", ximgui::toolbar::toolbar_host_edge::Top, ximgui::toolbar::axis::Horizontal, ImVec2(110.0f, xeditor::camera_toolbar::kHeight), ImVec2(32.0f, 60.0f), ImVec2(24.0f, 40.0f) });
+                std::snprintf(m_ToolbarName, sizeof(m_ToolbarName), "StackToolbar%016llX", static_cast<unsigned long long>(m_Doc.m_Guid.m_Instance.m_Value));
+                if (ImGui::FindSettingsHandler(m_ToolbarName) == nullptr) { ximgui::toolbar::RegisterSettingsHandler(m_Toolbar, m_ToolbarName); m_bToolbarHandler = true; }
+            }
+            ximgui::toolbar::RenderToolbarHost(m_Toolbar, ImGui::GetContentRegionAvail(), [this](const char*, ximgui::toolbar::axis Axis) { ToolbarButtons(Axis); }, [this] { RenderCanvas(); });
+        }
+        ~stack_canvas() noexcept { if (m_bToolbarHandler && ImGui::GetCurrentContext()) ImGui::RemoveSettingsHandler(m_ToolbarName); }
+
+        void RenderCanvas() noexcept
         {
             namespace st = stack_style;
             m_pFont    = ImGui::GetFont();
@@ -203,7 +217,7 @@ namespace xmaterial_editor
                 }
             }
             if (bInside && ImGui::IsMouseClicked(3)) Back();                           // Mouse4
-            if (ImGui::IsWindowFocused() && !IO.WantTextInput)
+            if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !IO.WantTextInput)     // the panel or anything in it (the toolbar host draws the canvas in a child)
             {
                 if (ImGui::IsKeyPressed(ImGuiKey_U, false)) Trace(m_Trace == trace::UP   ? trace::NONE : trace::UP);
                 if (ImGui::IsKeyPressed(ImGuiKey_D, false)) Trace(m_Trace == trace::DOWN ? trace::NONE : trace::DOWN);
@@ -311,7 +325,6 @@ namespace xmaterial_editor
             D->PopClipRect();
             ImGui::PopItemFlag();
             DrawBreadcrumb();
-            DrawCleanButton();
             DrawPopups();
             ImGui::SetCursorScreenPos(m_Origin);
             ImGui::Dummy(Avail);                                                        // the last item: the cursor moves never extend the window
@@ -1909,17 +1922,15 @@ namespace xmaterial_editor
             m_Open = "##MakeSubgraph";
         }
 
-        // Clean graph (top right): the layout places every step again, forgetting where the person put them (one undo step)
-        void DrawCleanButton() noexcept
+        // The canvas's buttons in the Level editor's toolbar (dependencies/toolbar.imgui: dragged to any edge or left floating). Clean graph:
+        // the layout places every step again, forgetting where the person put them (one undo step).
+        void ToolbarButtons(ximgui::toolbar::axis Axis) noexcept
         {
-            const ImVec2 Keep = ImGui::GetCursorScreenPos();
-            const char*  pLabel = "Clean graph";
-            ImGui::SetCursorScreenPos({ m_Origin.x + m_Avail.x - ImGui::CalcTextSize(pLabel).x - ImGui::GetStyle().FramePadding.x * 2 - 8, m_Origin.y + 6 });
+            const bool bHorizontal = Axis == ximgui::toolbar::axis::Horizontal;
             ImGui::BeginDisabled(m_Doc.m_Graph.m_Stack.m_Places.empty());
-            if (ImGui::SmallButton(pLabel)) xeditor::Run(m_Undo, "CleanGraph");
+            if (ImGui::Button(bHorizontal ? "Clean graph###CleanGraph" : "C###CleanGraph", bHorizontal ? ImVec2(0, 16.0f) : ImVec2(32.0f, 28.0f))) xeditor::Run(m_Undo, "CleanGraph");
             ImGui::EndDisabled();
-            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) xeditor::hint::Text("Lay out every step again, forgetting where you put them (Ctrl+Z brings them back)");
-            ImGui::SetCursorScreenPos(Keep);
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) xeditor::hint::Text("Clean graph: lay out every step again, forgetting where you put them (Ctrl+Z brings them back)");
         }
 
         // A sub-graph entered from a group: the graphs above it, each a way back (Tab goes to the last)
@@ -1991,6 +2002,9 @@ namespace xmaterial_editor
         std::vector<std::uint64_t>                  m_GroupHint, m_GroupHintNext;     // what the menu's Collapse would take (hovered)
         std::uint64_t                               m_DragStep = 0;     // a step being dragged to a column and a height
         float                                       m_DragDy   = 0;     // the grab: mouse minus the step's top, world
+        ximgui::toolbar::toolbar_host_state         m_Toolbar{ {}, false, [](const char* pText) noexcept { xeditor::hint::Text("%s", pText); } };
+        char                                        m_ToolbarName[64] = {};
+        bool                                        m_bToolbarHandler = false;
         bool                                        m_bDragCancelled = false;          // Esc during a drag: nothing until the button is released
         move_plan                                   m_Drag;
         std::uint64_t                               m_PreviewPin = 0;   // the output previewed on the mesh (0: the material)

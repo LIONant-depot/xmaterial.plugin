@@ -296,8 +296,8 @@ namespace xmaterial_editor
             const auto B = m_StackCanvas.PreviewBanner();
             if (B.empty()) return;
             const ImVec2 P = ImGui::GetWindowPos(), S = ImGui::GetWindowSize();
-            stack_style::Banner(ImGui::GetWindowDrawList(), ImGui::GetFont(), ImGui::GetFontSize(), { P.x + S.x * 0.5f, P.y + ImGui::GetFrameHeight() + 6 }, B);
-            if (ImGui::IsWindowFocused() && ImGui::IsKeyPressed(ImGuiKey_Escape, false)) m_StackCanvas.Preview(0);
+            stack_style::Banner(ImGui::GetWindowDrawList(), ImGui::GetFont(), ImGui::GetFontSize(), { P.x + S.x * 0.5f, P.y + ImGui::GetFrameHeight() + xeditor::camera_toolbar::kHeight + 8 }, B);   // under the tab and the toolbar
+            if (ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) && ImGui::IsKeyPressed(ImGuiKey_Escape, false)) m_StackCanvas.Preview(0);     // the preview is drawn in the toolbar host's child
         }
 
         // The shader text: the file of a shader-file node, or what the compiler made from the graph (left in its log).
