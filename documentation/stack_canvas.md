@@ -566,21 +566,39 @@ previewable. Alpha stays as the material has it. A compile of the material while
 
 ## 11. Task tests
 
-Run each by hand on the canvas and as a console script; record the measures from `LayoutStats`/`RouteInfo`/history. Every test also checks:
+Run each by hand on the canvas and as a script (`source/Editors/LevelEditor/smoke/test_material_stack_canvas.py`, pytest, Debug `xLION.exe`, nothing saved); record the measures from `LayoutStats`/`RouteInfo`/history. Every test also checks:
 segments crossing steps = 0, order invariant holds, one undo step per gesture, undo then redo restores the identical file text.
 
 | # | Test | Setup -> action | Pass | Measures |
 |---|---|---|---|---|
 | 1 | One UV feeding many branches | `UV` (Vec2) feeds 8 inputs over 3 sections | one trunk per container UV passes; junction dots, no parallel UV lanes; all 8 chips read `UV` | trunks for UV per highway = 1; total crossings; lanes per gutter |
-| 2 | Independent normal and color branches | sections Normal, Surface color with no links between | no route between them; 1600 px => side by side, 500 px => one column | columns at 1600/500 px; cross-section routes = 0 |
-| 3 | Multi-output step | `Wetness` outputs Roughness, Darken, each used twice | chips `Wetness.Roughness` / `Wetness.Darken`; two trunks, never merged | trunks = distinct outputs used (2); `FindUses -Output` correct |
+| 2 | Independent normal and color branches | sections Normal, Surface color with no links between | no route between them; the two roots share column 0 (depth columns, the same at any width) | columns, steps in column 0; cross-section routes = 0 |
+| 3 | Multi-output step | an `Inputs` step (outputs UV, Color) stands in for `Wetness`, each output used twice | chips `Wetness.UV(2)` / `Wetness.Color(4)`; two trunks, never merged | trunks = distinct outputs used (2); `FindUses -Output` correct |
 | 4 | Insert tint into one branch | `Albedo` feeds Base color and Emission; insert `Vec4 Multiply` on Albedo->Base color | only that connection goes through the new step; chooser asked which input; Emission untouched | gestures ≤ 4; undo steps = 1; other connection guid unchanged; other steps' order unchanged |
 | 5 | Reorder in a column (v2) | two independent branches in column 0; drag the second's header above the first | while dragging, the steps that would move drawn where they go; the drop swaps the branches; a drop the layout cannot honour says so and adds no history; Esc adds none | undo steps = 1 (0 for no-change / Esc); bindings unchanged; crossings not raised |
 | 6 | Replace a shared mask | `Mask` used by 3 steps; Find all uses -> Replace all -> `Mask2` | 3 chips read `Mask2`; `Mask` still exists, unused | gestures ≤ 5; undo steps = 1 |
 | 7 | Collapse steps (v2) | Ctrl+click steps with external inputs and an output used outside; Collapse | one box `Group  N steps`, a row per external source and per output used outside; boundary routes end at it; expand restores the identical layout | undo steps = 1; `LayoutStats` before collapse = after expand; segments through steps = 0 |
 | 8 | Change an instance value | edit a Float widget on an unconnected input | value changes, nothing moves | step rects diff = 0; lane diff = 0; undo steps = 1 |
-| 9 | Invalid connection | Vec3 output onto Float input; producer below consumer; a cycle | type and cycle refused with the message, no history; order case opens §7.3 | history size unchanged for refusals |
+| 9 | Invalid connection | Vec3 output onto Float input; producer below consumer; a cycle | type and cycle refused with the message, no history; order case (producer below consumer): `Connect` moves the consumer and its dependents after the producer, one undo step (§7.3's popup was not built) | history size unchanged for refusals |
 | 10 | Add one node to a large material | 200 steps; background menu Add step, then one reorder drag | the unwired new step waits at the bottom of column 0, nothing else moves; the drag preview costs one layout per slot change | steps moved by the add = 0; layout ms (`[A]` budget 2 ms; ~8 ms at 200 steps in release, §4.4 ponytail) |
+
+### Results (2026-10-22, Debug xLION.exe, `test_material_stack_canvas.py`: 10 passed in 170 s)
+
+Every test also passed the common checks (segments through steps 0, order invariant, one undo step per gesture, Undo then Redo restores the same
+`ListStack`; the file text itself has no command, so the stack listing is what is compared).
+
+| # | Result | Measured |
+|---|---|---|
+| 1 | pass | UV trunks per highway 1; crossings 0; junctions 6; columns 6; gutter lanes 1/1/1/0/0 |
+| 2 | pass | columns 4; 2 steps in column 0 (the roots side by side, the same at `-Width 500`/`1600`: the layout ignores the width); cross-section routes 0; crossings 0 |
+| 3 | pass | trunks 2 (= distinct outputs used); `FindUses -Output`: 2 routes per output; crossings 1 |
+| 4 | pass | gestures 4 (click route, (+), Enter, port); undo steps 1; Emission connection guid unchanged; other steps' order unchanged; crossings 0 |
+| 5 | pass | undo steps 1 (0 for the no-change drop and for Esc); graph untouched while previewing; bindings unchanged; crossings 0 -> 0 |
+| 6 | pass | gestures 4 + typing; undo steps 1; 3 chips read `Mask2`, `Mask` unused |
+| 7 | pass | undo steps 1; `LayoutStats` after expand = before collapse (4 columns, 5 routes, 0 crossings); collapsed: 4 columns, 4 routes; segments through steps 0 |
+| 8 | pass | step rects diff 0 of 5; lane diff 0 of 3; undo steps 1 (value set with `SetNodeProperty`, the command the widget issues) |
+| 9 | pass (order case differs from the spec) | type and cycle refused, graph and history unchanged; producer below consumer: accepted, consumer and dependents moved, 1 undo step |
+| 10 | pass, timing not met in Debug | 202 steps; add by `CreateNode`: sampled steps moved 0 of 21 (the whole view origin shifts 84 px right, relative places equal); layout 252 ms before the add, 243 ms after, 264 ms after a reorder (Debug build: the 2 ms / ~8 ms release budget is not comparable and was not re-measured in Release); drag preview at 200 steps not driven (the step is off screen) |
 
 The headless self-check (`xmaterial_stack_selftest()` in `xmaterial_stack_routes.h`, `assert`-based, run by a debug console command
 `StackSelfTest`) builds tests 1, 3, 7, 10 from code and asserts: invariant, no segment through a step, one trunk per (container, output),
@@ -636,6 +654,7 @@ Sized for one Sonnet session each. "Done" includes: builds, old canvas still wor
     P, the mesh shows the texture under the banner; Esc, the material again; `PreviewStep -Node @Vec4_Multiply` from the console.
 14. **Task test pass and docs** — run §11 by hand and as scripts, record measures in this file, update `documentation/editor.md` (stack
     panel, new commands). Done: all 10 pass; the owner decides when the old canvas goes.
+    Status: done (2026-10-22): results in §11; `editor.md` describes the panel, its keys and every command.
 
 ## 13. Deferred (not in the first milestone)
 

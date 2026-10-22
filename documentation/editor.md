@@ -6,7 +6,9 @@ console exactly as the canvas does.
 
 ```
 source/Editor/xmaterial_editor.h            the editor (session): panels, commands, its registration
-source/Editor/xmaterial_graph_canvas.h      the node canvas (imgui-node-editor): drag, link, menus
+source/Editor/xmaterial_stack_canvas.h      the Material Stack panel: depth-column canvas, routes, chips, gestures, preview
+source/Editor/xmaterial_stack_layout.h      its layout (pure); xmaterial_stack_routes.h: the router (pure)
+source/Editor/xmaterial_graph_canvas.h      the old node canvas (imgui-node-editor), read-only
 source/Editor/xmaterial_graph_editing.h     the graph commands and queries, symbol resolution, placement
 source/Editor/xmaterial_stack_commands.h    the stack commands: PlaceSteps, RenameStep, sections
 ```
@@ -16,9 +18,39 @@ snapshot- or value-based. A host includes `xmaterial_editor.h`, which registers 
 
 ## Panels
 
-Material Stack (the stack canvas, documentation/stack_canvas.md), Material Graph (the old node canvas), Node Properties (the selected node's reflected properties), Mesh Preview, Shader (the compiler's output).
+Material Stack (the stack canvas, below and documentation/stack_canvas.md), Material Graph (the old node canvas: positions from the stack layout, selection shared, no editing), Node Properties (the selected node's reflected properties), Mesh Preview, Shader (the compiler's output).
 
-On the Material Stack: drag a step's header up or down its column to change its reading order (the layout the drop gives is previewed; a drop that changes nothing visible issues nothing; Esc cancels); Ctrl+click adds steps to the selection and the step menu's Collapse puts them in one collapsed box (double click or Expand opens it); P previews the selected step on the mesh, Esc returns to the material.
+### The Material Stack panel
+
+The graph is drawn as steps in columns by dependency depth (a step is in the column after its deepest producer; steps with no producer share column 0).
+Routes (wires) run in the gutters between columns, one trunk per source output, with junction dots where they split and hops where they cross.
+An input fed by a step shows a source chip (`Albedo`, `Wetness.Color`) instead of a wire stub; an unfed input shows its value widget. Nothing the
+canvas does is saved in the layout: it follows the stored reading order, so every gesture below is one undo step (or none: view only) and the same
+as the console command named in documentation/stack_canvas.md section 7.2.
+
+| Gesture | Effect |
+|---|---|
+| click a step, a route or a chip | select it (the selection is shared with the Material Graph panel); a route's (+) appears where it was clicked |
+| Ctrl+click steps | add to the selection (a group, for Collapse) |
+| edit a widget on an unconnected input | `SetNodeProperty` |
+| click the (+) of the selected route, or right click a route -> Insert step on this connection... | search of the types that fit the source and the consumer, a port chooser when several ports fit, then `InsertOnConnection`; other uses of the source are untouched. The route menu also has Go to source, Go to consumer, Disconnect |
+| drag from a pin onto a pin of the other side | `Connect`; refusals (types, cycle) are shown as a tooltip and add no history; a producer below its consumer moves the consumer and its dependents after it |
+| drag from a pin into empty space | search of what fits (from an output: types with a fitting input; from an input: existing outputs before the consumer, then types), a ghost of the new step shows at the drop; nothing is wired until a type (and port) is picked |
+| right click empty canvas -> Add step... | search, `CreateNode` (unwired, at the end of the last section) |
+| double click a chip, Enter on a selected route, chip menu Go to source | centre and select the source step (Alt+Left or the mouse back button returns) |
+| chip menu | Go to source, Find all uses (every consumer of that output; pick one to go there; Replace all... picks a new source for all of them, one undo step), Replace source..., Disconnect |
+| drag a step's header up or down its column | reorder (`PlaceSteps`); the layout the drop gives is previewed, a drop that changes nothing issues nothing, Esc cancels |
+| right click a step | menu: Trace upstream / downstream, Preview on the mesh, Collapse N steps (hover outlines the steps it takes: the selection plus the steps between them) |
+| double click a collapsed box, or its menu Expand | open the group (a collapsed group is a section with the collapsed flag; the picture after expanding equals the one before collapsing) |
+| wheel / right drag / Home | zoom 0.5 to 1.5 under the cursor / pan / reset the view (a right click that does not move opens the menu of what is under it) |
+
+Keys (the panel focused, no text being typed): `U` / `D` trace upstream / downstream from the selected step (again to stop), `P` preview the selected
+step's output on the mesh, `Esc` stops, in order, a drag, the preview, the trace, the selection; `Tab` / `Shift+Tab` move focus along the chips,
+`Enter` goes to the source of the selected route, `Del` disconnects it, `Alt+Left` goes back. The preview and the trace are view state (never
+saved, never in the history); the asset is never written by a preview.
+
+The same view state is scriptable: `SelectStep`, `TraceRoute`, `PreviewStep`, `LayoutStats`, `RouteInfo` (below). The smoke tests
+`source/Editors/LevelEditor/smoke/test_material_stack_canvas.py` drive the gestures above with the virtual mouse and check them with these commands.
 
 ## Commands
 
