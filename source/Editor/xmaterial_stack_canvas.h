@@ -15,6 +15,11 @@
 // Inserting (section 7): a (+) on the selected route and the route menu insert on that connection; a drag from a pin onto a pin connects,
 // into empty space opens a search of what fits (a ghost of the new step, a port chooser when several fit); the background menu adds a step.
 // Every edit is a command (one undo step); nothing is wired without an explicit pick.
+// Moves and collapse (section 7.3, 7.6): drag a step's header up or down its column to change its reading order; the layout it would give is
+// previewed while dragging, and a drop that would change nothing visible issues nothing. Ctrl+click adds steps to the selection; the step
+// menu's Collapse puts them (and every step on a path between them) in a new collapsed section: one box with a row per source crossing in
+// and per output crossing out. Double click a box (or its menu) to expand it. Bindings never change.
+// Preview (section 10.4): P shows the selected step's output on the Mesh Preview, Esc returns to the material (the session compiles it).
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_graph_widgets.h"
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_stack_commands.h"
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_stack_routes.h"
@@ -64,6 +69,16 @@ namespace xmaterial_editor
         constexpr float PICK = 5.0f;                                                        // a click this close to a route picks it, screen px
         constexpr float PLUS_R = 8.0f;                                                      // the (+) on a selected route, screen px
         constexpr float GHOST = 0.6f;                                                       // a new step's preview alpha
+
+        // A flat label centred under TopCentre: the preview's banner (also over the Mesh Preview), what a drag would do
+        inline void Banner(ImDrawList* D, ImFont* pFont, float Size, ImVec2 TopCentre, const std::string& S) noexcept
+        {
+            const ImVec2 sz = pFont->CalcTextSizeA(Size, FLT_MAX, 0.0f, S.c_str());
+            const ImVec2 a{ TopCentre.x - sz.x * 0.5f - 10, TopCentre.y }, b{ TopCentre.x + sz.x * 0.5f + 10, TopCentre.y + sz.y + 10 };
+            D->AddRectFilled(a, b, OutputsHalf, 3);
+            D->AddRect(a, b, Selected, 3, 0, 1.5f);
+            D->AddText(pFont, Size, { a.x + 10, a.y + 5 }, Text, S.c_str());
+        }
     }
 
     class stack_canvas
@@ -81,8 +96,18 @@ namespace xmaterial_editor
 
         std::uint64_t SelectedNode() const noexcept { return m_SelStep; }
 
+        // The previewed output pin (0 = the material) and what the session says about it (compiling, why it failed); PreviewStep drives it too
+        std::uint64_t PreviewPin() const noexcept { return m_PreviewPin; }
+        void Preview(std::uint64_t Pin) noexcept { m_PreviewPin = Pin; m_PreviewStatus.clear(); }
+        void PreviewStatus(std::string S) noexcept { m_PreviewStatus = std::move(S); }
+        std::string PreviewBanner() const noexcept
+        {
+            if (!m_PreviewPin) return {};
+            return std::format("Previewing: {}  -  Esc to return{}{}", cmds::ChipText(m_Doc.m_Graph, xmaterial_graph::pin_guid{ m_PreviewPin }), m_PreviewStatus.empty() ? "" : "  -  ", m_PreviewStatus);
+        }
+
         // View state, also driven by the view commands (SelectStep, TraceRoute)
-        void Select(std::uint64_t Step, std::uint64_t Connection) noexcept { m_SelStep = Step; m_SelConn = Step ? 0 : Connection; if (!Step) m_Trace = trace::NONE; }
+        void Select(std::uint64_t Step, std::uint64_t Connection) noexcept { m_SelStep = Step; m_SelConn = Step ? 0 : Connection; if (!Step) { m_Trace = trace::NONE; m_Group.clear(); } }
         void Trace(trace T) noexcept { m_Trace = m_SelStep ? T : trace::NONE; }
         bool HasStep(std::uint64_t Id) const noexcept { return m_StepIndex.contains(Id); }
         bool HasRoute(std::uint64_t Id) const noexcept { const int e = EdgeOf(Id); return e >= 0 && !m_R.m_Routes[e].m_Points.empty(); }
@@ -152,7 +177,7 @@ namespace xmaterial_editor
                     if (m_PanTravel < 3)                                                // a right click, not a drag: the menu of what is under it
                     {
                         if      (m_HoverChip)      { Select(0, m_HoverChip); m_Open = "##ChipMenu"; }
-                        else if (m_HoverStep)      { Select(m_HoverStep, 0); m_Open = "##StepMenu"; }
+                        else if (m_HoverStep)      { if (m_HoverStep != m_SelStep && !Has(m_Group, m_HoverStep)) { m_Group.clear(); Select(m_HoverStep, 0); } m_Open = "##StepMenu"; }     // a step of the selection keeps it
                         else if (m_HoverEdge >= 0) { Select(0, m_In.m_Edges[m_HoverEdge].m_Id); m_Open = "##RouteMenu"; }
                         else                       { m_MenuAt = ToWorld(IO.MousePos); m_Open = "##CanvasMenu"; }
                     }
@@ -164,7 +189,14 @@ namespace xmaterial_editor
                 if (ImGui::IsKeyPressed(ImGuiKey_U, false)) Trace(m_Trace == trace::UP   ? trace::NONE : trace::UP);
                 if (ImGui::IsKeyPressed(ImGuiKey_D, false)) Trace(m_Trace == trace::DOWN ? trace::NONE : trace::DOWN);
                 if (ImGui::IsKeyPressed(ImGuiKey_Home, false)) { m_Zoom = 1; m_Pan = {}; }
-                if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) { if (m_Trace != trace::NONE) m_Trace = trace::NONE; else Select(0, 0); }
+                if (ImGui::IsKeyPressed(ImGuiKey_P, false)) PreviewSelected();
+                if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))                        // the first of: stop a drag, the preview, the trace, the selection
+                {
+                    if (m_DragStep) { m_DragStep = 0; m_bDragCancelled = true; }
+                    else if (m_PreviewPin) Preview(0);
+                    else if (m_Trace != trace::NONE) m_Trace = trace::NONE;
+                    else Select(0, 0);
+                }
                 if (ImGui::IsKeyPressed(ImGuiKey_Tab, false)) FocusChip(IO.KeyShift ? -1 : 1);
                 if ((ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)) && m_SelConn) GoToSource(m_SelConn);
                 if (ImGui::IsKeyPressed(ImGuiKey_Delete, false) && m_SelConn) Disconnect(m_SelConn);
@@ -189,6 +221,15 @@ namespace xmaterial_editor
                 m_DragPin = 0;
             }
 
+            // A step dragged up or down its column: the slot under the mouse, the layout it would give; a drop issues it only if it shows
+            if (m_DragStep && !m_StepIndex.contains(m_DragStep)) m_DragStep = 0;
+            if (m_DragStep) PlanDrag(ToWorld(IO.MousePos).y);
+            if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
+            {
+                if (m_DragStep && m_Drag.m_bChanges) xeditor::Run(m_Undo, std::format("PlaceSteps -Nodes {:016X} -{} {:016X} -Resolve dependents", m_DragStep, m_Drag.m_bAfter ? "After" : "Before", m_Drag.m_Anchor));
+                m_DragStep = 0; m_bDragCancelled = false; m_Drag = {};
+            }
+
             ImDrawList* D = ImGui::GetWindowDrawList();
             D->PushClipRect(m_Origin, Max, true);
             ImGui::PushItemFlag(ImGuiItemFlags_NoTabStop, true);                        // Tab cycles chips here, not the literals' widgets
@@ -205,11 +246,15 @@ namespace xmaterial_editor
             DrawRoutes(D, Lit);
             m_HoverStep = 0;
             m_ChipAt.clear();
+            m_GroupHint = std::move(m_GroupHintNext); m_GroupHintNext.clear();         // what the menu's Collapse would take, last frame
+            std::erase_if(m_Group, [&](std::uint64_t s) { return !m_StepIndex.contains(s); });
             for (int g = 0; g < static_cast<int>(m_In.m_Steps.size()); ++g) DrawStep(D, g, Max);
             DrawInsertButton(D);
             DrawDrag(D);
+            DrawMove(D);
             DrawGhost(D);
             if (ImGui::GetTime() < m_NoteUntil) DrawNote(D, m_NoteAt, m_NoteText);
+            if (const auto B = PreviewBanner(); !B.empty()) DrawBanner(D, { (m_Origin.x + Max.x) * 0.5f, m_Origin.y + 8 }, B);
 
             D->PopClipRect();
             ImGui::PopItemFlag();
@@ -504,14 +549,15 @@ namespace xmaterial_editor
         {
             namespace st = stack_style;
             namespace geo = stack_layout::geo;
-            auto* pN = m_Doc.FindNode(m_In.m_Steps[g].m_Value);
-            if (!pN) return;
-            auto& N = *pN;
             const auto& b = m_R.m_Layout.m_Steps[g];
             const ImVec2 P0 = ToScreen(b.m_X, b.m_Y), P1 = ToScreen(b.m_X + b.m_W, b.m_Y + b.m_H);
             if (P1.x < m_Origin.x || P1.y < m_Origin.y || P0.x - Len(m_R.m_Layout.m_LitW[g]) > ViewMax.x || P0.y > ViewMax.y) return;       // culled
+            if (m_In.m_Box[g] >= 0) { DrawBox(D, g, P0, P1); return; }
+            auto* pN = m_Doc.FindNode(m_In.m_Steps[g].m_Value);
+            if (!pN) return;
+            auto& N = *pN;
 
-            const bool bSelected = N.m_Guid.m_Value == m_SelStep;
+            const bool bSelected = N.m_Guid.m_Value == m_SelStep || Has(m_Group, N.m_Guid.m_Value) || Has(m_GroupHint, N.m_Guid.m_Value);
             const int  SelEdge   = EdgeOf(m_SelConn);
             const bool bRelated  = SelEdge >= 0 && (m_In.m_Edges[SelEdge].m_From == g || m_In.m_Edges[SelEdge].m_To == g);
             const float R = Len(st::ROUND);
@@ -538,7 +584,9 @@ namespace xmaterial_editor
             ImGui::SetNextItemAllowOverlap();
             ImGui::InvisibleButton("##Step", { std::max(1.0f, P1.x - P0.x), std::max(1.0f, P1.y - P0.y) });
             if (ImGui::IsItemHovered()) m_HoverStep = N.m_Guid.m_Value;
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) Select(N.m_Guid.m_Value, 0);
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) ClickStep(N.m_Guid.m_Value);
+            if (ImGui::IsItemActive() && !m_DragStep && !m_DragPin && !m_bDragCancelled && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 6)
+                && ImGui::GetIO().MouseClickedPos[0].y < HeaderB) m_DragStep = N.m_Guid.m_Value;       // a header dragged: a move (7.3)
             if (N.m_HasErrMsg && !N.m_ErrMsg.empty() && ImGui::IsItemHovered()) xeditor::hint::Text("%s", N.m_ErrMsg.c_str());
 
             // Input rows (left): pin on the left edge, name, the chip of its source; an unconnected input's literal outside, left of its pin
@@ -632,6 +680,268 @@ namespace xmaterial_editor
             }
             return false;
         }
+
+        // A collapsed section (7.6): a box with a row per source feeding it from outside (left) and per output of it used outside (right).
+        // A second card behind it says it holds several steps.
+        void DrawBox(ImDrawList* D, int g, ImVec2 P0, ImVec2 P1) noexcept
+        {
+            namespace st = stack_style;
+            namespace geo = stack_layout::geo;
+            const auto& B  = m_In.m_Boxes[m_In.m_Box[g]];
+            const auto  Id = m_In.m_Steps[g].m_Value;
+            const float R  = Len(st::ROUND), HeaderB = P0.y + Len(geo::HEADER_H), Back = Len(4);
+            float InW = 0;
+            for (auto& t : B.m_InText) InW = std::max(InW, Measure(t) + 2 * st::CHIP_PAD);
+            const float Split = B.m_In.empty() ? P0.x : B.m_Out.empty() ? P1.x : std::min(P1.x, P0.x + Len(geo::PORT_PAD + InW + geo::MID_GAP * 0.5f));
+            D->AddRectFilled({ P0.x + Back, P0.y - Back }, { P1.x + Back, P1.y - Back }, st::HeaderStep, R);
+            D->AddRect({ P0.x + Back, P0.y - Back }, { P1.x + Back, P1.y - Back }, st::StepBorder, R);
+            D->AddRectFilled(P0, { P1.x, HeaderB }, st::HeaderStep, R, ImDrawFlags_RoundCornersTop);
+            if (Split > P0.x) D->AddRectFilled({ P0.x, HeaderB }, { Split, P1.y }, st::InputsHalf, R, ImDrawFlags_RoundCornersBottomLeft);
+            if (Split < P1.x) D->AddRectFilled({ Split, HeaderB }, P1, st::OutputsHalf, R, ImDrawFlags_RoundCornersBottomRight);
+            const float ty = P0.y + (Len(geo::HEADER_H) - FontPx()) * 0.5f;
+            const std::string Count = std::format("{} step{}", B.m_nSteps, B.m_nSteps == 1 ? "" : "s");
+            Text(D, { P0.x + Len(geo::PORT_PAD), ty }, st::Text, B.m_Name);
+            Text(D, { P1.x - Len(geo::PORT_PAD) - TextW(Count), ty }, st::TextDim, Count);
+
+            ImGui::PushID(static_cast<int>(Id ^ (Id >> 32)));
+            ImGui::SetCursorScreenPos(P0);
+            ImGui::InvisibleButton("##Box", { std::max(1.0f, P1.x - P0.x), std::max(1.0f, P1.y - P0.y) });
+            ImGui::PopID();
+            if (ImGui::IsItemHovered()) { m_HoverStep = Id; xeditor::hint::Text("Collapsed section %s: double click to expand", B.m_Name.c_str()); }
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) Select(Id, 0);
+            if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) Expand(Id);
+
+            auto Color = [&](std::uint64_t Pin) { auto* p = PinOf(Pin); return p ? TypeColor(p->m_TypeGUID) : st::Text; };
+            for (int r = 0; r < static_cast<int>(B.m_In.size()); ++r)                  // what crosses in: the source, as a chip
+            {
+                const float cy = P0.y + Len(stack_layout::RowY(r));
+                const ImVec2 C0{ P0.x + Len(geo::PORT_PAD), cy - Len(st::CHIP_H) * 0.5f }, C1{ C0.x + Len(Measure(B.m_InText[r]) + 2 * st::CHIP_PAD), cy + Len(st::CHIP_H) * 0.5f };
+                D->AddRectFilled(C0, C1, st::Chip, Len(2));
+                Text(D, { C0.x + Len(st::CHIP_PAD), cy - FontPx() * 0.5f }, st::Text, B.m_InText[r]);
+                Pin(D, { P0.x, cy }, Color(B.m_In[r]), true);
+            }
+            for (int r = 0; r < static_cast<int>(B.m_Out.size()); ++r)                 // what crosses out: the output inside
+            {
+                const float cy = P0.y + Len(stack_layout::RowY(r));
+                Text(D, { P1.x - Len(geo::PORT_PAD) - TextW(B.m_OutText[r]), cy - FontPx() * 0.5f }, st::Text, B.m_OutText[r]);
+                Pin(D, { P1.x, cy }, Color(B.m_Out[r]), true);
+            }
+            const bool bSelected = Id == m_SelStep;
+            if (bSelected) D->AddRect({ P0.x - 3, P0.y - 3 }, { P1.x + 3, P1.y + 3 }, Alpha(st::Selected, 0.25f), R + 3, 0, 3.0f);
+            D->AddRect(P0, P1, bSelected ? st::Selected : st::StepBorder, R, 0, bSelected ? 2.0f : 1.0f);
+            if (!m_InTrace.empty() && !m_InTrace[g]) D->AddRectFilled({ P0.x - 1, P0.y - Back - 1 }, { P1.x + Back + 3, P1.y + 4 }, Alpha(st::Canvas, 0.6f), R);
+        }
+
+        void DrawBanner(ImDrawList* D, ImVec2 TopCentre, const std::string& S) const noexcept { stack_style::Banner(D, m_pFont, m_FontSize, TopCentre, S); }
+
+        static bool Has(const std::vector<std::uint64_t>& V, std::uint64_t x) noexcept { return std::find(V.begin(), V.end(), x) != V.end(); }
+
+        // A click selects one step; Ctrl+click adds it to the selection (or takes it out), for Collapse
+        void ClickStep(std::uint64_t Id) noexcept
+        {
+            if (!ImGui::GetIO().KeyCtrl || !m_SelStep) { m_Group.clear(); Select(Id, 0); return; }
+            if (auto It = std::find(m_Group.begin(), m_Group.end(), Id); It != m_Group.end()) m_Group.erase(It);
+            else if (Id != m_SelStep) m_Group.push_back(Id);
+        }
+
+        void PreviewSelected() noexcept                                                 // P: the selected step's first output, or the selected route's source
+        {
+            std::uint64_t Pin = 0;
+            if (auto* pN = m_Doc.FindNode(m_SelStep); pN && !pN->m_OutputPins.empty()) Pin = pN->m_OutputPins[0].m_PinGUID.m_Value;
+            else if (auto* c = Conn(m_SelConn)) Pin = c->m_OutputPinGuid.m_Value;
+            if (Pin) Preview(Pin == m_PreviewPin ? 0 : Pin);
+        }
+
+        //------------------------------------------------------------------------------------------
+        // Moves (7.3): a step dragged up or down its column changes its reading order, which the layout follows where it has a free choice
+        //------------------------------------------------------------------------------------------
+        struct move_plan
+        {
+            int                         m_Column  = -1;
+            std::uint64_t               m_Anchor  = 0;          // PlaceSteps -Before / -After this step
+            bool                        m_bAfter  = false, m_bChanges = false;
+            float                       m_LineY   = 0;          // world: where the slot line is drawn
+            stack_routes::graph_input   m_In;                   // the layout the drop would give
+            stack_routes::result        m_R;
+        };
+
+        void PlanDrag(float y) noexcept
+        {
+            namespace geo = stack_layout::geo;
+            const auto& L = m_R.m_Layout;
+            const int g = m_StepIndex.at(m_DragStep), c = L.m_Column[g];
+            std::vector<int> Col;                                                       // the other steps of its column, top to bottom
+            for (int it : L.m_Order[c]) if (const int s = L.m_Items[it].m_Step; s >= 0 && s != g && m_In.m_Box[s] < 0) Col.push_back(s);
+            if (Col.empty()) { m_Drag = {}; return; }
+            const auto It = std::find_if(Col.begin(), Col.end(), [&](int s) { return L.m_Steps[s].m_Y + L.m_Steps[s].m_H * 0.5f > y; });
+            const int  s  = It != Col.end() ? *It : Col.back();
+            const bool bAfter = It == Col.end();
+            if (m_Drag.m_Column == c && m_Drag.m_Anchor == m_In.m_Steps[s].m_Value && m_Drag.m_bAfter == bAfter) return;     // planned already
+            m_Drag = {};
+            m_Drag.m_Column = c; m_Drag.m_Anchor = m_In.m_Steps[s].m_Value; m_Drag.m_bAfter = bAfter;
+            m_Drag.m_LineY  = bAfter ? L.m_Steps[s].m_Y + L.m_Steps[s].m_H + geo::NODE_GAP * 0.5f : L.m_Steps[s].m_Y - geo::NODE_GAP * 0.5f;
+
+            // The order PlaceSteps -Resolve dependents gives (producers it moves above come along: they stay in earlier columns), laid out
+            auto& G = m_Doc.m_Graph;
+            G.m_Stack.Reindex();
+            const cmds::order_model M(G);
+            const auto A = G.m_Stack.m_Where.at(xmaterial_graph::node_guid{ m_DragStep }), X = G.m_Stack.m_Where.at(xmaterial_graph::node_guid{ m_Drag.m_Anchor });
+            const int Slot = X.second + (bAfter ? 1 : 0) - (A.first == X.first && A.second < X.second ? 1 : 0);
+            const auto S = xmaterial_graph::stack_order::ResolveMove(M.m_S, M.m_E, { M.m_Id.at(xmaterial_graph::node_guid{ m_DragStep }) }, X.first, Slot).m_Dependents;
+            if (!M.Check(G, S, G.m_Stack.m_Sections).empty()) return;
+            auto Sections = G.m_Stack.m_Sections;
+            for (std::size_t i = 0; i < S.size(); ++i) { Sections[i].m_Steps.clear(); for (int n : S[i]) Sections[i].m_Steps.push_back(M.m_Ids[n]); }
+            m_Drag.m_In = stack_routes::FromGraph(G, m_View.m_Measure, m_View.m_InputW, m_View.m_LitW, &Sections);
+            m_Drag.m_R  = stack_routes::Build(m_Drag.m_In.m_In, m_Drag.m_In.m_Edges);
+            for (int h = 0; h < static_cast<int>(m_Drag.m_In.m_Steps.size()); ++h) m_Drag.m_bChanges |= Moved(h);
+        }
+
+        bool Moved(int h) const noexcept                                                // a step of the drag's layout sits elsewhere than now
+        {
+            auto It = m_StepIndex.find(m_Drag.m_In.m_Steps[h].m_Value);
+            if (It == m_StepIndex.end()) return true;
+            const auto &a = m_R.m_Layout.m_Steps[It->second], &b = m_Drag.m_R.m_Layout.m_Steps[h];
+            return std::abs(a.m_X - b.m_X) > 0.5f || std::abs(a.m_Y - b.m_Y) > 0.5f;
+        }
+
+        // The slot under the mouse, every step that would move outlined where it would go, the routes it would draw, what the drop does
+        void DrawMove(ImDrawList* D) const noexcept
+        {
+            namespace st = stack_style;
+            if (!m_DragStep || m_Drag.m_Column < 0) return;
+            const auto& L = m_R.m_Layout;
+            const int   c = m_Drag.m_Column;
+            Line(D, L.m_X[c] + L.m_Band[c] - 6, m_Drag.m_LineY, L.m_X[c] + L.m_Band[c] + L.m_W[c] + 6, m_Drag.m_LineY, st::Selected, 2.5f);
+            if (m_Drag.m_bChanges)
+            {
+                for (auto& W : m_Drag.m_R.m_Wires) Line(D, W.m_X0, W.m_Y0, W.m_X1, W.m_Y1, Alpha(st::Selected, 0.35f), 1.0f);
+                for (int h = 0; h < static_cast<int>(m_Drag.m_In.m_Steps.size()); ++h)
+                {
+                    if (!Moved(h)) continue;
+                    const auto& b = m_Drag.m_R.m_Layout.m_Steps[h];
+                    const ImVec2 a0 = ToScreen(b.m_X, b.m_Y), a1 = ToScreen(b.m_X + b.m_W, b.m_Y + b.m_H);
+                    auto* pN = m_Doc.FindNode(m_Drag.m_In.m_Steps[h].m_Value);                          // a flat card with its name: "this one goes here"
+                    D->AddRectFilled(a0, a1, Alpha(st::OutputsHalf, 0.92f), Len(st::ROUND));
+                    D->AddRect(a0, a1, st::Selected, Len(st::ROUND), 0, 1.5f);
+                    if (pN) Text(D, { a0.x + Len(stack_layout::geo::PORT_PAD), a0.y + (Len(stack_layout::geo::HEADER_H) - FontPx()) * 0.5f }, st::Text, cmds::StepLabel(*pN));
+                }
+            }
+            auto* pA = m_Doc.FindNode(m_DragStep);
+            auto* pX = m_Doc.FindNode(m_Drag.m_Anchor);
+            const std::string S = !m_Drag.m_bChanges ? std::string("nothing moves here: the layout keeps its order (fewer crossings)")
+                                : pA && pX ? std::format("{} {} {}", cmds::StepLabel(*pA), m_Drag.m_bAfter ? "after" : "before", cmds::StepLabel(*pX)) : std::string();
+            const ImVec2 m = ImGui::GetIO().MousePos;
+            DrawBanner(D, { m.x + 16 + m_pFont->CalcTextSizeA(m_FontSize, FLT_MAX, 0.0f, S.c_str()).x * 0.5f, m.y + 12 }, S);
+        }
+
+        //------------------------------------------------------------------------------------------
+        // Collapse (7.6): steps into a new collapsed section; expand clears the flag (the section stays: it is organisation)
+        //------------------------------------------------------------------------------------------
+        std::vector<std::uint64_t> Selection() const noexcept
+        {
+            std::vector<std::uint64_t> S;
+            if (m_Doc.FindNode(m_SelStep)) S.push_back(m_SelStep);
+            for (auto s : m_Group) if (m_Doc.FindNode(s) && !Has(S, s)) S.push_back(s);
+            return S;
+        }
+
+        // The steps a collapse takes: the selection and every step on a path between two of them (else the box would feed itself), in reading order
+        std::vector<std::uint64_t> Closure(const std::vector<std::uint64_t>& Sel) const noexcept
+        {
+            const cmds::order_model M(m_Doc.m_Graph);
+            const int N = static_cast<int>(M.m_Ids.size());
+            std::vector<char> In(N, 0), Up(N, 0), Down(N, 0);
+            for (auto s : Sel) if (auto It = M.m_Id.find(xmaterial_graph::node_guid{ s }); It != M.m_Id.end()) In[It->second] = Up[It->second] = Down[It->second] = 1;
+            for (bool bMore = true; bMore; )
+            {
+                bMore = false;
+                for (auto [p, c] : M.m_E)
+                {
+                    if (Down[p] && !Down[c]) { Down[c] = 1; bMore = true; }
+                    if (Up[c] && !Up[p])     { Up[p] = 1;   bMore = true; }
+                }
+            }
+            std::vector<std::uint64_t> R;
+            for (auto& S : M.m_S) for (int n : S) if (In[n] || (Up[n] && Down[n])) R.push_back(M.m_Ids[n].m_Value);
+            return R;
+        }
+
+        // One undo step: the steps together at a slot after every producer outside them and before every consumer outside them (nothing else
+        // moves), then split off as a new section, collapsed. Refused when no such slot exists without moving other steps.
+        void Collapse(const std::vector<std::uint64_t>& Sel) noexcept
+        {
+            using kind = xmaterial_graph::section::kind;
+            auto& G = m_Doc.m_Graph;
+            G.m_Stack.Reindex();
+            const auto Block = Closure(Sel);
+            const ImVec2 At = ToWorld(ImGui::GetIO().MousePos);
+            if (Block.empty()) return;
+            const cmds::order_model M(G);
+            auto SecOf = [&](int n) { return G.m_Stack.m_Where.at(M.m_Ids[n]).first; };
+            auto Name  = [&](int n) { return cmds::StepLabel(*m_Doc.FindNode(M.m_Ids[n].m_Value)); };
+            std::vector<char> InB(M.m_Ids.size(), 0);
+            for (auto s : Block) InB[M.m_Id.at(xmaterial_graph::node_guid{ s })] = 1;
+            for (int n = 0; n < static_cast<int>(InB.size()); ++n) if (InB[n] && G.m_Stack.m_Sections[SecOf(n)].m_Kind == kind::OUTPUT) { Note("the output stack does not collapse", At); return; }
+            for (auto& S : G.m_Stack.m_Sections)                                       // exactly a section: collapse it
+                if (S.m_Steps.size() == Block.size() && std::ranges::all_of(S.m_Steps, [&](auto g) { return Has(Block, g.m_Value); }))
+                {
+                    xeditor::Run(m_Undo, std::format("SetSectionCollapsed -Section {:016X} -Collapsed 1", S.m_Guid.m_Value));
+                    m_Group.clear(); Select(S.m_Guid.m_Value, 0);
+                    return;
+                }
+
+            std::vector<int> Rest, Pos(M.m_Ids.size(), -1);                            // the reading order without the block
+            int T = -1;
+            for (auto& S : M.m_S) for (int n : S) { if (InB[n]) { if (T < 0) T = static_cast<int>(Rest.size()); } else { Pos[n] = static_cast<int>(Rest.size()); Rest.push_back(n); } }
+            int Lo = 0, Hi = static_cast<int>(Rest.size()), Prod = -1, Cons = -1;
+            for (auto [p, c] : M.m_E)
+            {
+                if (InB[c] && !InB[p] && Pos[p] + 1 > Lo) { Lo = Pos[p] + 1; Prod = p; }
+                if (InB[p] && !InB[c] && Pos[c] < Hi)     { Hi = Pos[c];     Cons = c; }
+            }
+            if (Lo > Hi) { Note(std::format("these steps cannot sit together: {} reads them before {} feeds them", Name(Cons), Name(Prod)), At); return; }
+            const int  Slot    = std::clamp(T, Lo, Hi);
+            const bool bBefore = Slot < static_cast<int>(Rest.size()) && G.m_Stack.m_Sections[SecOf(Rest[Slot])].m_Kind == kind::USER;
+            if (!bBefore && Slot == 0) return;
+            const int  Anchor  = bBefore ? Rest[Slot] : Rest[Slot - 1];
+            const int  Sec     = SecOf(Anchor);
+            const auto& S      = G.m_Stack.m_Sections[Sec];
+
+            std::vector<std::uint64_t> Head, Tail;                                      // the anchor's section without the block, split at the slot
+            bool bTail = false;
+            for (auto Guid : S.m_Steps)
+            {
+                if (Has(Block, Guid.m_Value)) continue;
+                if (bBefore && Guid == M.m_Ids[Anchor]) bTail = true;
+                (bTail ? Tail : Head).push_back(Guid.m_Value);
+                if (!bBefore && Guid == M.m_Ids[Anchor]) bTail = true;
+            }
+            auto Unique = [&](const std::string& Base) { std::string N = Base; for (int k = 2; cmds::SectionNameUsed(G.m_Stack, N); ++k) N = std::format("{} ({})", Base, k); return N; };
+            auto List   = [](const std::vector<std::uint64_t>& V) { std::string L; for (auto v : V) L += std::format("{}{:016X}", L.empty() ? "" : ",", v); return L; };
+            auto Id     = [] { return xresource::guid_generator::Type64(); };
+            const std::uint64_t Group = Id(), SecId = S.m_Guid.m_Value;
+            std::vector<std::string> Cmds
+            { std::format("PlaceSteps -Nodes {} -{} {:016X}", List(Block), bBefore ? "Before" : "After", M.m_Ids[Anchor].m_Value)       // together at the slot
+            , std::format("CreateSection -Section {:016X} -Name {} -{} {:016X}", Group, xeditor::Quote(Unique("Group")), Head.empty() ? "Before" : "After", SecId)
+            };
+            if (!Head.empty() && !Tail.empty())                                         // the rest of the section after the group: a section of its own
+            {
+                const std::uint64_t After = Id();
+                Cmds.push_back(std::format("CreateSection -Section {:016X} -Name {} -After {:016X}", After, xeditor::Quote(Unique(S.m_Name)), Group));
+                Cmds.push_back(std::format("PlaceSteps -Nodes {} -Section {:016X} -First 1", List(Tail), After));
+            }
+            Cmds.push_back(std::format("PlaceSteps -Nodes {} -Section {:016X} -First 1", List(Block), Group));
+            Cmds.push_back(std::format("SetSectionCollapsed -Section {:016X} -Collapsed 1", Group));
+            if (!xeditor::RunGroup(m_Undo, "Collapse steps", Cmds)) Note("not collapsed", At);
+            else { m_Group.clear(); Select(Group, 0); }
+        }
+
+        const xmaterial_graph::section* SectionOf(std::uint64_t Id) const noexcept
+        {
+            for (auto& S : m_Doc.m_Graph.m_Stack.m_Sections) if (S.m_Guid.m_Value == Id) return &S;
+            return nullptr;
+        }
+        void Expand(std::uint64_t Section) noexcept { xeditor::Run(m_Undo, std::format("SetSectionCollapsed -Section {:016X} -Collapsed 0", Section)); Select(0, 0); }
 
         //------------------------------------------------------------------------------------------
         // Connections, pins, navigation (6)
@@ -1110,13 +1420,24 @@ namespace xmaterial_editor
 
             if (ImGui::BeginPopup("##StepMenu"))
             {
-                if (auto* pN = m_Doc.FindNode(m_SelStep))
+                auto* pN   = m_Doc.FindNode(m_SelStep);
+                auto* pBox = pN ? nullptr : SectionOf(m_SelStep);
+                if (pN || pBox)
                 {
-                    ImGui::TextDisabled("%s", cmds::StepLabel(*pN).c_str());
+                    ImGui::TextDisabled("%s", pN ? cmds::StepLabel(*pN).c_str() : pBox->m_Name.c_str());
                     ImGui::Separator();
                     if (ImGui::MenuItem("Trace upstream",   "U", m_Trace == trace::UP))   Trace(m_Trace == trace::UP   ? trace::NONE : trace::UP);
                     if (ImGui::MenuItem("Trace downstream", "D", m_Trace == trace::DOWN)) Trace(m_Trace == trace::DOWN ? trace::NONE : trace::DOWN);
                 }
+                if (pN)
+                {
+                    if (!pN->m_OutputPins.empty() && ImGui::MenuItem("Preview on the mesh", "P")) PreviewSelected();
+                    const auto Sel = Selection();
+                    const auto Block = Closure(Sel);
+                    if (ImGui::MenuItem(std::format("Collapse {} step{}", Block.size(), Block.size() == 1 ? "" : "s").c_str(), "Ctrl+click adds")) Collapse(Sel);
+                    if (ImGui::IsItemHovered()) m_GroupHintNext = Block;                // the steps it would take, outlined
+                }
+                if (pBox && ImGui::MenuItem("Expand")) Expand(pBox->m_Guid.m_Value);
                 ImGui::EndPopup();
             }
 
@@ -1220,6 +1541,13 @@ namespace xmaterial_editor
         std::vector<entry>                          m_Entries;          // what the search offers, last frame
         std::optional<entry>                        m_Picked;           // a pick waiting for its port
         int                                         m_HoverEntry = -1, m_HoverPort = -1;
+        std::vector<std::uint64_t>                  m_Group;            // steps added to the selection with Ctrl+click
+        std::vector<std::uint64_t>                  m_GroupHint, m_GroupHintNext;     // what the menu's Collapse would take (hovered)
+        std::uint64_t                               m_DragStep = 0;     // a step being dragged up or down its column
+        bool                                        m_bDragCancelled = false;          // Esc during a drag: nothing until the button is released
+        move_plan                                   m_Drag;
+        std::uint64_t                               m_PreviewPin = 0;   // the output previewed on the mesh (0: the material)
+        std::string                                 m_PreviewStatus;
     };
 
     namespace cmds
@@ -1230,7 +1558,7 @@ namespace xmaterial_editor
             graph_document& m_Doc;
             stack_canvas&   m_Canvas;
             select_step_cmd(xundo::system& System, graph_document& Doc, stack_canvas& Canvas) noexcept : query_command_base(System, "SelectStep", nullptr), m_Doc(Doc), m_Canvas(Canvas) { RegisterArguments(); }
-            const char* getCommandHelp() const noexcept override { return "View only: selects a step (its input and consumer routes lit) or a connection (its route lit) on the Material Stack, or nothing (no argument); replies where it is on screen. Usage: SelectStep [-Node hexguid|@StepName | -Connection hexguid]"; }
+            const char* getCommandHelp() const noexcept override { return "View only: selects a step (its input and consumer routes lit) or a connection (its route lit) on the Material Stack, or nothing (no argument); replies where it is on screen. Usage: SelectStep [-Node hexguid|@StepName|collapsed section guid | -Connection hexguid]"; }
             void RegisterArguments() noexcept override
             {
                 m_hNode       = m_Parser.addOption("Node",       "The step", false, 1);
@@ -1242,10 +1570,11 @@ namespace xmaterial_editor
                 std::uint64_t Id = 0;
                 if (GetArg(m_Parser, m_hNode, Text))
                 {
-                    if (!ResolveNodeText(m_Doc, Text, Id, &Err)) return "SelectStep: " + Err;
+                    if (!ResolveNodeText(m_Doc, Text, Id, &Err) && !(ParseHex(Text, Id) && m_Canvas.HasStep(Id))) return "SelectStep: " + Err;      // a collapsed section's box: its guid
                     if (!m_Canvas.HasStep(Id)) return "SelectStep: not a step on the canvas";
                     m_Canvas.Select(Id, 0);
-                    return "selected " + StepLabel(*m_Doc.FindNode(Id)) + "  " + m_Canvas.Where(Id, 0);
+                    auto* pN = m_Doc.FindNode(Id);
+                    return "selected " + (pN ? StepLabel(*pN) : std::string("a collapsed section")) + "  " + m_Canvas.Where(Id, 0);
                 }
                 if (!GetArg(m_Parser, m_hConnection, Text)) { m_Canvas.Select(0, 0); return "nothing selected"; }
                 if (!HexArg(m_Parser, m_hConnection, Id)) return "SelectStep: bad -Connection";
@@ -1283,6 +1612,34 @@ namespace xmaterial_editor
                 return "tracing " + StepLabel(*m_Doc.FindNode(Id)) + (Dir == "up" ? " upstream" : " downstream");
             }
             xcmdline::parser::handle m_hNode, m_hDirection;
+        };
+
+        //---- PreviewStep: view only, one step's output on the Mesh Preview instead of the material (P / Esc on the canvas)
+        struct preview_step_cmd : xundo::query_command_base
+        {
+            graph_document& m_Doc;
+            stack_canvas&   m_Canvas;
+            preview_step_cmd(xundo::system& System, graph_document& Doc, stack_canvas& Canvas) noexcept : query_command_base(System, "PreviewStep", nullptr), m_Doc(Doc), m_Canvas(Canvas) { RegisterArguments(); }
+            const char* getCommandHelp() const noexcept override { return "View only: shows a step's output (its first, or -Output name) on the Mesh Preview, compiled from a temporary copy of the material; without -Node: back to the material. Usage: PreviewStep [-Node hexguid|@StepName [-Output name]]"; }
+            void RegisterArguments() noexcept override
+            {
+                m_hNode   = m_Parser.addOption("Node",   "The step", false, 1);
+                m_hOutput = m_Parser.addOption("Output", "Its output's name (default: the first)", false, 1);
+            }
+            std::string Query() noexcept override
+            {
+                std::string Text, Out, Err;
+                std::uint64_t Id = 0;
+                if (!GetArg(m_Parser, m_hNode, Text)) { m_Canvas.Preview(0); return "previewing the material"; }
+                if (!ResolveNodeText(m_Doc, Text, Id, &Err)) return "PreviewStep: " + Err;
+                auto* pN = m_Doc.FindNode(Id);
+                if (!pN || pN->m_OutputPins.empty()) return "PreviewStep: that step has no output";
+                const bool bNamed = GetArg(m_Parser, m_hOutput, Out);
+                for (auto& O : pN->m_OutputPins)
+                    if (!bNamed || NoSpace(O.m_Name) == NoSpace(Out)) { m_Canvas.Preview(O.m_PinGUID.m_Value); return "previewing " + ChipText(m_Doc.m_Graph, O.m_PinGUID); }
+                return "PreviewStep: no output named " + Out;
+            }
+            xcmdline::parser::handle m_hNode, m_hOutput;
         };
     }
 }

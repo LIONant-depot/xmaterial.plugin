@@ -30,7 +30,7 @@ source/Editor/xmaterial_graph_widgets.h     param widgets moved out of xmaterial
 - Columns are layout only (E27 `NODE_SCRIPTING_DESIGN.md` §12.5). Which column a section lands in has no meaning.
 - Sections do not make scope. Unlike E27 spines with owned `End` markers (§4.1) and the scope-depth rule (§11.5), any step can feed any later
   step. Scope arrives only with loop/switch regions (deferred), which would reuse E27's owned-marker model.
-- Section ≠ collapsed section ≠ subgraph. A section organises. A collapsed section shows a boundary summary. Only subgraphs (later) define a
+- Section ≠ collapsed section ≠ subgraph. A section organises. A collapsed section shows a boundary summary (one box, §7.6). Only subgraphs (later) define a
   reusable interface.
 - Move ≠ insert. Moving changes presentation and keeps bindings. Inserting on a connection routes that connection through the new step.
   Moving to another section changes organisation only. Duplicating copies bindings explicitly.
@@ -336,7 +336,7 @@ waits at the bottom of column 0.
 - Selected connection: its path from the source at full alpha, 2.5 px (nothing moves); the other branches of that output at 0.75.
 - Selected step: its input and consumer routes lit.
 - Trace upstream/downstream (`U` / `D`): transitive closure lit, the rest dimmed to 0.15.
-- Collapsed section: internal routes hidden; boundary routes end at the box rows.
+- Collapsed section (§7.6): internal routes are not laid out; boundary routes end at the box rows.
 
 ## 6. Source chips
 
@@ -396,20 +396,31 @@ Contract: nothing is wired until the person picks a source or a type and, when s
 | drag from an output pin, drop on an input | `Connect` | type, cycle, order (§7.3 if violated) |
 | drag from an input pin into empty space / chip "Replace source" | search: existing compatible outputs before the consumer + prefabs; a new step goes right before the consumer: group {`CreateNode`, `Connect`} | type, order (only sources before the consumer are offered) |
 | (+) on the selected route / route menu "Insert step on this connection…" | search filtered by in-type = source type, out-type = consumer type; chooser if several ports fit; placed right before the consumer: `InsertOnConnection` | types |
-| drag a step header onto a slot | `PlaceSteps -Nodes -Section -After\|-Before` | order (§7.3) |
-| drag a section header onto a section slot | `MoveSection` | order: violations => same three options, applied to the whole section |
+| drag a step header up or down its column | `PlaceSteps -Nodes -After\|-Before <step> -Resolve dependents` (§7.3) | none needed (one column: no binding between its steps) |
+| Ctrl+click steps, step menu Collapse | group {`PlaceSteps`, `CreateSection`, (`CreateSection`, `PlaceSteps`), `PlaceSteps`, `SetSectionCollapsed`} (§7.6) | refused when the steps cannot sit together without moving others |
 | step menu Duplicate | `DuplicateStep` (copies every input binding; outputs unconnected; placed after the original) | none |
 | Del on a step | `DeleteNode` (also leaves its section; consumers fall back to widgets) | OUTPUT steps cannot be deleted from the stack |
 | edit a param widget | `SetNodeProperty` (existing, value-based) | xproperty |
 | rename (F2 / double-click the header) | `RenameStep` | unique, non-empty |
-| collapse / expand a section | `SetSectionCollapsed` | none |
+| expand a box (double click, menu Expand) | `SetSectionCollapsed -Collapsed 0` | none |
 | select, hover, trace, go to, back, zoom, pan, preview | none | — |
 
-### 7.3 Moves that break the order
+### 7.3 Moves (task 11, re-thought for depth columns)
 
-Dropping where the invariant fails opens a popup at the drop point with three choices, each previewed (ghost of the resulting order and
-routes while hovered): **Move dependents too**, **Nearest valid spot**, **Cancel**. The first two issue one `PlaceSteps` with
-`-Resolve dependents|nearest` (the command computes the same orders, §3, so console and canvas agree). Cancel issues nothing.
+The v1 move (drag a step onto a slot between section steps, a popup when the drop breaks the order) does not fit v2: columns come from
+dependency depth, so a step can only ever sit in its own column, and the reading order decides only the layout's free choices (§4.4). What a
+person can still change is the vertical order of the steps of a column, which the layout derives from the reading order where it may.
+- **Drag a step's header up or down its column.** The slot under the mouse is a line across the column; the drop is `PlaceSteps -Nodes <step>
+  -Before|-After <neighbour> -Resolve dependents` (one undo step; bindings untouched). Steps of one column never bind each other, so the only
+  order a drop can break is the step moving above one of its producers; `dependents` brings those along (they sit in earlier columns, so
+  nothing visible moves for them). The three-choice popup is therefore never needed on the canvas; `PlaceSteps -Resolve none|nearest` and
+  `ValidatePlacement` stay for the console.
+- **Preview.** While dragging, the canvas lays out the order the drop would make (`FromGraph` with the planned sections, the same pure
+  layout) and draws every step that would move as a flat card with its name where it would go, the routes it would draw faintly, and a label
+  (`Detail2 before Detail`). When nothing would move (the barycentre order wins: fewer crossings) the label says so and the drop issues
+  nothing: no invisible history. Esc cancels the drag.
+- Deterministic and memoryless as before: the picture follows the stored reading order only.
+- Not built: dragging sections (not drawn, §4); dragging across columns (meaningless: the column is the depth).
 
 ### 7.4 Search popup
 
@@ -423,11 +434,20 @@ sit before the consumer. Text filter over prefab and step names. Nothing is wire
 "Find all uses" -> "Replace all…" -> pick a new source (search) -> group {`Connect` per use}. The new source must be before the earliest use;
 otherwise §7.3 options apply to the new source.
 
-### 7.6 Collapsed section
+### 7.6 Collapse (task 11)
 
-One box: `Normal detail · 8 steps · in: UV, DetailMap · out: Normal`. `in` = distinct external sources feeding steps inside (chip text);
-`out` = distinct inside outputs consumed outside. One row per boundary input/output; routes attach there. Expanding restores the same lanes
-(lane memory keeps trunk keys; boundary trunks share the source output key).
+A collapsed group is a USER section with `m_bCollapsed` set: organisation data only, saved and undone like every section.
+- **Gesture.** Click a step, Ctrl+click more, step menu **Collapse N steps** (hovering it outlines the steps it takes). The group is the
+  selection plus every step on a path between two of them (else the box would feed itself). Exactly a section: that section collapses.
+  Otherwise one undo step: the steps go together to a slot after every producer outside them and before every consumer outside them, so no
+  other step moves (`PlaceSteps`); they become a new section `Group` (the rest of the section they leave becomes `Name (2)`), collapsed. When
+  no such slot exists without moving other steps (a step reading the group sits before a step feeding it) the collapse is refused, naming both.
+- **Box.** One step-like box in the layout (`FromGraph`): header `Group  2 steps` with a card behind it; an input row per distinct source
+  outside feeding a step inside (its chip text), an output row per inside output used outside. Boundary routes attach to the rows; routes
+  inside are not laid out. Its column follows from its boundary like any step's.
+- **Expand.** Double click the box or its menu Expand: `SetSectionCollapsed -Collapsed 0`; the section stays. The layout keeps no memory, so
+  expanding gives exactly the picture from before the collapse (`LayoutStats` identical).
+- `SelectStep -Node <section guid>` selects a box (scripts).
 
 ### 7.7 Validation messages (shown as a tooltip at the drop; nothing in history)
 
@@ -528,10 +548,21 @@ editor's error mapping (`xmaterial_editor.h:95`, matches the decimal guid in log
 
 ### 10.4 One selected intermediate preview (first milestone)
 
-`PreviewStep` writes a temporary copy of the graph where `Output: Target Color` takes the selected output (float -> `vec4(x,x,x,1)`, vec2 ->
-`(x,y,0,1)`, vec3 -> `(xyz,1)`), compiles it as a side resource and shows it in Mesh Preview with a banner "Previewing Wetness.Roughness ·
-Esc to stop". `[A: the compile path can build a temporary descriptor without touching the asset; unverified — if not, the preview task
-becomes "compiler flag: preview output pin guid"]`.
+`PreviewStep` (or P on the selected step; P again or Esc returns) makes a temporary copy of the graph whose output colour input takes the
+selected output, compiles it as a side resource and shows it in Mesh Preview with a banner `Previewing: Wetness.Roughness  -  Esc to return`
+over the canvas and the mesh (plus `compiling...` or the compiler's first error).
+
+Assumption checked (task 13): the library compiles per asset (`library_mgr::RequestCompile` takes a library resource) and the editor has no
+in-process GLSL compiler (shaderc is linked only into the compiler, a release build). But the compiler takes any descriptor path, and the
+pipeline already accepts descriptors under `Cache\Descriptors\<Type>\..` (generated ones, `compiler_base::setupPaths`). So the editor
+writes the copy to `Cache\Descriptors\Material\XX\YY\<new guid>.desc\Descriptor.txt`, runs the plugin's compiler with the library's
+command line (`compilation::RunCommandLine`, on a thread), loads the result by guid through `g_Mgr` (it reads
+`Cache\Resources\Platforms\WINDOWS\Material\XX\YY\<guid>`) and removes the temporary paths when the preview ends. The asset, its
+descriptor, its compiled resource and the library DB are never written (the library watches `Descriptors`, not `Cache\Descriptors`; it only
+logs the new log folder as unknown). No compiler flag needed.
+Conversion: a vec3 feeds the colour directly, a float splats (the compiler's rule), another type goes through a prefab with one input of
+that type and an output of the colour's type (`Vec4 To Vec3`); none => `a Vec2 cannot show on the mesh`. Textures and samplers are not
+previewable. Alpha stays as the material has it. A compile of the material while previewing compiles the preview again from the new graph.
 
 ## 11. Task tests
 
@@ -544,12 +575,12 @@ segments crossing steps = 0, order invariant holds, one undo step per gesture, u
 | 2 | Independent normal and color branches | sections Normal, Surface color with no links between | no route between them; 1600 px => side by side, 500 px => one column | columns at 1600/500 px; cross-section routes = 0 |
 | 3 | Multi-output step | `Wetness` outputs Roughness, Darken, each used twice | chips `Wetness.Roughness` / `Wetness.Darken`; two trunks, never merged | trunks = distinct outputs used (2); `FindUses -Output` correct |
 | 4 | Insert tint into one branch | `Albedo` feeds Base color and Emission; insert `Vec4 Multiply` on Albedo->Base color | only that connection goes through the new step; chooser asked which input; Emission untouched | gestures ≤ 4; undo steps = 1; other connection guid unchanged; other steps' order unchanged |
-| 5 | Move a step across a dependency | drag `Noise` below its consumer | popup with 3 previewed options; each gives a valid order; Cancel adds no history | undo steps = 1 (0 for Cancel); steps moved = exactly the dependents (option 1) / 1 (option 2) |
+| 5 | Reorder in a column (v2) | two independent branches in column 0; drag the second's header above the first | while dragging, the steps that would move drawn where they go; the drop swaps the branches; a drop the layout cannot honour says so and adds no history; Esc adds none | undo steps = 1 (0 for no-change / Esc); bindings unchanged; crossings not raised |
 | 6 | Replace a shared mask | `Mask` used by 3 steps; Find all uses -> Replace all -> `Mask2` | 3 chips read `Mask2`; `Mask` still exists, unused | gestures ≤ 5; undo steps = 1 |
-| 7 | Collapse a large section | 30-step section with 4 external inputs, 2 outputs | one box with summary; boundary routes end at it; expand restores identical lanes | column height before/after; lanes before = after expand; sections moved between columns = 0 |
+| 7 | Collapse steps (v2) | Ctrl+click steps with external inputs and an output used outside; Collapse | one box `Group  N steps`, a row per external source and per output used outside; boundary routes end at it; expand restores the identical layout | undo steps = 1; `LayoutStats` before collapse = after expand; segments through steps = 0 |
 | 8 | Change an instance value | edit a Float widget on an unconnected input | value changes, nothing moves | step rects diff = 0; lane diff = 0; undo steps = 1 |
 | 9 | Invalid connection | Vec3 output onto Float input; producer below consumer; a cycle | type and cycle refused with the message, no history; order case opens §7.3 | history size unchanged for refusals |
-| 10 | Add one node to a large material | 200 steps, 12 sections; (+) Add step in a middle section | only the steps below it in that column shift; no section changes column | lanes changed for unrelated trunks = 0; sections moved between columns = 0; layout ms (`[A]` budget 2 ms) |
+| 10 | Add one node to a large material | 200 steps; background menu Add step, then one reorder drag | the unwired new step waits at the bottom of column 0, nothing else moves; the drag preview costs one layout per slot change | steps moved by the add = 0; layout ms (`[A]` budget 2 ms; ~8 ms at 200 steps in release, §4.4 ponytail) |
 
 The headless self-check (`xmaterial_stack_selftest()` in `xmaterial_stack_routes.h`, `assert`-based, run by a debug console command
 `StackSelfTest`) builds tests 1, 3, 7, 10 from code and asserts: invariant, no segment through a step, one trunk per (container, output),
@@ -593,10 +624,16 @@ Sized for one Sonnet session each. "Done" includes: builds, old canvas still wor
     §7.3 popup lands with task 11.
 11. **Moves and collapse** — `xmaterial_stack_canvas.h`. Step and section drag onto slots, the §7.3 popup with previews, collapsed section
     box with boundary rows. Done: tests 5, 7, 10.
+    Status: done, re-thought for depth columns (§7.3, §7.6): reorder within a column by dragging the header, previewed, issuing nothing when
+    nothing would move; Ctrl+click + Collapse into a new collapsed section (a box with boundary rows), double click to expand. Tests 5 and 7
+    by mouse (smoke script, nothing saved: reorder 1 undo step, Esc and no-change drops 0; collapse 1 undo step, `LayoutStats` after expand
+    = before collapse). Test 10's add was covered in task 10; its 200-step timing was not re-measured.
 12. **Old canvas read-only** — `Editor/xmaterial_graph_canvas.h`. Positions from the stack layout, editing disabled, shared selection.
     Done: both panels show the same selection; no edit possible from the old one.
 13. **One intermediate preview** — `xmaterial_stack_canvas.h`, `xmaterial_editor.h` (+ compiler only if §10.4's assumption fails).
     `PreviewStep`. Done: selecting a step and pressing P shows its output on the mesh; Esc returns to the material.
+    Status: done (§10.4: the assumption holds with a descriptor under `Cache\Descriptors`; no compiler change). By mouse: click `Texture`,
+    P, the mesh shows the texture under the banner; Esc, the material again; `PreviewStep -Node @Vec4_Multiply` from the console.
 14. **Task test pass and docs** — run §11 by hand and as scripts, record measures in this file, update `documentation/editor.md` (stack
     panel, new commands). Done: all 10 pass; the owner decides when the old canvas goes.
 

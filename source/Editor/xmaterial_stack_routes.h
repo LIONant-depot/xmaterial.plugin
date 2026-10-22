@@ -625,33 +625,67 @@ namespace xmaterial_editor::stack_routes
     // A sub-element is no row: its routes leave from its output's row, as their own trunk. Measure(std::string) -> width in pixels;
     // InputW(node, input_pin) -> an input row's content inside the step (its name, its chip); LitW(node, input_pin) -> the literal field left
     // of the step for an unconnected input (0 for none). The canvas measures them with ImGui.
-    // ponytail: a collapsed section is laid out expanded until the collapsed box exists (task 11)
+    // A collapsed USER section (7.6) is one box: an input row per distinct source outside it feeding a step inside, an output row per inside
+    // output used outside; routes attach to those rows, routes inside it are not drawn. pSections replaces the stack's sections (the canvas
+    // lays out the order a drag would make, to preview it).
     struct graph_input
     {
+        struct box { int m_Section = 0, m_nSteps = 0; std::string m_Name; std::vector<std::uint64_t> m_In, m_Out; std::vector<std::string> m_InText, m_OutText; };
         sl::input                               m_In;
         std::vector<edge>                       m_Edges;
-        std::vector<xmaterial_graph::node_guid> m_Steps;            // per global step
+        std::vector<xmaterial_graph::node_guid> m_Steps;            // per global step (a box: its section's guid)
+        std::vector<int>                        m_Box;              // per global step: index into m_Boxes, -1 = a step
+        std::vector<box>                        m_Boxes;
         std::vector<std::string>                m_SectionNames;
     };
 
+    inline std::string BoxTitle(const std::string& Name, int nSteps) { return std::format("{}  {} step{}", Name, nSteps, nSteps == 1 ? "" : "s"); }
+
+    // A chip's text (cmds::ChipText): Step, Step.Output (several outputs), Step.x (a sub-element)
+    inline std::string SourceText(const xmaterial_graph::graph& G, std::uint64_t Out) noexcept
+    {
+        auto* pN = G.findNodeByPin(xmaterial_graph::pin_guid{ Out });
+        if (!pN) return "?";
+        const std::string Step = pN->m_StepName.empty() ? pN->m_Name : pN->m_StepName;
+        for (auto& O : pN->m_OutputPins)
+        {
+            const std::string Base = Step + (pN->m_OutputPins.size() > 1 ? "." + O.m_Name : "");
+            if (O.m_PinGUID.m_Value == Out) return Base;
+            for (auto& Sub : O.m_SubElements) if (Sub.m_PinGUID.m_Value == Out) return Base + "." + Sub.m_Name;
+        }
+        return "?";
+    }
+
     template<typename T_MEASURE, typename T_INPUT_W, typename T_LIT_W>
-    graph_input FromGraph(const xmaterial_graph::graph& G, T_MEASURE&& Measure, T_INPUT_W&& InputW, T_LIT_W&& LitW) noexcept
+    graph_input FromGraph(const xmaterial_graph::graph& G, T_MEASURE&& Measure, T_INPUT_W&& InputW, T_LIT_W&& LitW, const std::vector<xmaterial_graph::section>* pSections = nullptr) noexcept
     {
         graph_input R;
+        const auto& Sections = pSections ? *pSections : G.m_Stack.m_Sections;
+        std::unordered_map<std::uint64_t, std::uint64_t> MainOf;                    // output or sub-element pin -> its output pin
+        for (auto& [Id, pN] : G.m_InstanceNodes) for (auto& O : pN->m_OutputPins) { MainOf[O.m_PinGUID.m_Value] = O.m_PinGUID.m_Value; for (auto& s : O.m_SubElements) MainOf[s.m_PinGUID.m_Value] = O.m_PinGUID.m_Value; }
         std::unordered_set<std::uint64_t> Used;                                     // output pins feeding something (directly or by a sub-element)
-        for (auto& [Id, C] : G.m_Connections)
-            if (auto* pN = G.findNodeByPin(C->m_OutputPinGuid))
-                for (auto& O : pN->m_OutputPins)
-                    if (O.m_PinGUID.m_Value == C->m_OutputPinGuid.m_Value || std::any_of(O.m_SubElements.begin(), O.m_SubElements.end(), [&](const xmaterial_graph::pin& s) { return s.m_PinGUID.m_Value == C->m_OutputPinGuid.m_Value; }))
-                        Used.insert(O.m_PinGUID.m_Value);
+        for (auto& [Id, C] : G.m_Connections) if (auto It = MainOf.find(C->m_OutputPinGuid.m_Value); It != MainOf.end()) Used.insert(It->second);
 
         std::unordered_map<std::uint64_t, std::pair<int,int>> OutRow, InRow;        // pin -> (global step, row)
-        for (auto& S : G.m_Stack.m_Sections)
+        std::unordered_map<std::uint64_t, int> BoxOf;                               // a node inside a collapsed section -> its box's global step
+        for (int s = 0; s < static_cast<int>(Sections.size()); ++s)
         {
+            const auto& S = Sections[s];
             auto& Sec = R.m_In.emplace_back();
             Sec.m_Id = S.m_Guid.m_Value;
             Sec.m_bOutput = S.m_Kind == xmaterial_graph::section::kind::OUTPUT;
             R.m_SectionNames.push_back(S.m_Name);
+            if (S.m_bCollapsed && !Sec.m_bOutput && !S.m_Steps.empty())
+            {
+                const int g = static_cast<int>(R.m_Steps.size());
+                R.m_Steps.push_back(xmaterial_graph::node_guid{ S.m_Guid.m_Value });
+                R.m_Box.push_back(static_cast<int>(R.m_Boxes.size()));
+                auto& B = R.m_Boxes.emplace_back();
+                B.m_Section = s; B.m_Name = S.m_Name;
+                for (auto Guid : S.m_Steps) if (G.m_InstanceNodes.contains(Guid)) { BoxOf[Guid.m_Value] = g; ++B.m_nSteps; }
+                Sec.m_Steps.push_back({ S.m_Guid.m_Value });                        // rows and width once its boundary is known (below)
+                continue;
+            }
             for (auto Guid : S.m_Steps)
             {
                 auto It = G.m_InstanceNodes.find(Guid);
@@ -659,6 +693,7 @@ namespace xmaterial_editor::stack_routes
                 const auto& N = *It->second;
                 const int g = static_cast<int>(R.m_Steps.size());
                 R.m_Steps.push_back(Guid);
+                R.m_Box.push_back(-1);
                 float InW = 0, OutW = 0, Lit = 0;
                 int nIn = 0, nOut = 0;
                 for (auto& P : N.m_InputPins) { InRow[P.m_PinGUID.m_Value] = { g, nIn++ }; InW = std::max(InW, InputW(N, P)); Lit = std::max(Lit, LitW(N, P)); }
@@ -675,11 +710,52 @@ namespace xmaterial_editor::stack_routes
                 Sec.m_Steps.push_back({ Guid.m_Value, sl::StepW(TextW), std::max({ 1, nIn, nOut }), Lit });
             }
         }
+
+        // The boundary of every box, in its steps' order: a row per source outside feeding it, a row per output of it used outside
+        for (int g = 0; g < static_cast<int>(R.m_Steps.size()); ++g)
+        {
+            if (R.m_Box[g] < 0) continue;
+            auto& B = R.m_Boxes[R.m_Box[g]];
+            auto Inside = [&](const xmaterial_graph::node* p) { auto It = p ? BoxOf.find(p->m_Guid.m_Value) : BoxOf.end(); return It != BoxOf.end() && It->second == g; };
+            for (auto Guid : Sections[B.m_Section].m_Steps)
+            {
+                auto It = G.m_InstanceNodes.find(Guid);
+                if (It == G.m_InstanceNodes.end()) continue;
+                for (auto& P : It->second->m_InputPins)
+                {
+                    auto C = G.m_Connections.find(P.m_ConnectionGUID);
+                    if (!P.m_ConnectionGUID.m_Value || C == G.m_Connections.end() || C->second->m_InputPinGuid != P.m_PinGUID) continue;
+                    const auto* pSrc = G.findNodeByPin(C->second->m_OutputPinGuid);
+                    if (!pSrc || Inside(pSrc)) continue;
+                    const std::uint64_t Src = C->second->m_OutputPinGuid.m_Value;
+                    const auto k = std::find(B.m_In.begin(), B.m_In.end(), Src) - B.m_In.begin();
+                    if (k == static_cast<std::ptrdiff_t>(B.m_In.size())) { B.m_In.push_back(Src); B.m_InText.push_back(SourceText(G, Src)); }
+                    InRow[P.m_PinGUID.m_Value] = { g, static_cast<int>(k) };
+                }
+                for (auto& O : It->second->m_OutputPins)
+                {
+                    const bool bOut = std::any_of(G.m_Connections.begin(), G.m_Connections.end(), [&](auto& C)
+                        { auto M = MainOf.find(C.second->m_OutputPinGuid.m_Value); return M != MainOf.end() && M->second == O.m_PinGUID.m_Value && !Inside(G.findNodeByPin(C.second->m_InputPinGuid)); });
+                    if (!bOut) continue;
+                    const int k = static_cast<int>(B.m_Out.size());
+                    B.m_Out.push_back(O.m_PinGUID.m_Value); B.m_OutText.push_back(SourceText(G, O.m_PinGUID.m_Value));
+                    OutRow[O.m_PinGUID.m_Value] = { g, k };
+                    for (auto& Sub : O.m_SubElements) OutRow[Sub.m_PinGUID.m_Value] = { g, k };
+                }
+            }
+            float InW = 0, OutW = 0;
+            for (auto& t : B.m_InText)  InW  = std::max(InW,  Measure(t));
+            for (auto& t : B.m_OutText) OutW = std::max(OutW, Measure(t));
+            auto& Step = R.m_In[B.m_Section].m_Steps[0];
+            Step.m_nRows = std::max({ 1, static_cast<int>(B.m_In.size()), static_cast<int>(B.m_Out.size()) });
+            Step.m_W     = sl::StepW(std::max(Measure(BoxTitle(B.m_Name, B.m_nSteps)), InW + OutW + sl::geo::MID_GAP));
+        }
+
         for (auto& [Id, C] : G.m_Connections)
         {
             auto O = OutRow.find(C->m_OutputPinGuid.m_Value);
             auto I = InRow.find(C->m_InputPinGuid.m_Value);
-            if (O != OutRow.end() && I != InRow.end())
+            if (O != OutRow.end() && I != InRow.end() && O->second.first != I->second.first)
                 R.m_Edges.push_back({ O->second.first, O->second.second, I->second.first, I->second.second, C->m_OutputPinGuid.m_Value, Id.m_Value });
         }
         return R;
