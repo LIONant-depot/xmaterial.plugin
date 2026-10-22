@@ -915,10 +915,11 @@ namespace xmaterial_editor::stack_routes
 
 namespace xmaterial_editor::stack_routes
 {
-    constexpr float CHIP_W = 80.0f;     // ponytail: room for a chip or a param widget beside an input's name; measure the real chip text in task 9
+    constexpr float CHIP_W = 80.0f;     // without a canvas: room for a chip or a param widget beside an input's name
 
     // The stack of a graph as router input (4.2): per step one row per input, then one per used output (the first always). A sub-element is
-    // no row: its routes leave from its output's row, as their own trunk. Measure(std::string) -> width in pixels (the canvas passes ImGui's).
+    // no row: its routes leave from its output's row, as their own trunk. Measure(std::string) -> width in pixels; InputW(node, input_pin) ->
+    // the width of an input row's content: its name, its chip or widget (the canvas measures both with ImGui).
     // ponytail: a collapsed section is laid out expanded until the collapsed box exists (task 11)
     struct graph_input
     {
@@ -928,8 +929,8 @@ namespace xmaterial_editor::stack_routes
         std::vector<std::string>                m_SectionNames;
     };
 
-    template<typename T_MEASURE>
-    graph_input FromGraph(const xmaterial_graph::graph& G, T_MEASURE&& Measure) noexcept
+    template<typename T_MEASURE, typename T_INPUT_W>
+    graph_input FromGraph(const xmaterial_graph::graph& G, T_MEASURE&& Measure, T_INPUT_W&& InputW) noexcept
     {
         graph_input R;
         std::unordered_set<std::uint64_t> Used;                                     // output pins feeding something (directly or by a sub-element)
@@ -954,7 +955,7 @@ namespace xmaterial_editor::stack_routes
                 R.m_Steps.push_back(Guid);
                 float TextW = Measure(N.m_StepName.empty() ? N.m_Name : N.m_StepName + "  " + N.m_Name);
                 int Row = 0;
-                for (auto& P : N.m_InputPins) { InRow[P.m_PinGUID.m_Value] = { g, Row++ }; TextW = std::max(TextW, Measure(P.m_Name) + CHIP_W); }
+                for (auto& P : N.m_InputPins) { InRow[P.m_PinGUID.m_Value] = { g, Row++ }; TextW = std::max(TextW, InputW(N, P)); }
                 for (std::size_t o = 0; o < N.m_OutputPins.size(); ++o)
                 {
                     const auto& P = N.m_OutputPins[o];
@@ -994,13 +995,15 @@ namespace xmaterial_editor::cmds
     {
         stack_routes::view_memory                   m_Memory;
         float                                       m_Width   = 1600.0f;
-        std::function<float(const std::string&)>    m_Measure = [](const std::string& s) { return 7.0f * static_cast<float>(s.size()); };     // ponytail: 7 px per char until the canvas (task 8) passes ImGui::CalcTextSize
+        // Text and input row widths: the stack canvas sets ImGui's; until it has drawn once (or with no canvas), 7 px per character
+        std::function<float(const std::string&)>    m_Measure = [](const std::string& s) { return 7.0f * static_cast<float>(s.size()); };
+        std::function<float(const xmaterial_graph::node&, const xmaterial_graph::input_pin&)> m_InputW = [](const xmaterial_graph::node&, const xmaterial_graph::input_pin& P) { return 7.0f * static_cast<float>(P.m_Name.size()) + stack_routes::CHIP_W; };
     };
 
     // The layout the canvas would show at Width, on a copy of the view memory: a query never changes the view
     inline stack_routes::result StackLayoutOf(const graph_document& Doc, const stack_view& View, float Width, stack_routes::graph_input& In, double& Ms) noexcept
     {
-        In = stack_routes::FromGraph(Doc.m_Graph, View.m_Measure);
+        In = stack_routes::FromGraph(Doc.m_Graph, View.m_Measure, View.m_InputW);
         auto Memory = View.m_Memory;
         const auto T0 = std::chrono::steady_clock::now();
         auto R = stack_routes::Build(In.m_In, In.m_Edges, Width, Memory);

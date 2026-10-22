@@ -2,15 +2,12 @@
 #define XMATERIAL_GRAPH_CANVAS_H
 #pragma once
 
-// The material graph's canvas: nodes, pins, links, the widgets of unconnected inputs, the create/delete menus. It only draws and asks: every edit it
+// The material graph's canvas: nodes, pins, links, the widgets of unconnected inputs (xmaterial_graph_widgets.h), the create/delete menus. It only draws and asks: every edit it
 // makes is a command run on the editor's undo system (xmaterial_graph_editing.h), so what a person does here an AI does from the console.
-#include "plugins/xmaterial.plugin/source/Editor/xmaterial_graph_editing.h"
+#include "plugins/xmaterial.plugin/source/Editor/xmaterial_graph_widgets.h"
 #include "dependencies/xeditor/include/xeditor/hint.h"
-#include "dependencies/xresource_pipeline_v2/source/editor/xresource_editor_inspector_pickers.h"
 #include "dependencies/imgui-node-editor/imgui_node_editor.h"
 #include "dependencies/imgui/imgui_internal.h"
-
-#include <commdlg.h>
 
 namespace xmaterial_editor
 {
@@ -86,14 +83,8 @@ namespace xmaterial_editor
 #endif
         }
 
-        // Runs a command for an edit the widgets have already applied: Before is what the value was.
-        void CommitProperty(const xmaterial_graph::node& N, const std::string& Path, const std::string& After, const std::string& Before) noexcept
-        {
-            xeditor::Run(m_Undo, std::format("SetNodeProperty -Node {:016X} -Path {} -Value {} -Before {}", N.m_Guid.m_Value
-                , xeditor::Quote(Path), xeditor::Quote(After), xeditor::Quote(Before)));
-        }
-
-        static std::string ParamPath(int iParam, const char* pMember) noexcept { return std::format("node/Params[G:{}]/{}", iParam, pMember); }
+        void CommitProperty(const xmaterial_graph::node& N, const std::string& Path, const std::string& After, const std::string& Before) noexcept { graph_widgets::CommitProperty(m_Undo, N, Path, After, Before); }
+        static std::string ParamPath(int iParam, const char* pMember) noexcept { return graph_widgets::ParamPath(iParam, pMember); }
 
         //------------------------------------------------------------------------------------------
         // The widgets of an unconnected input: a number, a texture, a shader file
@@ -125,24 +116,7 @@ namespace xmaterial_editor
                 ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(32, 32, 32, 200));
                 ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 1.f));
 
-                // Dragging edits the value live; one command is sent when the drag ends
-                const std::string Id = "##" + Pin.m_Name + std::to_string(N.m_Guid.m_Value);
-                if (Param.m_Type == xmaterial_graph::node_param::type::FLOAT)
-                {
-                    float& Value = Param.m_Value.get<float>();
-                    const float Pre = Value;
-                    ImGui::DragFloat(Id.c_str(), &Value, 0.01f);
-                    if (ImGui::IsItemActivated()) m_Before = std::format("{:.9g}", Pre);
-                    if (ImGui::IsItemDeactivatedAfterEdit()) CommitProperty(N, ParamPath(iParam, "Float"), std::format("{:.9g}", Value), m_Before);
-                }
-                else
-                {
-                    int& Value = Param.m_Value.get<int>();
-                    const int Pre = Value;
-                    ImGui::DragInt(Id.c_str(), &Value, 0.01f);
-                    if (ImGui::IsItemActivated()) m_Before = std::to_string(Pre);
-                    if (ImGui::IsItemDeactivatedAfterEdit()) CommitProperty(N, ParamPath(iParam, "Int"), std::to_string(Value), m_Before);
-                }
+                graph_widgets::NumberDrag(m_Undo, N, iParam, "##" + Pin.m_Name + std::to_string(N.m_Guid.m_Value), m_Before);
                 ImGui::PopStyleVar();
                 ImGui::PopStyleColor();
 
@@ -163,7 +137,7 @@ namespace xmaterial_editor
                     ImGui::Text("Rsc");
                     ImGui::SameLine(0, 5);
                     ImGui::SetCursorPosY(ImGui::GetCursorPosY() - 2.f);
-                    DrawTextureButton(N, iParam, Param);
+                    ShowHint(graph_widgets::TextureButton(m_Undo, N, iParam, ImVec2(100, 14)));
                 }
                 else
                 {
@@ -172,8 +146,9 @@ namespace xmaterial_editor
                     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 5.f);
                     ImGui::Text("File");
                     ImGui::SameLine(0, 68 - 5);
-                    ImGui::SetCursorPosY(ImGui::GetCursorPosY() - 5.f);
-                    DrawFileButton(N, Param);
+                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() - 60.f);
+                    ImGui::SetCursorPosY(ImGui::GetCursorPosY() - 2.f);
+                    ShowHint(graph_widgets::FileButton(m_Undo, N, iParam, ImVec2(102, 14)));
                 }
 
                 auto* pDraw = ImGui::GetWindowDrawList();
@@ -184,55 +159,12 @@ namespace xmaterial_editor
             }
         }
 
-        // A button with the texture's name; pressing it opens the asset browser as a popup and the pick becomes a command.
-        void DrawTextureButton(xmaterial_graph::node& N, int iParam, xmaterial_graph::node_param& Param) noexcept
+        static void ShowHint(const std::string& Text) noexcept
         {
-            ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(32, 32, 32, 200));
-            auto& Guid = Param.m_Value.get<xresource::full_guid>();
-
-            bool bOpen = false;
-            xresource::full_guid NewGuid = {};
-            std::string Name;
-            xresource_editor::RemapGUIDToString(Name, Guid);
-            if (ImGui::Button(std::format("{}##{}", (Name.empty() || Name == "None") ? "textures" : Name, (void*)&Param.m_Value).c_str(), ImVec2(100, 14))) bOpen = true;
-            static constexpr auto Filters = std::array{ xrsc::texture_type_guid_v };
-            xresource_editor::ResourceBrowserPopup(&Guid, bOpen, NewGuid, Filters);
+            if (Text.empty()) return;
             ed::Suspend();
-            if (ImGui::IsItemHovered()) xeditor::hint::Text("%s", Name.c_str());
+            xeditor::hint::Text("%s", Text.c_str());
             ed::Resume();
-
-            if (!NewGuid.empty() && NewGuid.m_Type == xrsc::texture_type_guid_v && NewGuid != Guid)
-                xeditor::Run(m_Undo, std::format("SetNodeProperty -Node {:016X} -Path {} -Value {}", N.m_Guid.m_Value, xeditor::Quote(ParamPath(iParam, "TextureRef"))
-                    , xeditor::Quote(std::format("{:X}, {:X}", NewGuid.m_Instance.m_Value, NewGuid.m_Type.m_Value))));
-            ImGui::PopStyleColor();
-        }
-
-        // A button with the file's name; pressing it asks for a shader file (SetShaderFile reads it).
-        void DrawFileButton(xmaterial_graph::node& N, xmaterial_graph::node_param& Param) noexcept
-        {
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() - 60.f);
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 3.f);
-            ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(32, 32, 32, 200));
-
-            const std::wstring FileName = Param.m_Value.get<std::wstring>();
-            if (ImGui::Button(std::format("{}##{}", xstrtool::To(xstrtool::PathFileName(FileName)), (void*)&Param.m_Value).c_str(), ImVec2(102, 14)))
-            {
-                wchar_t Buffer[MAX_PATH] = { 0 };
-                OPENFILENAMEW Ofn = { 0 };
-                Ofn.lStructSize     = sizeof(Ofn);
-                Ofn.lpstrFilter     = xmaterial_graph::node_param::file_filter_v;
-                Ofn.lpstrFile       = Buffer;
-                Ofn.nMaxFile        = MAX_PATH;
-                Ofn.Flags           = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
-                Ofn.lpstrDefExt     = L"txt";
-                Ofn.lpstrInitialDir = xproperty::member_ui<std::wstring>::g_CurrentPath.c_str();
-                if (GetOpenFileNameW(&Ofn))
-                    xeditor::Run(m_Undo, std::format("SetShaderFile -Node {:016X} -File {}", N.m_Guid.m_Value, xeditor::Quote(xstrtool::To(std::wstring(Buffer)))));
-            }
-            ed::Suspend();
-            if (ImGui::IsItemHovered()) xeditor::hint::Text("%s", xstrtool::To(FileName).c_str());
-            ed::Resume();
-            ImGui::PopStyleColor();
         }
 
         //------------------------------------------------------------------------------------------

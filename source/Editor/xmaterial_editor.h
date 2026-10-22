@@ -2,12 +2,12 @@
 #define XMATERIAL_EDITOR_H
 #pragma once
 
-// The Material editor: opens a material from the asset browser in its own window. The material is a graph of nodes edited on a canvas (every edit is
-// an undoable command, so an AI drives it from the console); the compiled material is previewed on a mesh and the shader the compiler made is shown as
-// text. Hosts include this header and open editors through xeditor::open_resource_editors.
+// The Material editor: opens a material from the asset browser in its own window. The material is a graph of nodes edited on two canvases over the
+// same document and undo: the Material Stack (sections and steps placed by the system) and the Material Graph (free nodes). Every edit is an undoable
+// command, so an AI drives it from the console; the compiled material is previewed on a mesh and the shader the compiler made is shown as text.
+// Hosts include this header and open editors through xeditor::open_resource_editors.
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_graph_canvas.h"
-#include "plugins/xmaterial.plugin/source/Editor/xmaterial_stack_commands.h"
-#include "plugins/xmaterial.plugin/source/Editor/xmaterial_stack_routes.h"
+#include "plugins/xmaterial.plugin/source/Editor/xmaterial_stack_canvas.h"
 #include "source/Tools/Editor/xeditor_mesh_preview.h"
 #include "source/Tools/Editor/xeditor_text_widget.h"
 #include "dependencies/xresource_pipeline_v2/source/editor/xresource_editor_resources.h"
@@ -56,6 +56,10 @@ namespace xmaterial_editor
         cmds::stack_self_test_cmd       m_StackSelfTest;
 
         graph_canvas                    m_Canvas;
+        stack_canvas                    m_StackCanvas;
+        cmds::select_step_cmd           m_SelectStep;
+        cmds::trace_route_cmd           m_TraceRoute;
+        std::uint64_t                   m_GraphSelected = 0, m_StackSelected = 0, m_Selected = 0;     // the canvas whose selection changed last decides what Node Properties shows
         xeditor::inspector_panel        m_NodeInspector{ "Node Properties" };
         std::uint64_t                   m_InspectedNode = 0;
         xeditor::mesh_preview           m_Preview;
@@ -76,7 +80,8 @@ namespace xmaterial_editor
             , m_FindUses(m_Undo, m_Document), m_ValidatePlacement(m_Undo, m_Document)
             , m_LayoutStats(m_Undo, m_Document, m_StackView), m_RouteInfo(m_Undo, m_Document, m_StackView)
             , m_RepackRoutes(m_Undo, m_StackView), m_StackSelfTest(m_Undo)
-            , m_Canvas(m_Document, m_Undo)
+            , m_Canvas(m_Document, m_Undo), m_StackCanvas(m_Document, m_Undo, m_StackView)
+            , m_SelectStep(m_Undo, m_Document, m_StackCanvas), m_TraceRoute(m_Undo, m_Document, m_StackCanvas)
         {
             xresource_editor::WireResourcePickerCallbacks(m_NodeInspector.m_Inspector);
             m_Shader.SetLanguageDefinition(TextEditor::LanguageDefinition::GLSL());
@@ -85,7 +90,8 @@ namespace xmaterial_editor
 
             AddPanel("Mesh Preview",    dock::left,        [this] { m_Preview.Render(); });
             AddPanel("Node Properties", dock::left_bottom, [this] { RenderNodeProperties(); });
-            AddPanel("Material Graph",  dock::center,      [this] { m_Canvas.Render(); });
+            AddPanel("Material Graph",  dock::center,      [this] { m_Canvas.Render(); });       // ponytail: still editable until the stack canvas edits everything (stack_canvas.md task 12)
+            AddPanel("Material Stack",  dock::center,      [this] { m_StackCanvas.Render(); }, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);   // after the graph: it joins the graph's dock as a tab
             AddPanel("Shader",          dock::bottom,      [this] { m_Shader.Render("Shader", ImVec2(0, 0), true, [] {}); }, ImGuiWindowFlags_HorizontalScrollbar);
 
             LoadShaderText(false);
@@ -145,7 +151,9 @@ namespace xmaterial_editor
         // The selected node's properties: an edit is a command, like everything else.
         void RenderNodeProperties() noexcept
         {
-            const std::uint64_t Selected = m_Canvas.SelectedNode();
+            if (const auto S = m_Canvas.SelectedNode();      S != m_GraphSelected) m_Selected = m_GraphSelected = S;
+            if (const auto S = m_StackCanvas.SelectedNode(); S != m_StackSelected) m_Selected = m_StackSelected = S;
+            const std::uint64_t Selected = m_Selected && m_Document.FindNode(m_Selected) ? m_Selected : 0;
             if (Selected != m_InspectedNode)
             {
                 m_InspectedNode = Selected;
