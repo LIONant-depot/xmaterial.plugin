@@ -69,13 +69,31 @@ namespace xmaterial_editor
         }
     };
 
-    // Two pins can be connected when they are on different nodes and carry the same type, or a float feeds a vec2/vec3/vec4 (a splat: the compiler emits vecN(x)).
+    // Why the colour spaces forbid an Out value feeding an In input, "" when they do not (material_contract.md 3): an SColor (sRGB-encoded)
+    // feeds only SColor inputs and a Color (linear) never feeds one; a plain Vector4 may, which declares raw data sRGB-encoded.
+    inline const char* ColorSpaceClash(xmaterial_graph::type_guid Out, xmaterial_graph::type_guid In) noexcept
+    {
+        if (Out == In) return "";
+        if (Out == xmaterial_graph::scolor_type_guid_v) return "SColor is sRGB-encoded; convert with 'SColor To Color'";
+        if (Out == xmaterial_graph::color_type_guid_v && In == xmaterial_graph::scolor_type_guid_v) return "Color is linear; convert with 'Color To SColor'";
+        return "";
+    }
+
+    // The type rule for types alone: the same type, a float feeding a vec2/vec3/vec4 (a splat: the compiler emits vecN(x)), or two types of one
+    // GLSL type (Color and Vector4 are both vec4), unless the colour spaces clash.
+    inline bool AreTypesCompatible(const xmaterial_graph::graph& G, xmaterial_graph::type_guid Out, xmaterial_graph::type_guid In) noexcept
+    {
+        auto* pOut = G.findType(Out);
+        auto* pIn  = G.findType(In);
+        return pOut && pIn && !*ColorSpaceClash(Out, In)
+            && (Out == In || (pOut->m_CodeString == "float" && pIn->m_CodeString.starts_with("vec")) || pOut->m_CodeString == pIn->m_CodeString);
+    }
+
+    // Two pins can be connected when they are on different nodes and their types fit (AreTypesCompatible).
     inline bool IsPinCompatible(const xmaterial_graph::pin& Out, const xmaterial_graph::pin& In, const xmaterial_graph::graph& G) noexcept
     {
         if (G.findNodeByPin(In.m_PinGUID) == G.findNodeByPin(Out.m_PinGUID)) return false;
-        auto* pOut = G.findType(Out.m_TypeGUID);
-        auto* pIn  = G.findType(In.m_TypeGUID);
-        return pOut && pIn && (pOut->m_GUID == pIn->m_GUID || (pOut->m_CodeString == "float" && pIn->m_CodeString.starts_with("vec")));
+        return AreTypesCompatible(G, Out.m_TypeGUID, In.m_TypeGUID);
     }
 
     //--------------------------------------------------------------------------------------------
@@ -147,7 +165,7 @@ namespace xmaterial_editor
                 return Fail(std::format("'{}' needs a pin: @{}.Name", StepLabel(N), StepLabel(N)));
             }
             int nFound = 0;
-            for (auto& [Name, Guid] : Names) if (NoSpace(Name) == NoSpace(Part) || NoSpace(Name.substr(0, Name.find('('))) == NoSpace(Part)) { Out = Guid; ++nFound; }       // "A(4)" is also "A"
+            for (auto& [Name, Guid] : Names) if (NoSpace(Name) == NoSpace(Part) || (Name.find('.') == std::string::npos && NoSpace(Name.substr(0, Name.find('('))) == NoSpace(Part))) { Out = Guid; ++nFound; }       // "A(4)" is also "A" (not "A(4).x")
             if (nFound == 0) return Fail(std::format("'{}' has no {} pin '{}'", StepLabel(N), bOutput ? "output" : "input", Part));
             if (nFound > 1)  return Fail(std::format("'{}' is ambiguous on '{}'", Part, StepLabel(N)));
             return true;
@@ -330,6 +348,7 @@ namespace xmaterial_editor
 
         inline std::string TypesDiffer(const xmaterial_graph::graph& G, const xmaterial_graph::pin& Out, const xmaterial_graph::pin& In) noexcept
         {
+            if (auto* pWhy = ColorSpaceClash(Out.m_TypeGUID, In.m_TypeGUID); *pWhy) return pWhy;
             auto Name = [&](const xmaterial_graph::pin& P) { auto* p = G.findType(P.m_TypeGUID); return p ? p->m_Name : std::string("?"); };
             return std::format("types differ ({} -> {}); use a sub-element or a conversion", Name(Out), Name(In));
         }

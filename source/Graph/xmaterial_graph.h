@@ -17,6 +17,10 @@ namespace xmaterial_graph
     , FAILURE
     };
 
+    // The two colour pin types (material_contract.md 3): Color is linear RGBA, SColor is sRGB-encoded RGBA
+    inline constexpr auto color_type_guid_v  = type_guid{ xresource::type_guid{"Color"}.m_Value };
+    inline constexpr auto scolor_type_guid_v = type_guid{ xresource::type_guid{"SColor"}.m_Value };
+
 
     struct connection
     {

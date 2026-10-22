@@ -343,6 +343,11 @@ namespace xmaterial_graph
             if (TextFile.isReading()) //reading from text file
             {
                 graph.RebuildPinGuidForNode(Entry);
+
+                // outputs take their types from the node's definition, not the file (old files' vertex colour: Vector4 -> Color)
+                const auto& Prefab = *graph.m_PrefabNodes[PrefabGuid];
+                for (std::size_t o = 0; o < std::min(Prefab.m_OutputPins.size(), Entry.m_OutputPins.size()); ++o)
+                    Entry.m_OutputPins[o].m_TypeGUID = Prefab.m_OutputPins[o].m_TypeGUID;
             }
         }
 
@@ -881,6 +886,19 @@ namespace xmaterial_graph
         typeVec4.m_Sub[3].m_Name        = "w";
         typeVec4.m_Sub[3].m_TypeGUID    = typeFloat.m_GUID;
 
+        // Color: linear RGBA, a vec4 for math. SColor: sRGB-encoded RGBA; it feeds only SColor inputs and has no sub-elements, so its
+        // channels never leak out undecoded ('SColor To Color' decodes it; the rule is IsPinCompatible's, xmaterial_graph_editing.h)
+        auto& typeColor = g.CreateType(color_type_guid_v);
+        typeColor.m_Name        = "Color";
+        typeColor.m_CodeString  = "vec4";
+        typeColor.m_Color       = FromRGB(235, 235, 235);
+        typeColor.m_Sub         = typeVec4.m_Sub;
+
+        auto& typeSColor = g.CreateType(scolor_type_guid_v);
+        typeSColor.m_Name       = "SColor";
+        typeSColor.m_CodeString = "vec4";
+        typeSColor.m_Color      = FromRGB(255, 130, 30);
+
         // sampler2D
         auto& typeSampler2D = g.CreateType(type_guid{ xresource::type_guid{"Sampler2D"}.m_Value });
         typeSampler2D.m_Name        = "Sampler2D";
@@ -1181,14 +1199,39 @@ namespace xmaterial_graph
             vertexInput.m_Code = "[TOP]<!layout(location = 0) in struct { vec4 wSpacePosition; vec4 ShadowPosition; vec4 VertColor; vec4 Tangent; vec3 Normal; vec2 UV; } In;\n!>";
 
             vertexInput.m_OutputPins.resize(2);
-            vertexInput.m_OutputPins[0].m_Name          = "Color(4)";
-            vertexInput.m_OutputPins[0].m_TypeGUID      = typeVec4.m_GUID;
+            vertexInput.m_OutputPins[0].m_Name          = "Color(4)";                // linear (no vertex format carries a colour yet: white)
+            vertexInput.m_OutputPins[0].m_TypeGUID      = typeColor.m_GUID;
             vertexInput.m_OutputPins[0].m_DefaultExpr   = "In.VertColor";
             vertexInput.m_OutputPins[1].m_Name          = "UV(2)";
             vertexInput.m_OutputPins[1].m_TypeGUID      = typeVec2.m_GUID;
             vertexInput.m_OutputPins[1].m_DefaultExpr   = "In.UV";
 
             g.CompletePrefab(vertexInput);
+        }
+
+        // SColor To Color / Color To SColor: the exact piecewise sRGB transfer (IEC 61966-2-1), alpha untouched
+        {
+            auto& Decode = g.CreatePrefabNode(node_guid{ xresource::type_guid{"SColorToColorPrefabs"}.m_Value });
+            Decode.m_Name = "SColor To Color";
+            Decode.m_Code = "vec4 $var = vec4(mix($input[0].rgb / 12.92, pow(($input[0].rgb + 0.055) / 1.055, vec3(2.4)), greaterThan($input[0].rgb, vec3(0.04045))), $input[0].a);\n";
+            Decode.m_InputPins.resize(1);
+            Decode.m_InputPins[0].m_Name        = "A(4)";
+            Decode.m_InputPins[0].m_TypeGUID    = typeSColor.m_GUID;
+            Decode.m_OutputPins.resize(1);
+            Decode.m_OutputPins[0].m_Name       = "Color";
+            Decode.m_OutputPins[0].m_TypeGUID   = typeColor.m_GUID;
+            g.CompletePrefab(Decode);
+
+            auto& Encode = g.CreatePrefabNode(node_guid{ xresource::type_guid{"ColorToSColorPrefabs"}.m_Value });
+            Encode.m_Name = "Color To SColor";
+            Encode.m_Code = "vec4 $var = vec4(mix($input[0].rgb * 12.92, 1.055 * pow($input[0].rgb, vec3(1.0 / 2.4)) - 0.055, greaterThan($input[0].rgb, vec3(0.0031308))), $input[0].a);\n";
+            Encode.m_InputPins.resize(1);
+            Encode.m_InputPins[0].m_Name        = "A(4)";
+            Encode.m_InputPins[0].m_TypeGUID    = typeColor.m_GUID;
+            Encode.m_OutputPins.resize(1);
+            Encode.m_OutputPins[0].m_Name       = "SColor";
+            Encode.m_OutputPins[0].m_TypeGUID   = typeSColor.m_GUID;
+            g.CompletePrefab(Encode);
         }
 
         // Vec3 Dot

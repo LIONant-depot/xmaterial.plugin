@@ -196,9 +196,25 @@ not the shader reads them, so one layout serves all materials.
 
 ## 3. Values, color space, defaults
 
-- Every value is **linear** everywhere: graph file, instance file, manifest, GPU. The inspector's color picker shows sRGB and converts
-  on edit; typed numbers are linear. No shader-side conversion for parameters.
-- Textures: sRGB decode is the texture format's job at sampling `[UNVERIFIED: xtexture compiles albedo as an SRGB format]`.
+- Every value is **linear** everywhere: graph file, instance file, manifest, GPU. The material instance inspector's color picker shows sRGB
+  and converts at the UI boundary with the exact piecewise transfer (`xmaterial_instance_editor.h`, `ToSRGB`/`ToLinear`); typed numbers
+  (console, material editor property fields, `SetParamDefault`) are linear. No shader-side conversion for parameters.
+- Two colour pin types in the graph, so a colour's encoding is always on its pin:
+  - `Color`: linear RGBA (GLSL `vec4`, sub-elements x y z w). It behaves as a `vec4` for math: it connects to and from `Vector4` pins.
+  - `SColor`: sRGB-encoded RGBA (GLSL `vec4`, no sub-elements). It feeds only `SColor` inputs; Connect refuses anything else with
+    "SColor is sRGB-encoded; convert with 'SColor To Color'", and a `Color` into an `SColor` input with "Color is linear; convert with
+    'Color To SColor'". A plain `Vector4` may feed an `SColor` input: that declares raw data sRGB-encoded (e.g. a texture whose format
+    does not decode). The nodes `SColor To Color` and `Color To SColor` apply the exact piecewise sRGB transfer (not pow 2.2), alpha untouched.
+- Vertex colour (`Input: Vertex Variants` -> `Color(4)`, `In.VertColor`) is `Color`, linear. Today no geometry carries one: the static and
+  skin vertex formats have no colour (`xgeom_static.h` / `xgeom_skin.h` `vertex`, `vertex_extras`), their compilers read the imported
+  `xcolori` and drop it, and the vertex shaders' input decode sets `VertColor = vec4(1)` (`xgeom_static_mb_input_full.vert`,
+  `xgeom_skin_mb_input_full.vert`); the `CreateMesh` path (`xlionrender::vertex::m_Color`, UNORM8, tests only) is filled with white.
+  Whoever adds stored vertex colours stores them sRGB-encoded 8-bit and decodes them in the vertex shader (or an `_SRGB` vertex format),
+  so the varying, and the material, stay linear.
+- Textures: sRGB decode is the texture format's job at sampling. A texture with `m_bSRGB` (the default for COLOR usages) is compiled to an
+  sRGB format and its bitmap's colour space marks it (`xtexture_compiler.cpp` `setColorSpace`); the loader creates it with
+  `m_isGamma = !isLinearSpace()` (`xgpu_xcore_bitmap_helpers.h`), i.e. a `VK_FORMAT_*_SRGB` view, so sampling returns linear. The
+  `Texture` node's output therefore stays `Vector4` (linear, and not always a colour: normals, masks).
 - COLOR is a float4; `m_bAlpha = false` -> w forced to 1 at resolve; `m_bHDR = false` -> rgb clamped to [0,1] (part of validRange).
 - `validRange` clamps at resolve (instance compile) and reports `W_CLAMPED`; `uiRange` only bounds sliders.
 - Defaults live in the declaration. The compiled material block holds the defaults (the material's "own instance").
