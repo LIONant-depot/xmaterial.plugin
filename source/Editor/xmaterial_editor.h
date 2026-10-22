@@ -122,6 +122,7 @@ namespace xmaterial_editor
             LoadShaderText(false);
             m_Document.m_OnRead = [](xmaterial_graph::graph& G) { cmds::RefreshGroupNodes(G); };    // group nodes follow their sub-graphs' interfaces
             cmds::RefreshGroupNodes(m_Document.m_Graph);                                            // (the document was read before this hook existed)
+            xresource_editor::g_LibMgr.m_OnCompilationState.Register<&session::OnAnyCompile>(*this); // ...and the moment a sub-graph is compiled again
             if (pDevice && bMaterial && m_Preview.Init(*pDevice) && std::filesystem::exists(m_Document.m_ResourcePath)) ReloadPreview();
             if (pDevice && bMaterial && m_StepPreviews.Init(*pDevice))
             {
@@ -136,7 +137,23 @@ namespace xmaterial_editor
             }
         }
 
-        ~session() noexcept override { StopStepPreview(); xresource::g_Mgr.ReleaseRef(m_MaterialRef); }
+        ~session() noexcept override { xresource_editor::g_LibMgr.m_OnCompilationState.RemoveDelegates(this); StopStepPreview(); xresource::g_Mgr.ReleaseRef(m_MaterialRef); }
+
+        // A sub-graph's compile ended (the compile thread; any library, saved here or elsewhere): its group nodes take its interface on the next frame
+        std::atomic<bool> m_bSubgraphCompiled = false;
+        void OnAnyCompile(xresource_editor::library_mgr&, xresource_editor::library::guid, xresource::full_guid Guid, std::shared_ptr<xresource_editor::compilation::historical_entry::log>& Log) noexcept
+        {
+            if (Guid.m_Type != xmaterial_graph::subgraph_type_guid_v || !Log) return;
+            xcontainer::lock::scope Lock(*Log);
+            using result = xresource_editor::compilation::historical_entry::result;
+            if (const auto R = Log->get().m_Result; R != result::COMPILING && R != result::COMPILING_WARNINGS) m_bSubgraphCompiled = true;
+        }
+
+        void Render() noexcept override
+        {
+            if (m_bSubgraphCompiled.exchange(false)) cmds::RefreshGroupNodes(m_Document.m_Graph);    // in memory only, as when the graph is read: saving writes the new pins
+            document_editor::Render();
+        }
 
         void OnDocumentReplaced() noexcept override { m_InspectedNode = 0; m_NodeInspector.Clear(); }
 

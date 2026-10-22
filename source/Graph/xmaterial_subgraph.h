@@ -52,7 +52,7 @@ namespace xmaterial_graph
     }
 
     // "" when the graph is a sound sub-graph, else why not: one Group Output with at least one pin, every one of them fed, at most one Group
-    // Input, no material output, no declared material parameter (not supported in a sub-graph yet)
+    // Input, no material output, every material parameter read declared (a sub-graph's parameters become the parameters of the materials using it)
     inline std::string ValidateSubgraph(const graph& G) noexcept
     {
         const node *pIn = nullptr, *pOut = nullptr;
@@ -61,9 +61,10 @@ namespace xmaterial_graph
             if (p->isGroupInputNode())       { if (pIn)  return "a sub-graph has one Group Input";  pIn  = p.get(); }
             else if (p->isGroupOutputNode()) { if (pOut) return "a sub-graph has one Group Output"; pOut = p.get(); }
             else if (p->isOutputNode()) return std::format("'{}' is a material output: a sub-graph's outputs are the Group Output's pins", p->m_Name);
-            for (auto& Prm : p->m_Params) if (Prm.m_ParamID) return std::format("'{}' reads a material parameter: a sub-graph cannot declare parameters yet", p->m_StepName);
+            for (auto& Prm : p->m_Params)
+                if (Prm.m_ParamID && !std::ranges::any_of(G.m_Params, [&](auto& D) { return D.m_ID == Prm.m_ParamID; }))
+                    return std::format("'{}' reads parameter {:016X}, which the sub-graph does not declare", p->m_StepName, Prm.m_ParamID);
         }
-        if (!G.m_Params.empty()) return "a sub-graph cannot declare material parameters yet";
         if (!pOut || pOut->m_InputPins.empty()) return "the sub-graph has no output: add one with AddGroupPin -Side Out";
         for (auto& P : pOut->m_InputPins)
             if (P.m_ConnectionGUID.m_Value == 0 || !G.m_Connections.contains(P.m_ConnectionGUID)) return std::format("the output '{}' is fed by nothing", P.m_Name);
@@ -77,6 +78,7 @@ namespace xmaterial_graph
         auto TypeName = [&](type_guid T) { auto* p = G.findType(T); return p ? p->m_Name : std::string("?"); };
         if (auto* p = FindGroupNode(G, true))  for (auto& P : p->m_OutputPins) Out += std::format("in {} {}\n",  TypeName(P.m_TypeGUID), P.m_Name);
         if (auto* p = FindGroupNode(G, false)) for (auto& P : p->m_InputPins)  Out += std::format("out {} {}\n", TypeName(P.m_TypeGUID), P.m_Name);
+        for (auto& D : G.m_Params) Out += std::format("param {} {}\n", xmaterial::param_type_enum_v[int(D.m_Type)].m_pName, D.m_Name);
         return Out;
     }
 
@@ -208,6 +210,10 @@ namespace xmaterial_graph
             if (auto Why = FlattenCalls(Sub, PathOf, pUsed, {}, Chain); !Why.empty()) return Why;
             Chain.pop_back();
 
+            // Its parameters are G's (by id: every group node of that sub-graph reads the same one; one G declares already stays as G has it)
+            for (auto& D : Sub.m_Params)
+                if (!std::ranges::any_of(G.m_Params, [&](auto& E) { return E.m_ID == D.m_ID; })) G.m_Params.push_back(D);
+
             const std::uint64_t C = CallId.m_Value;
             auto New = [&](auto Guid) { return MixGuid(C, Guid.m_Value); };
 
@@ -305,7 +311,6 @@ namespace xmaterial_graph
             if (It == G.m_InstanceNodes.end()) return std::format("no step {:016X}", S.m_Value);
             const node& N = *It->second;
             if (N.isOutputNode() || N.isGroupInputNode() || N.isCommentNode()) return std::format("'{}' cannot go into a sub-graph", N.m_StepName);
-            for (auto& P : N.m_Params) if (P.m_ParamID) return std::format("'{}' reads a material parameter: a sub-graph cannot declare parameters yet", N.m_StepName);
             In.insert(S.m_Value);
         }
         if (In.empty()) return "no steps";
@@ -388,6 +393,12 @@ namespace xmaterial_graph
 
         for (auto S : Steps) G.RemoveNode(S);
         for (auto& Sec : G.m_Stack.m_Sections) std::erase_if(Sec.m_Steps, [&](node_guid S) { return In.contains(S.m_Value); });
+
+        // The parameters the steps read go with them: the sub-graph declares them, G keeps those its other steps still read (flattening gives
+        // G the rest back, by id, so a material instance's values stay)
+        auto Reads = [](const graph& Of, xmaterial::param_id Id) { return std::ranges::any_of(Of.m_InstanceNodes, [&](auto& N) { return std::ranges::any_of(N.second->m_Params, [&](auto& P) { return P.m_ParamID == Id; }); }); };
+        for (auto& D : G.m_Params) if (Reads(Sub, D.m_ID)) Sub.m_Params.push_back(D);
+        std::erase_if(G.m_Params, [&](auto& D) { return Reads(Sub, D.m_ID) && !Reads(G, D.m_ID); });
 
         auto& Call = G.CreateNode(group_call_prefab_v, CallGuid);
         xresource::full_guid Ref; Ref.m_Instance.m_Value = SubGuid; Ref.m_Type = subgraph_type_guid_v;

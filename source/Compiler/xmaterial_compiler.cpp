@@ -21,6 +21,8 @@
 #include "source/xmaterial_data_file.h"
 #include "source/Graph/xmaterial_step_names.h"
 #include "source/Graph/xmaterial_subgraph.h"
+#include "dependencies/xtextfile/source/xtextfile.h"
+#include "dependencies/xproperty/source/sprop/property_sprop_xtextfile_serializer.h"
 
 #include "plugins/xmaterial_instance.plugin/source/xmaterial_intance_descriptor.h"
 
@@ -37,6 +39,41 @@
 
 void xresource::loader< xrsc::material_type_guid_v >::Destroy(xresource::mgr& Mgr, data_type&& Data, const full_guid& GUID){}
 void xresource::loader< xrsc::texture_type_guid_v >::Destroy(xresource::mgr& Mgr, data_type&& Data, const full_guid& GUID) {}
+
+// The libraries a resource can use besides its own project or library: its members and dependencies, transitively, as the editor writes them in
+// Project.config/Library.config.txt (xresource_editor::library; only the paths are read, the other properties are skipped)
+namespace xmaterial_compiler::details
+{
+    struct library_paths
+    {
+        std::wstring                m_Path;
+        std::vector<library_paths>  m_ParentLibraries, m_Libraries;
+
+        XPROPERTY_DEF
+        ( "Library", library_paths
+        , obj_member<"Path",            &library_paths::m_Path>
+        , obj_member<"ParentLibraries", &library_paths::m_ParentLibraries>
+        , obj_member<"Libraries",       &library_paths::m_Libraries>
+        )
+    };
+    XPROPERTY_REG(library_paths)
+
+    inline std::vector<std::wstring> LibraryRoots(const std::wstring& Root) noexcept
+    {
+        std::vector<std::wstring> Roots{ Root };
+        for (std::size_t i = 0; i < Roots.size(); ++i)
+        {
+            xtextfile::stream             Stream;
+            library_paths                 Lib;
+            xproperty::settings::context  Context;
+            if (Stream.Open(true, std::format(L"{}/Project.config/Library.config.txt", Roots[i]), xtextfile::file_type::TEXT)) continue;
+            if (xproperty::sprop::serializer::Stream(Stream, Lib, Context)) continue;
+            for (auto* pList : { &Lib.m_Libraries, &Lib.m_ParentLibraries })
+                for (auto& L : *pList) if (!L.m_Path.empty() && std::ranges::find(Roots, L.m_Path) == Roots.end()) Roots.push_back(L.m_Path);
+        }
+        return Roots;
+    }
+}
 
 namespace xmaterial_compiler
 {
@@ -553,11 +590,18 @@ namespace xmaterial_compiler
             Graph.CreateGraph(Graph);
             Graph.serialize(Graph, true, DescriptorFileName);
 
-            // Group nodes: each is replaced by a copy of its sub-graph's steps (nested ones too), before anything reads the graph. The sub-graphs'
-            // files are dependencies: editing one compiles every material that uses it again.
+            // Group nodes: each is replaced by a copy of its sub-graph's steps (nested ones too), before anything reads the graph. A sub-graph is
+            // looked for in this project or library first, then in the libraries it uses. Their files are dependencies: editing one compiles every
+            // material that uses it again (one of another library: by a path relative to this one, "../Other.lionlib/Descriptors/...").
             {
                 std::vector<std::wstring> Used;
-                const auto PathOf = [&](std::uint64_t Guid) { return std::format(L"{}/MaterialSubgraph/{:02X}/{:02X}/{:X}.desc/Descriptor.txt", m_ProjectPaths.m_Descriptors, Guid & 0xff, (Guid >> 8) & 0xff, Guid); };
+                const auto Roots  = details::LibraryRoots(m_ProjectPaths.m_Project);
+                const auto PathOf = [&](std::uint64_t Guid)
+                {
+                    for (const auto& R : Roots)
+                        if (auto P = std::format(L"{}/Descriptors/MaterialSubgraph/{:02X}/{:02X}/{:X}.desc/Descriptor.txt", R, Guid & 0xff, (Guid >> 8) & 0xff, Guid); std::filesystem::exists(P)) return P;
+                    return std::wstring{};
+                };
                 const auto Why = FlattenCalls(Graph, PathOf, &Used);
                 for (const auto& Path : Used)
                 {

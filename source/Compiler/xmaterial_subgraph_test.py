@@ -32,7 +32,7 @@ SUBGRAPH_TYPE = 0xE52C32C54E8C5117
 class Graph:
     """Writes a graph file: nodes (prefab, guid, property lines) and connections (from pin, to pin)."""
     def __init__(self):
-        self.nodes, self.conns = [], []
+        self.nodes, self.conns, self.params = [], [], []    # params: (id, name, type): a v3 file, every step in one section
 
     def node(self, guid, prefab, name, props=()):
         self.nodes.append((guid, prefab, [("node/StepName", "string", f'"{name}"'), *props]))
@@ -52,8 +52,12 @@ class Graph:
         raise AssertionError(f"no input {to:X}")
 
     def text(self):
-        out = ["", "[ Info ]", "{ nNodes:d  nConnections:d }", "//--------  --------------", f"     {len(self.nodes)}            {len(self.conns)}", ""]
         types = "< s32:d u32:g s16:C u16:H s8:c u8:h f32:f f64:F string:s wstring:S u64:G s64:D bool:c full_guid:GG enum:s >"
+        if self.params:
+            out = ["", "[ Info ]", "{ nNodes:d  nConnections:d  Version:d  nParameters:d }", "//--------  --------------  ---------  -------------",
+                   f"     {len(self.nodes)}            {len(self.conns)}             3            {len(self.params)}", ""]
+        else:
+            out = ["", "[ Info ]", "{ nNodes:d  nConnections:d }", "//--------  --------------", f"     {len(self.nodes)}            {len(self.conns)}", ""]
         for g, p, props in self.nodes:
             out += ["[ Node ]", "{ Guid:G             PrefabGuid:G      }", "//-----------------  -----------------", f"  #{g:X}  #{p:X}", "", types, "",
                     f"[ xProperties : {len(props)} ]", "{ Name:s  Value:? }", "//------  --------"]
@@ -62,6 +66,18 @@ class Graph:
             out += ["[ Connection ]", "{ Guid:G             }", "//-----------------", f"  #{c:X}", "", types, "",
                     "[ xProperties : 2 ]", "{ Name:s  Value:? }", "//------  --------",
                     f'  "connection/InputPinGuid/Value" ;u64 #{to:X}', f'  "connection/OutputPinGuid/Value" ;u64 #{frm:X}', ""]
+        if self.params:
+            st = [("stack/Sections[]", "s64", "1"), ("stack/Sections[G:0]/Guid/Value", "u64", "#5EC7"), ("stack/Sections[G:0]/Name", "string", '"Steps"'),
+                  ("stack/Sections[G:0]/Kind", "enum", '"USER"'), ("stack/Sections[G:0]/Stage", "enum", '"FRAGMENT"'), ("stack/Sections[G:0]/bCollapsed", "bool", "0"),
+                  ("stack/Sections[G:0]/Steps[]", "s64", str(len(self.nodes)))]
+            st += [(f"stack/Sections[G:0]/Steps[G:{i}]/Value", "u64", f"#{g:X}") for i, (g, p, props) in enumerate(self.nodes)]
+            out += ["[ StackLayout ]", "{ nSections:d }", "//-----------", "       1", "", types, "", f"[ xProperties : {len(st)} ]", "{ Name:s  Value:? }", "//------  --------"]
+            out += [f'  "{k}" ;{t} {v}' for k, t, v in st] + [""]
+            for pid, name, typ in self.params:
+                pr = [("param_decl/ID", "u64", f"#{pid:X}"), ("param_decl/Name", "string", f'"{name}"'), ("param_decl/Type", "enum", f'"{typ}"'), ("param_decl/Kind", "enum", '"DYNAMIC"'),
+                      ("param_decl/Default/X", "f32", "0.5")]
+                out += ["[ Parameter ]", "{ Guid:G }", "//------", f"  #{pid:X}", "", types, "", f"[ xProperties : {len(pr)} ]", "{ Name:s  Value:? }", "//------  --------"]
+                out += [f'  "{k}" ;{t} {v}' for k, t, v in pr] + [""]
         return "\n".join(out) + "\n"
 
 
@@ -86,12 +102,24 @@ def adder(guid, a, b):                          # the sub-graph "Adder": Sum = A
     return g, (pa, pb, ps)
 
 
+def subref(sub):                                # a group node's sub-graph
+    return [("node/Params[]", "s64", "1"), ("node/Params[G:0]/Name", "string", '"Subgraph"'), ("node/Params[G:0]/Type", "enum", '"SUBGRAPH RESOURCE"'),
+            ("node/Params[G:0]/SubgraphRef", "full_guid", f"#{sub:X} #{SUBGRAPH_TYPE:X}")]
+
+
 def call(g, guid, sub, iface, name):            # a group node calling sub: pins mirror its interface
     pa, pb, ps = iface
-    g.node(guid, P_CALL, name, [*pins("in", [("A", VEC4, mix(guid, pa)), ("B", VEC4, mix(guid, pb))]), *pins("out", [("Sum", VEC4, mix(guid, ps))]),
-                                ("node/Params[]", "s64", "1"), ("node/Params[G:0]/Name", "string", '"Subgraph"'), ("node/Params[G:0]/Type", "enum", '"SUBGRAPH RESOURCE"'),
-                                ("node/Params[G:0]/SubgraphRef", "full_guid", f"#{sub:X} #{SUBGRAPH_TYPE:X}")])
+    g.node(guid, P_CALL, name, [*pins("in", [("A", VEC4, mix(guid, pa)), ("B", VEC4, mix(guid, pb))]), *pins("out", [("Sum", VEC4, mix(guid, ps))]), *subref(sub)])
     return mix(guid, pa), mix(guid, pb), mix(guid, ps)
+
+
+def library_config(root, parents):              # Project.config/Library.config.txt as the editor writes it: only what the compiler reads
+    esc = lambda p: str(p).replace("\\", "\\\\")
+    props = [("Library/GUID", "u64", "#1234"), ("Library/Path", "wstring", f'"{esc(root)}"'), ("Library/ParentLibraries[]", "s64", str(len(parents)))]
+    for i, p in enumerate(parents):
+        props += [(f"Library/ParentLibraries[G:{i}]/GUID", "u64", f"#{0x5678 + i:X}"), (f"Library/ParentLibraries[G:{i}]/Path", "wstring", f'"{esc(p)}"')]
+    types = "< s32:d u32:g s16:C u16:H s8:c u8:h f32:f f64:F string:s wstring:S u64:G s64:D bool:c full_guid:GG enum:s >"
+    return "\n".join(["// New Types", types, "", f"[ xProperties : {len(props)} ]", "{ Name:s  Value:? }", "//------  --------", *[f'  "{k}" ;{t} {v}' for k, t, v in props]]) + "\n"
 
 
 def write(root, kind, guid, g):
@@ -170,6 +198,56 @@ def main():
     # The compiled materials are byte-identical: names do not reach SPIR-V
     data = {g: next((root / "Cache" / "Resources" / "Platforms" / "WINDOWS" / "Material").rglob(f"{g:X}")).read_bytes() for g in (0x7E57000000000101, 0x7E57000000000201, 0x7E57000000000301)}
     assert len(set(data.values())) == 1, "the grouped materials compile to other SPIR-V than the inline one"
+
+    # A sub-graph of another library is found once the project names that library (a dependency, in its Library.config.txt)
+    lib = root.parent / "shared.lionlib"
+    OTHER = 0x5B00000000000301
+    osub, oface = adder(OTHER, "A", "B")
+    write(lib, "MaterialSubgraph", OTHER, osub)
+
+    def other(m, k):
+        a, b, s = call(m, 0xAA, OTHER, oface, "O"); m.link(0xD1, k, a); m.link(0xD2, k, b); return s
+    rc, log = compile(root, material(root, 0x7E57000000000401, other))
+    assert rc != 0 and "not there" in log, log[-2000:]
+    (root / "Project.config").mkdir()
+    (root / "Project.config" / "Library.config.txt").write_text(library_config(root, [lib]))
+    rc, log = compile(root, material(root, 0x7E57000000000401, other))
+    assert rc == 0, log[-3000:]
+    assert re.sub(r"\bo_add\b", "ADD", glsl(log).lower()) == norm(results["inline"]), glsl(log)
+
+    # A sub-graph with a material parameter: the materials that use it declare it, once however many group nodes read it
+    TINT, PID = 0x5B00000000000401, 0x9A9A00000000F00D
+    def tinted_subgraph(params):
+        t = Graph()
+        gi, k2, add, go = TINT ^ 0xA1, TINT ^ 0xA5, TINT ^ 0xA2, TINT ^ 0xA3
+        t.node(gi, P_GIN, "Inputs", pins("out", [("A", VEC4, mix(gi, 101))]))
+        t.node(k2, P_CONST, "Amount", [("node/Params[G:0]/Float", "f32", "0.5"), ("node/Params[G:0]/ParamID", "u64", f"#{PID:X}")])
+        t.node(add, P_ADD, "Add")
+        t.node(go, P_GOUT, "Outputs", pins("in", [("Sum", VEC4, mix(go, 103))]))
+        t.link(TINT ^ 0xC1, mix(gi, 101), mix(add, 1)); t.link(TINT ^ 0xC2, mix(k2, 5), mix(add, 2)); t.link(TINT ^ 0xC3, mix(add, 3), mix(go, 103))
+        t.params = params
+        return t, mix(gi, 101), mix(go, 103)
+    tdesc = Path("Descriptors") / "MaterialSubgraph" / f"{TINT & 0xff:02X}" / f"{(TINT >> 8) & 0xff:02X}" / f"{TINT:X}.desc"
+
+    t, pa1, ps1 = tinted_subgraph([])                                  # reading a parameter it does not declare: refused
+    write(root, "MaterialSubgraph", TINT, t)
+    rc, log = compile(root, tdesc)
+    assert rc != 0 and "does not declare" in log, log[-2000:]
+
+    t, pa1, ps1 = tinted_subgraph([(PID, "Amount", "FLOAT")])
+    write(root, "MaterialSubgraph", TINT, t)
+    rc, log = compile(root, tdesc)
+    assert rc == 0 and "param FLOAT Amount" in log, log[-2000:]
+
+    def tinted(m, k):
+        s = k
+        for n, g in enumerate((0xB1, 0xB2)):
+            m.node(g, P_CALL, f"T{n}", [*pins("in", [("A", VEC4, mix(g, pa1))]), *pins("out", [("Sum", VEC4, mix(g, ps1))]), *subref(TINT)])
+            m.link(0xE0 + n, s, mix(g, pa1)); s = mix(g, ps1)
+        return s
+    rc, log = compile(root, material(root, 0x7E57000000000501, tinted))
+    assert rc == 0 and "E_PARAM" not in log, log[-3000:]
+    assert glsl(log).count("g_Mat.P[XMAT_BASE + 0u].x") == 2, glsl(log)     # both group nodes read the one parameter
 
     # A loop is refused: Adder calling Twice which calls Adder
     loop, _ = adder(ADDER, "A", "B")

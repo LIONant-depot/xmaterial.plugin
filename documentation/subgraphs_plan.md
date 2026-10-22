@@ -66,7 +66,7 @@ inner pin, made unique; recursion refused by a dependency walk.
    script makes a group from steps, enters, edits, exits, and the material's GLSL is unchanged by make + ungroup.
 4. **Docs and tests.** `documentation/editor.md` commands, results recorded here.
 
-## 4. Status (2026-10-22: phases 1 to 4 built, not committed)
+## 4. Status (2026-10-22: phases 1 to 4 built and committed; the first three limits below closed the same day, see 5)
 
 Built as above, with 2.8 as the default (own tab plus breadcrumb). Where the code is: `Graph/xmaterial_subgraph.h` (validate, interface, the
 group node's pins, `FlattenCalls`, `ExtractSubgraph`; no editor), `Editor/xmaterial_subgraph_commands.h` (the commands and enter/exit), the
@@ -82,6 +82,25 @@ Limits, as built: the compiler reads sub-graphs from the project's own `Descript
 takes a changed interface when the graph is read again (open, undo), not the moment the sub-graph is saved; an unconnected group input leaves
 the steps that read it on their own literals; a sub-graph cannot declare material parameters; 2.2's default literal per interface pin and
 `MoveGroupPin` are not built.
+
+## 5. Closing the limits (2026-10-22)
+
+1. **Other libraries.** The compiler looks for a sub-graph in its own project or library, then in every library that one names in
+   `Project.config/Library.config.txt` (members and dependencies, transitively). The dependency is the sub-graph's descriptor by a relative
+   path (`../Shared.lionlib/Descriptors/...`), so a stale material compiles again at the next start. Still open: the file watcher of the
+   sub-graph's library does not tell the other libraries, so a material in another library than its sub-graph is not compiled again the
+   moment the sub-graph is saved (it needs the pipeline to pass asset changes between libraries).
+2. **Live interface.** Every open material or sub-graph editor listens for sub-graph compiles (any library); on the next frame its group nodes
+   take the new interface, in memory, as a read does (`xmaterial_editor.h`, `OnAnyCompile`).
+3. **Parameters.** A sub-graph declares material parameters like a material (ExposeParam and the rest work in its editor). Flattening adds
+   its declarations to the material by id: every group node of that sub-graph reads the same parameter, and one the material declares itself
+   stays as the material has it. Make sub-graph moves the declarations its steps read into the new sub-graph (the material keeps those its
+   other steps still read); Ungroup gives them back. The sub-graph's compile refuses a read of an undeclared parameter, and its interface
+   lists `param <type> <name>`.
+
+Checked: `xmaterial_subgraph_test.py` also covers a sub-graph of another library (refused until the project names the library, then the
+same GLSL as inline) and a sub-graph with a parameter called twice (one parameter, read twice; an undeclared read refused). The editor change
+compiles; it was not run live (the renderer was mid-change in another thread).
 
 Not in this plan: previews of a group node's outputs (the step preview path applies once it flattens), sub-graph thumbnails, a function-call
 compile path (only if flattened shaders get too large).
