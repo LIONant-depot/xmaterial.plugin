@@ -355,29 +355,47 @@ unconnected input shows no chip: its literal sits outside the step (§4.2).
 | menu "Disconnect" / Del when focused | input falls back to its widget | `Disconnect` |
 | Tab / Shift+Tab | focus next / previous chip of the selected step | none |
 
+Built (task 9): the chip is a flat box after the input's name; a hovered chip lights its route at full alpha and outlines the source step;
+the focused chip (= the selected connection) has a blue border and lights its route, and the (+) of §7.1 appears on it. A chip is only drawn
+for a connection that really ends at that input and leaves from a pin of a node: a stale `ConnectionGUID` (old files can name a connection
+between pins that no longer exist) shows the input's literal, as the old canvas does. Go to source / Find all uses' pick centre the step and
+push the history; refusals and validation are checked before a command runs, so a refused gesture leaves no history.
+
 ## 7. Interaction contract
 
 Every gesture = exactly one undo step: one command, or `xeditor::RunGroup` (`dependencies/xeditor/include/xeditor/commands.h:72`). View
 gestures issue no command. The canvas issues GUIDs only; symbols are for people and AI.
 
-### 7.1 (+) slots (port of `DrawInsertMarker`, `NodeOS_UI_Canvas.h:1367-1481`; column-edge targets 1545-1610)
+### 7.1 Insert affordances (task 10; replaces the E27 (+) slots)
 
-Slots: between every two steps, at the top and bottom of each section, and at column edges (before the first section of a column, after the
-last). A column-edge slot means "a new section at this point of the section order" (columns are layout only). Each slot is selectable and
-its (+) opens a menu:
-- Add step… -> search of all prefabs; placed here; **no wiring** -> `CreateNode -Section -After/-Before -Name`.
-- New section here -> `CreateSection` (+ `PlaceSteps` of the steps below the slot in the same section if "split here" is chosen).
-- `[later]` Paste.
+E27's slots between steps and at column edges (`DrawInsertMarker`, `NodeOS_UI_Canvas.h:1367-1481`) do not fit the depth layout: a column
+holds steps of several sections in the order the layout picks, so the gap between two drawn steps names no place in the reading order. A new
+step's place follows from what it binds to instead:
+- **(+) on the selected route** (click a route; the (+) sits at the middle of its longest segment), or route menu (right click a route)
+  "Insert step on this connection…": search of the types whose input takes the source and whose output fits the consumer; several
+  (input, output) pairs => port chooser -> `InsertOnConnection`. Exactly that connection goes through the new step, placed right before the
+  consumer; other uses of the source are untouched. The route menu also has Go to source, Go to consumer, Disconnect.
+- **Drag from a pin** (the drag draws a wire to the mouse): onto a pin of the other side -> `Connect`; into empty space -> search of what
+  fits: from an output, the types with a fitting input; from an input, the existing outputs (sub-elements too, `UV.x`) that sit before the
+  consumer, then the types with a fitting output. Hovering a type shows a ghost of the new step at the drop point with its binding drawn;
+  several fitting ports => port chooser (hovering a port moves the ghost's binding). A new step goes right after the step it reads
+  (`CreateNode -After`) or right before the step it feeds (`-Before`); an output step goes to the output stack. Commit = group {`CreateNode
+  -Name`, `Connect`}.
+- **Background menu** (right click empty space) "Add step…": search of every type; **no wiring** -> `CreateNode` at the default slot (end
+  of the last user section; unwired, so at the bottom of column 0, where it moves nothing).
+- "New section here" is not offered on the canvas while sections are not drawn (§4); `CreateSection` / `PlaceSteps` from the console.
+
+Contract: nothing is wired until the person picks a source or a type and, when several ports fit, a port. Every pick is one undo step.
 
 ### 7.2 Gestures
 
 | Gesture | Commands (one undo step) | Validation |
 |---|---|---|
-| (+) -> Add step | `CreateNode -Prefab -Node -Section -After\|-Before -Name` | none needed (no wiring) |
-| drag from an output pin, drop on a (+) slot | search filtered to prefabs with a compatible input; ghost preview of the new step with the binding pre-selected; several fitting inputs => chooser; commit = group {`CreateNode`, `Connect`} | slot must be after the producer (slots before it are not offered) |
+| background menu -> Add step | `CreateNode -Prefab -Node` (default slot) | none needed (no wiring) |
+| drag from an output pin into empty space | search filtered to prefabs with a compatible input; ghost preview of the new step with the binding pre-selected; several fitting inputs => chooser; commit = group {`CreateNode -After <producer>`, `Connect`} | none needed (a new step after its producer) |
 | drag from an output pin, drop on an input | `Connect` | type, cycle, order (§7.3 if violated) |
-| drag from an input pin / chip "Replace source" | search: existing compatible outputs before the consumer + prefabs; a new step goes right before the consumer: group {`CreateNode`, `Connect`} | type, order |
-| route menu "Insert step on this connection…" | search filtered by in-type = source type, out-type = consumer type; chooser if several ports fit; placed right before the consumer: `InsertOnConnection` | types |
+| drag from an input pin into empty space / chip "Replace source" | search: existing compatible outputs before the consumer + prefabs; a new step goes right before the consumer: group {`CreateNode`, `Connect`} | type, order (only sources before the consumer are offered) |
+| (+) on the selected route / route menu "Insert step on this connection…" | search filtered by in-type = source type, out-type = consumer type; chooser if several ports fit; placed right before the consumer: `InsertOnConnection` | types |
 | drag a step header onto a slot | `PlaceSteps -Nodes -Section -After\|-Before` | order (§7.3) |
 | drag a section header onto a section slot | `MoveSection` | order: violations => same three options, applied to the whole section |
 | step menu Duplicate | `DuplicateStep` (copies every input binding; outputs unconnected; placed after the original) | none |
@@ -566,8 +584,13 @@ Sized for one Sonnet session each. "Done" includes: builds, old canvas still wor
    emphasis, trace. Done: tests 1, 2, 3, 8 pass visually and by measures.
 9. **Source chips and navigation** — `xmaterial_stack_canvas.h`. Chip text, hover, select, go to source, back, find uses, replace,
    disconnect, keyboard focus. Done: every row of §6 works; test 6 by mouse.
+   Status: done. Test 6 by mouse: chip menu -> Find all uses -> Replace all… -> type `Mask2`, Enter (4 gestures + typing, 1 undo step).
 10. **(+) slots, search, pin drag** — `xmaterial_stack_canvas.h`. Slots incl. column edges, slot menu, search popup with filters, ghost
     preview, port chooser, insert-on-connection from a route menu. Done: tests 4 and 9 by mouse; no gesture wires anything without a pick.
+    Status: done, with the affordances of §7.1 instead of slots (depth columns leave no reading-order gap to put a slot in). Test 4 by mouse:
+    click the route, its (+), pick `Vec4 Multiply`, pick `A(4)` (4 gestures, 1 undo step, the Emission connection keeps its guid). Test 9:
+    type and cycle drops refused with the message, history unchanged; the order case is resolved by `Connect` (dependents move) until the
+    §7.3 popup lands with task 11.
 11. **Moves and collapse** — `xmaterial_stack_canvas.h`. Step and section drag onto slots, the §7.3 popup with previews, collapsed section
     box with boundary rows. Done: tests 5, 7, 10.
 12. **Old canvas read-only** — `Editor/xmaterial_graph_canvas.h`. Positions from the stack layout, editing disabled, shared selection.
@@ -581,4 +604,4 @@ Sized for one Sonnet session each. "Done" includes: builds, old canvas still wor
 
 Expression steps, the structured text view, always-live thumbnails and typed on-demand previews, loop/switch regions (E27 owned markers and
 scope depth), semantic zoom, subgraphs with interfaces, pin modifier chains (`[Texture.R] -> OneMinus -> Clamp01`; sketch: modifier nodes
-owned by an input, like E27's owned markers, promotable to steps by clearing the owner), VERTEX stage in the output stack, saved lane hints.
+owned by an input, like E27's owned markers, promotable to steps by clearing the owner), VERTEX stage in the output stack, saved lane hints, section slots on the canvas ("New section here", once sections are drawn again).
