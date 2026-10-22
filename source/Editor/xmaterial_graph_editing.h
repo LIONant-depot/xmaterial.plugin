@@ -25,6 +25,7 @@ namespace xmaterial_editor
         xmaterial_graph::graph  m_Graph;
         bool                    m_bLoaded           = false;
         bool                    m_bPositionsChanged = true;         // the nodes moved behind the canvas's back (a load, an undo): it must move them
+        std::function<void(xmaterial_graph::graph&)> m_OnRead;      // after every read of the file (a load, an undo)
 
         bool isLoaded() const noexcept override { return m_bLoaded; }
 
@@ -36,6 +37,16 @@ namespace xmaterial_editor
             m_Graph.m_Stack = {};
             m_Graph.m_Stack.m_Sections.push_back({ .m_Guid = xmaterial_graph::section_guid{ xresource::guid_generator::Type64() }, .m_Name = "Output", .m_Kind = xmaterial_graph::section::kind::OUTPUT });
             if (m_Graph.m_PrefabNodes.empty()) m_Graph.CreateGraph(m_Graph);
+            m_Graph.m_bSubgraph = m_Guid.m_Type == xmaterial_graph::subgraph_type_guid_v;
+            if (m_Graph.m_bSubgraph)                                        // a new sub-graph starts with its interface: Group Input first, Group Output in the output stack
+            {
+                auto& In  = m_Graph.CreateNode(xmaterial_graph::group_input_prefab_v,  xmaterial_graph::node_guid{ xresource::guid_generator::Type64() });
+                auto& Out = m_Graph.CreateNode(xmaterial_graph::group_output_prefab_v, xmaterial_graph::node_guid{ xresource::guid_generator::Type64() });
+                In.m_StepName = "Inputs"; Out.m_StepName = "Outputs";
+                m_Graph.m_Stack.m_Sections.insert(m_Graph.m_Stack.m_Sections.begin(), xmaterial_graph::section{ .m_Guid = xmaterial_graph::section_guid{ xresource::guid_generator::Type64() }, .m_Name = "Inputs", .m_Steps = { In.m_Guid } });
+                m_Graph.m_Stack.m_Sections.back().m_Steps.push_back(Out.m_Guid);
+                m_Graph.m_Stack.Reindex();
+            }
             m_bLoaded = true;
             m_bPositionsChanged = true;
             return true;
@@ -45,6 +56,7 @@ namespace xmaterial_editor
         {
             if (!std::filesystem::exists(Path)) return false;
             m_Graph.serialize(m_Graph, true, Path);
+            if (m_OnRead) m_OnRead(m_Graph);                                // group nodes take their sub-graphs' interfaces again
             m_bLoaded = true;
             m_bPositionsChanged = true;
             return true;
@@ -79,14 +91,87 @@ namespace xmaterial_editor
         return "";
     }
 
-    // The type rule for types alone: the same type, a float feeding a vec2/vec3/vec4 (a splat: the compiler emits vecN(x)), or two types of one
-    // GLSL type (Color and Vector4 are both vec4), unless the colour spaces clash.
+    using xmaterial_graph::Components;
+    using xmaterial_graph::ComponentLetters;
+
+    // The type rule for types alone: the same type, a float feeding a vec2/vec3/vec4 (a splat: the compiler emits vecN(x)), two types of one
+    // GLSL type (Color and Vector4 are both vec4), or a longer vector feeding a shorter vector input (truncation: the input takes the first
+    // components, the compiler emits .xyz and the chip shows it), unless the colour spaces clash. Widening is refused (a sub-element splats).
     inline bool AreTypesCompatible(const xmaterial_graph::graph& G, xmaterial_graph::type_guid Out, xmaterial_graph::type_guid In) noexcept
     {
         auto* pOut = G.findType(Out);
         auto* pIn  = G.findType(In);
         return pOut && pIn && !*ColorSpaceClash(Out, In)
-            && (Out == In || (pOut->m_CodeString == "float" && pIn->m_CodeString.starts_with("vec")) || pOut->m_CodeString == pIn->m_CodeString);
+            && (Out == In || (pOut->m_CodeString == "float" && pIn->m_CodeString.starts_with("vec")) || pOut->m_CodeString == pIn->m_CodeString
+                || (Components(G, In) >= 2 && Components(G, Out) > Components(G, In)));
+    }
+
+    // The output a pin belongs to: itself, or the output of a sub-element
+    inline const xmaterial_graph::output_pin* MainOutput(const xmaterial_graph::graph& G, xmaterial_graph::pin_guid Pin) noexcept
+    {
+        auto* pN = G.findNodeByPin(Pin);
+        if (pN) for (auto& O : pN->m_OutputPins)
+        {
+            if (O.m_PinGUID == Pin) return &O;
+            for (auto& S : O.m_SubElements) if (S.m_PinGUID == Pin) return &O;
+        }
+        return nullptr;
+    }
+
+    // Which components an input takes from an output (Main: a whole output) when asked for Ask ("", "w", "bgr", "xxxx"; xyzw or rgba): the pin
+    // to connect and the swizzle to store, or why not. One form for each meaning, so both canvases and the compiler agree:
+    //   ""                          the whole output (the type rule above: exact, splat or truncation)
+    //   one letter, or one repeated  the sub-element (a float; splatted into a vector input, as the old canvas's sub-element pins always did)
+    //   the first letters in order   the whole output again (no swizzle: truncation, or exact)
+    //   anything else               a swizzle on the whole output, as long as the input (2 to 4 letters), e.g. ".bgr", ".xyxy"
+    struct component_pick { xmaterial_graph::pin_guid m_Out = {}; std::string m_Swizzle, m_Error; };
+    inline component_pick PickComponents(const xmaterial_graph::graph& G, const xmaterial_graph::output_pin& Main, std::string Ask, const xmaterial_graph::pin& In) noexcept
+    {
+        component_pick R{ Main.m_PinGUID };
+        auto TypeName = [&](xmaterial_graph::type_guid T) { auto* p = G.findType(T); return p ? p->m_Name : std::string("?"); };
+        const int nOut = Components(G, Main.m_TypeGUID), nIn = Components(G, In.m_TypeGUID);
+        if (auto* pWhy = ColorSpaceClash(Main.m_TypeGUID, In.m_TypeGUID); *pWhy) { R.m_Error = pWhy; return R; }
+        if (Ask.empty())
+        {
+            if (!AreTypesCompatible(G, Main.m_TypeGUID, In.m_TypeGUID))
+                R.m_Error = nIn == 1 && nOut > 1 ? std::format("a {} feeds a float input one component: pick .x .y .z or .w", TypeName(Main.m_TypeGUID))
+                                                 : std::format("types differ ({} -> {}); pick components (a sub-element or a swizzle) or convert", TypeName(Main.m_TypeGUID), TypeName(In.m_TypeGUID));
+            return R;
+        }
+        for (auto& c : Ask)
+        {
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (auto k = std::string_view("rgba").find(c); k != std::string_view::npos) c = "xyzw"[k];
+        }
+        const std::string_view Have("xyzw", std::clamp(nOut, 0, 4));
+        if (nOut < 2 || static_cast<int>(Main.m_SubElements.size()) < nOut) { R.m_Error = std::format("a {} has no components to pick", TypeName(Main.m_TypeGUID)); return R; }
+        if (Ask.size() > 4 || Ask.find_first_not_of(Have) != std::string::npos) { R.m_Error = std::format("a {} has the components .{} only", TypeName(Main.m_TypeGUID), std::string(ComponentLetters(Main.m_TypeGUID), nOut)); return R; }
+        if (nIn == 0) { R.m_Error = std::format("a {} input takes no components", TypeName(In.m_TypeGUID)); return R; }
+        if (Ask.find_first_not_of(Ask[0]) == std::string::npos && (Ask.size() == 1 || static_cast<int>(Ask.size()) == nIn))
+        {
+            R.m_Out = Main.m_SubElements[Have.find(Ask[0])].m_PinGUID;
+            return R;
+        }
+        if (static_cast<int>(Ask.size()) != nIn) { R.m_Error = std::format("this input takes {} component{}: {} letter{}", nIn, nIn == 1 ? "" : "s", nIn, nIn == 1 ? "" : "s"); return R; }
+        if (Ask != std::string("xyzw", nIn)) R.m_Swizzle = std::move(Ask);
+        return R;
+    }
+
+    // The components an input takes from its source, as the chip shows them after the source: "xyz" (a swizzle or truncation), "a" (a sub-element), "" (all of it)
+    inline std::string TakenComponents(const xmaterial_graph::graph& G, const xmaterial_graph::connection& C, const xmaterial_graph::pin& In) noexcept
+    {
+        auto* pMain = MainOutput(G, C.m_OutputPinGuid);
+        if (!pMain) return {};
+        const char* L = ComponentLetters(pMain->m_TypeGUID);
+        for (std::size_t k = 0; k < pMain->m_SubElements.size() && k < 4; ++k) if (pMain->m_SubElements[k].m_PinGUID == C.m_OutputPinGuid) return std::string(1, L[k]);
+        if (!C.m_Swizzle.empty())
+        {
+            std::string S = C.m_Swizzle;
+            for (auto& c : S) if (auto k = std::string_view("xyzw").find(c); k != std::string_view::npos) c = L[k];
+            return S;
+        }
+        const int nOut = Components(G, pMain->m_TypeGUID), nIn = Components(G, In.m_TypeGUID);
+        return nIn >= 2 && nOut > nIn ? std::string(L, nIn) : std::string();
     }
 
     // Two pins can be connected when they are on different nodes and their types fit (AreTypesCompatible).
@@ -396,6 +481,9 @@ namespace xmaterial_editor
                 auto It = G.m_PrefabNodes.find(xmaterial_graph::node_guid{ Prefab });
                 if (It == G.m_PrefabNodes.end()) return "no such node type";
                 if (m_Doc.FindNode(Node)) return "a node with that id exists";
+                if (!xmaterial_graph::IsAllowedIn(G, *It->second)) return G.m_bSubgraph ? "a sub-graph has no material outputs: its outputs are the Group Output's pins" : "Group Input and Group Output belong in a sub-graph";
+                if (It->second->isGroupInputNode() || It->second->isGroupOutputNode())
+                    for (auto& [Id, p] : G.m_InstanceNodes) if (p->m_PrefabGuid == It->first) return std::format("a sub-graph has one {}", It->second->m_Name);
                 G.m_Stack.Reindex();
                 auto& Sections = G.m_Stack.m_Sections;
 
@@ -479,16 +567,17 @@ namespace xmaterial_editor
         struct connect_cmd : graph_cmd
         {
             connect_cmd(xundo::system& System, graph_document& Doc) noexcept : graph_cmd(System, Doc, "Connect") { RegisterArguments(); }
-            const char* getCommandHelp() const noexcept override { return "Connects an output pin to an input pin of the same type (undoable; replaces the input's connection). Usage: Connect -Output hexguid|@Step[.Pin] -Input hexguid|@Step.Pin -Connection hexguid. Refused when it would make a cycle. When the producer is after the consumer, the consumer and its dependents move to right after the producer."; }
+            const char* getCommandHelp() const noexcept override { return "Connects an output pin to an input pin of the same type (undoable; replaces the input's connection). Usage: Connect -Output hexguid|@Step[.Pin] -Input hexguid|@Step.Pin -Connection hexguid [-Swizzle letters]. -Swizzle: the components the input takes from the output (xyzw or rgba: w, bgr, xyxy; see SetInputSwizzle). A longer vector feeding a shorter vector input gives its first components. Refused when it would make a cycle. When the producer is after the consumer, the consumer and its dependents move to right after the producer."; }
             void RegisterArguments() noexcept override
             {
                 m_hOutput     = m_Parser.addOption("Output",     "The output pin's guid, hex",        true, 1);
                 m_hInput      = m_Parser.addOption("Input",      "The input pin's guid, hex",         true, 1);
                 m_hConnection = m_Parser.addOption("Connection", "The new connection's guid, hex",    true, 1);
+                m_hSwizzle    = m_Parser.addOption("Swizzle",    "The components the input takes (xyzw or rgba)", false, 1);
             }
             std::string Apply() noexcept override
             {
-                std::uint64_t Out = 0, In = 0, Connection = 0; std::string Err;
+                std::uint64_t Out = 0, In = 0, Connection = 0; std::string Err, Swizzle;
                 if (!ResolvePinArg(m_Doc, m_Parser, m_hOutput, true, Out, &Err) || !ResolvePinArg(m_Doc, m_Parser, m_hInput, false, In, &Err)) return Err;
                 if (!HexArg(m_Parser, m_hConnection, Connection) || Connection == 0) return "bad arguments";
                 auto& G = m_Doc.m_Graph;
@@ -502,7 +591,17 @@ namespace xmaterial_editor
                 auto* pIn  = G.findPinConst(*pInNode,  xmaterial_graph::pin_guid{ In },  bInIsInput,  Index, Sub);
                 if (!pOut || !pIn || bOutIsInput || !bInIsInput) return "that connects an output pin to an input pin";
                 if (pOutNode == pInNode) return "the pins are on the same node";
-                if (!IsPinCompatible(*pOut, *pIn, G)) return TypesDiffer(G, *pOut, *pIn);
+                GetArg(m_Parser, m_hSwizzle, Swizzle);
+                if (Lower(Swizzle) == "all") Swizzle.clear();
+                if (!Swizzle.empty())
+                {
+                    auto* pMain = MainOutput(G, xmaterial_graph::pin_guid{ Out });
+                    if (!pMain || pMain->m_PinGUID.m_Value != Out) return "-Swizzle picks components of a whole output, not of a sub-element";
+                    auto Pick = PickComponents(G, *pMain, Swizzle, *pIn);
+                    if (!Pick.m_Error.empty()) return Pick.m_Error;
+                    Out = Pick.m_Out.m_Value; Swizzle = Pick.m_Swizzle;
+                }
+                else if (!IsPinCompatible(*pOut, *pIn, G)) return TypesDiffer(G, *pOut, *pIn);
                 if (G.m_Connections.contains(xmaterial_graph::connection_guid{ Connection })) return "a connection with that id exists";
 
                 std::function<void()> Reorder;
@@ -543,11 +642,46 @@ namespace xmaterial_editor
                 auto& Link = G.createConnection(xmaterial_graph::connection_guid{ Connection });
                 Link.m_OutputPinGuid = xmaterial_graph::pin_guid{ Out };
                 Link.m_InputPinGuid  = xmaterial_graph::pin_guid{ In };
+                Link.m_Swizzle       = Swizzle;
                 if (const int i = pInNode->getInputPinIndex(Link.m_InputPinGuid); i >= 0) pInNode->m_InputPins[i].m_ConnectionGUID = Link.m_Guid;
                 if (Reorder) Reorder();
                 return {};
             }
-            xcmdline::parser::handle m_hOutput, m_hInput, m_hConnection;
+            xcmdline::parser::handle m_hOutput, m_hInput, m_hConnection, m_hSwizzle;
+        };
+
+        //---- SetInputSwizzle: which components a connected input takes from its source output (the same connection, its id kept)
+        struct set_input_swizzle_cmd : graph_cmd
+        {
+            set_input_swizzle_cmd(xundo::system& System, graph_document& Doc) noexcept : graph_cmd(System, Doc, "SetInputSwizzle") { RegisterArguments(); }
+            const char* getCommandHelp() const noexcept override { return "Picks the components a connected input takes from its source output (undoable; the connection keeps its id). Usage: SetInputSwizzle -Input hexguid|@Step.Pin -Swizzle letters. Letters xyzw or rgba: one letter (w) takes that component (the output's sub-element; a vector input splats it), as many letters as the input has components reorder or repeat them (bgr, xyxy), -Swizzle all takes the whole output (a longer vector: its first components)."; }
+            void RegisterArguments() noexcept override
+            {
+                m_hInput   = m_Parser.addOption("Input",   "The connected input",                      true, 1);
+                m_hSwizzle = m_Parser.addOption("Swizzle", "The components, xyzw or rgba, or all", true, 1);
+            }
+            std::string Apply() noexcept override
+            {
+                std::uint64_t In = 0; std::string Err, Swizzle;
+                if (!ResolvePinArg(m_Doc, m_Parser, m_hInput, false, In, &Err)) return Err;
+                GetArg(m_Parser, m_hSwizzle, Swizzle);
+                if (Lower(Swizzle) == "all") Swizzle.clear();
+                auto& G = m_Doc.m_Graph;
+                auto* pNode = G.findNodeByPin(xmaterial_graph::pin_guid{ In });
+                const int i = pNode ? pNode->getInputPinIndex(xmaterial_graph::pin_guid{ In }) : -1;
+                if (i < 0) return "no such input";
+                auto C = G.m_Connections.find(pNode->m_InputPins[i].m_ConnectionGUID);
+                if (C == G.m_Connections.end()) return "the input is not connected";
+                auto* pMain = MainOutput(G, C->second->m_OutputPinGuid);
+                if (!pMain) return "the connection is broken";
+                auto Pick = PickComponents(G, *pMain, Swizzle, pNode->m_InputPins[i]);
+                if (!Pick.m_Error.empty()) return Pick.m_Error;
+                if (Pick.m_Out == C->second->m_OutputPinGuid && Pick.m_Swizzle == C->second->m_Swizzle) return "it takes those components already";
+                C->second->m_OutputPinGuid = Pick.m_Out;
+                C->second->m_Swizzle       = Pick.m_Swizzle;
+                return {};
+            }
+            xcmdline::parser::handle m_hInput, m_hSwizzle;
         };
 
         //---- Disconnect

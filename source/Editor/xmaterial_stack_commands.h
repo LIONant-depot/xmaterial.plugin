@@ -303,11 +303,12 @@ namespace xmaterial_editor::cmds
     inline std::uint64_t DerivedId(std::uint64_t Node, std::uint64_t k) noexcept { return Node + k * 0x9E3779B97F4A7C15ull; }
 
     // A connection of the given id from one output pin to one input pin (the input remembers it)
-    inline void MakeLink(xmaterial_graph::graph& G, std::uint64_t Id, xmaterial_graph::pin_guid Out, xmaterial_graph::pin_guid In) noexcept
+    inline void MakeLink(xmaterial_graph::graph& G, std::uint64_t Id, xmaterial_graph::pin_guid Out, xmaterial_graph::pin_guid In, std::string Swizzle = {}) noexcept
     {
         auto& Link = G.createConnection(xmaterial_graph::connection_guid{ Id });
         Link.m_OutputPinGuid = Out;
         Link.m_InputPinGuid  = In;
+        Link.m_Swizzle       = std::move(Swizzle);
         if (auto* pNode = G.findNodeByPin(In)) if (const int i = pNode->getInputPinIndex(In); i >= 0) pNode->m_InputPins[i].m_ConnectionGUID = Link.m_Guid;
     }
 
@@ -331,6 +332,15 @@ namespace xmaterial_editor::cmds
             for (auto& sub : op.m_SubElements) if (sub.m_PinGUID == Out) return Base + "." + sub.m_Name;
         }
         return "?";
+    }
+
+    // What an input reads: its source output's chip, then the components it takes (TakenComponents): Texture.xyz, Texture.a, Vec2.x, Albedo.bgr
+    inline std::string InputChipText(const xmaterial_graph::graph& G, const xmaterial_graph::connection& C, const xmaterial_graph::pin& In) noexcept
+    {
+        auto* pMain = MainOutput(G, C.m_OutputPinGuid);
+        if (!pMain) return "?";
+        const auto T = TakenComponents(G, C, In);
+        return ChipText(G, pMain->m_PinGUID) + (T.empty() ? "" : "." + T);
     }
 
     //---- InsertOnConnection: a new step on a connection; only that connection goes through it
@@ -365,6 +375,7 @@ namespace xmaterial_editor::cmds
             GetArg(m_Parser, m_hInput, InText); GetArg(m_Parser, m_hOutput, OutText);
 
             const auto SrcOut = It->second->m_OutputPinGuid, DstIn = It->second->m_InputPinGuid;
+            const auto Swizzle = It->second->m_Swizzle;
             auto* pSrc = G.findNodeByPin(SrcOut);
             auto* pDst = G.findNodeByPin(DstIn);
             if (!pSrc || !pDst) return "the connection is broken";
@@ -380,7 +391,10 @@ namespace xmaterial_editor::cmds
             if (!PinByPart(N, false, InText, NewIn, &Err) || !PinByPart(N, true, OutText, NewOut, &Err)) return Fail(Err);
             const auto* pIn  = G.findPinConst(N, xmaterial_graph::pin_guid{ NewIn },  bIn, Index, Sub);
             const auto* pOut = G.findPinConst(N, xmaterial_graph::pin_guid{ NewOut }, bIn, Index, Sub);
-            if (!IsPinCompatible(OldOut, *pIn, G)) return Fail(TypesDiffer(G, OldOut, *pIn));
+            // the components the old input took go to the new step's input when they fit it, else the new input takes the whole source
+            std::string Keep;
+            if (auto* pMain = Swizzle.empty() ? nullptr : MainOutput(G, SrcOut); pMain && PickComponents(G, *pMain, Swizzle, *pIn).m_Error.empty()) Keep = PickComponents(G, *pMain, Swizzle, *pIn).m_Swizzle;
+            if (Keep.empty() && !IsPinCompatible(OldOut, *pIn, G)) return Fail(TypesDiffer(G, OldOut, *pIn));
             if (!IsPinCompatible(*pOut, OldIn, G)) return Fail(TypesDiffer(G, *pOut, OldIn));
 
             G.m_Stack.Reindex();
@@ -399,7 +413,7 @@ namespace xmaterial_editor::cmds
             Sections[Sec].m_Steps.insert(Sections[Sec].m_Steps.begin() + Slot, N.m_Guid);
             const xmaterial_graph::pin_guid NewInPin{ NewIn }, NewOutPin{ NewOut };
             G.RemoveConnection(xmaterial_graph::connection_guid{ Conn });
-            MakeLink(G, Id1, SrcOut, NewInPin);
+            MakeLink(G, Id1, SrcOut, NewInPin, Keep);
             MakeLink(G, Id2, NewOutPin, DstIn);
             G.m_Stack.Reindex();
             return {};
@@ -443,7 +457,7 @@ namespace xmaterial_editor::cmds
             m_Doc.m_bPositionsChanged = true;
             for (std::size_t i = 0; i < pSrc->m_InputPins.size(); ++i)
                 if (auto C = G.m_Connections.find(pSrc->m_InputPins[i].m_ConnectionGUID); C != G.m_Connections.end())
-                    MakeLink(G, DerivedId(New, 3 + i), C->second->m_OutputPinGuid, N.m_InputPins[i].m_PinGUID);
+                    MakeLink(G, DerivedId(New, 3 + i), C->second->m_OutputPinGuid, N.m_InputPins[i].m_PinGUID, C->second->m_Swizzle);
             auto& Steps = G.m_Stack.m_Sections[Sec].m_Steps;
             Steps.insert(Steps.begin() + Slot + 1, N.m_Guid);
             G.m_Stack.Reindex();
@@ -482,7 +496,7 @@ namespace xmaterial_editor::cmds
                     for (auto& Pin : pNode->m_InputPins)
                     {
                         std::string What;
-                        if (auto C = G.m_Connections.find(Pin.m_ConnectionGUID); C != G.m_Connections.end() && G.findNodeByPin(C->second->m_OutputPinGuid)) What = "<- " + ChipText(G, C->second->m_OutputPinGuid);
+                        if (auto C = G.m_Connections.find(Pin.m_ConnectionGUID); C != G.m_Connections.end() && G.findNodeByPin(C->second->m_OutputPinGuid)) What = "<- " + InputChipText(G, *C->second, Pin);
                         else if (Pin.m_ParamIndex >= 0 && Pin.m_ParamIndex < static_cast<int>(pNode->m_Params.size()))
                         {
                             auto& Prop = pNode->m_Params[Pin.m_ParamIndex];
@@ -517,7 +531,7 @@ namespace xmaterial_editor::cmds
             std::string Out;
             for (auto& Pin : pNode->m_InputPins)
                 if (auto C = m_Doc.m_Graph.m_Connections.find(Pin.m_ConnectionGUID); C != m_Doc.m_Graph.m_Connections.end() && m_Doc.m_Graph.findNodeByPin(C->second->m_OutputPinGuid))
-                    Out += std::format("{}  <- {}  connection {:016X}  source {:016X}\n", Pin.m_Name, ChipText(m_Doc.m_Graph, C->second->m_OutputPinGuid), C->first.m_Value, C->second->m_OutputPinGuid.m_Value);
+                    Out += std::format("{}  <- {}  connection {:016X}  source {:016X}\n", Pin.m_Name, InputChipText(m_Doc.m_Graph, *C->second, Pin), C->first.m_Value, C->second->m_OutputPinGuid.m_Value);
                 else Out += std::format("{}  (not connected)\n", Pin.m_Name);
             return Out.empty() ? "(no inputs)" : Out;
         }

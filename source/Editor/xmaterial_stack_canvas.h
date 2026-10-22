@@ -20,9 +20,13 @@
 // menu's Collapse puts them (and every step on a path between them) in a new collapsed section: one box with a row per source crossing in
 // and per output crossing out. Double click a box (or its menu) to expand it. Bindings never change.
 // Preview (section 10.4): P shows the selected step's output on the Mesh Preview, Esc returns to the material (the session compiles it).
+// Components (section 6.5): a vector output's arrow shows its components as pins (always shown while one is connected); dragging from an
+// input over a vector output fans its components out beside the pin; a drop the types refuse but components can fix opens the component
+// picker; a chip's component suffix (.xyz, .a) opens it too ('.' on a focused chip). One command each: Connect [-Swizzle] / SetInputSwizzle.
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_graph_widgets.h"
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_stack_commands.h"
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_stack_routes.h"
+#include "plugins/xmaterial.plugin/source/Editor/xmaterial_subgraph_commands.h"
 #include "dependencies/xeditor/include/xeditor/hint.h"
 #include "dependencies/imgui/imgui_internal.h"
 
@@ -52,6 +56,7 @@ namespace xmaterial_editor
         constexpr ImU32 Selected      = IM_COL32( 74, 144, 226, 255);
         constexpr ImU32 Related       = IM_COL32(140, 170, 205, 255);
         constexpr ImU32 Error         = IM_COL32(230,  72,  72, 255);
+        constexpr ImU32 Component     = IM_COL32(110, 205, 235, 255);     // the components an input takes (.xyz), a component pin's label, the open arrow
 
         constexpr float ROUND      = 3.5f;
         constexpr float PIN_R      = 4.5f;
@@ -131,7 +136,17 @@ namespace xmaterial_editor
                             Out += std::format("  {}:{}={:.0f},{:.0f}", pSide, P.m_Name, s.x, s.y);
                         }
                 };
-                if (auto* pN = m_Doc.FindNode(Step)) { Pins(pN->m_InputPins, "in"); Pins(pN->m_OutputPins, "out"); }
+                if (auto* pN = m_Doc.FindNode(Step))
+                {
+                    Pins(pN->m_InputPins, "in"); Pins(pN->m_OutputPins, "out");
+                    for (auto& Op : pN->m_OutputPins)
+                    {
+                        for (std::size_t k = 0; k < Op.m_SubElements.size(); ++k)
+                            if (auto Pa = m_PinAt.find(Op.m_SubElements[k].m_PinGUID.m_Value); Pa != m_PinAt.end() && !Pa->second.m_bSub)
+                                { const ImVec2 s = ToScreen(Pa->second.m_W.x, Pa->second.m_W.y); Out += std::format("  out:{}{}={:.0f},{:.0f}", Op.m_Name, stack_routes::ComponentLabel(Op, static_cast<int>(k)), s.x, s.y); }
+                        if (auto A = m_ArrowAt.find(Op.m_PinGUID.m_Value); A != m_ArrowAt.end()) Out += std::format("  arrow:{}={:.0f},{:.0f}", Op.m_Name, A->second.x, A->second.y);
+                    }
+                }
                 return Out;
             }
             if (const int e = EdgeOf(Connection); e >= 0 && m_R.m_Routes[e].m_Points.size() >= 2)
@@ -139,6 +154,7 @@ namespace xmaterial_editor
                 const ImVec2 m = RouteMid(e), a = ToScreen(m.x, m.y);
                 std::string Out = std::format("screen {:.0f} {:.0f}", a.x, a.y);
                 if (auto C = m_ChipAt.find(Connection); C != m_ChipAt.end()) Out += std::format("  chip {:.0f} {:.0f}", C->second.x, C->second.y);
+                if (auto C = m_SuffixAt.find(Connection); C != m_SuffixAt.end()) Out += std::format("  suffix {:.0f} {:.0f}", C->second.x, C->second.y);
                 return Out;
             }
             return "not on the canvas";
@@ -200,7 +216,14 @@ namespace xmaterial_editor
                     else if (m_Trace != trace::NONE) m_Trace = trace::NONE;
                     else Select(0, 0);
                 }
-                if (ImGui::IsKeyPressed(ImGuiKey_Tab, false)) FocusChip(IO.KeyShift ? -1 : 1);
+                if (ImGui::IsKeyPressed(ImGuiKey_Tab, false))                           // Tab: into the selected group, back out of a sub-graph, else the next chip
+                {
+                    auto* pSel = m_SelStep ? m_Doc.FindNode(m_SelStep) : nullptr;
+                    if (pSel && pSel->isGroupCallNode() && !m_SelConn) NoteIf(cmds::EnterGroup(m_Doc, m_SelStep), ToWorld(IO.MousePos));
+                    else if (!m_SelStep && !m_SelConn && cmds::GroupTrails().contains(m_Doc.m_Guid.m_Instance.m_Value)) NoteIf(cmds::ExitGroup(m_Doc), ToWorld(IO.MousePos));
+                    else FocusChip(IO.KeyShift ? -1 : 1);
+                }
+                if (IO.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_G, false) && m_SelStep && m_Doc.FindNode(m_SelStep)) AskSubgraphName();
                 if ((ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)) && m_SelConn) GoToSource(m_SelConn);
                 if (ImGui::IsKeyPressed(ImGuiKey_Delete, false))                        // a selected connection (or focused chip) disconnects; selected steps go
                 {
@@ -208,24 +231,38 @@ namespace xmaterial_editor
                     else if (m_SelStep) DeleteSelected(ToWorld(IO.MousePos));
                 }
                 if (IO.KeyAlt && ImGui::IsKeyPressed(ImGuiKey_LeftArrow, false)) Back();
+                if (ImGui::IsKeyPressed(ImGuiKey_Period, false) && m_SelConn)          // the focused chip's components
+                    if (auto* c = Conn(m_SelConn); c && HasComponents(c->m_OutputPinGuid.m_Value))
+                    {
+                        auto At = m_ChipAt.find(m_SelConn);
+                        OpenComponents(c->m_OutputPinGuid.m_Value, c->m_InputPinGuid.m_Value, m_SelConn, At != m_ChipAt.end() ? ImVec2{ At->second.x, At->second.y + 10 } : IO.MousePos);
+                    }
             }
 
             // A drag from a pin: onto a pin of the other side connects (refused with the reason), into empty space opens the search of what fits
             if (bInside && !bPopup && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) if (auto* p = PinAt(IO.MousePos)) { m_DragPin = p->first; m_DragFrom = IO.MousePos; }
             if (m_DragPin && !m_PinAt.contains(m_DragPin)) m_DragPin = 0;               // an undo took it
+            UpdateFan(IO.MousePos);
             if (m_DragPin && !ImGui::IsMouseDown(ImGuiMouseButton_Left))
             {
                 const auto  From = m_PinAt.at(m_DragPin);
                 const auto* pTo  = PinAt(IO.MousePos);
-                if (pTo && pTo->second.m_bOut != From.m_bOut)
+                if (const int k = FanAt(IO.MousePos); k >= 0)                           // a component of the fanned output
+                {
+                    const std::uint64_t Out = MainOutput(m_Doc.m_Graph, xmaterial_graph::pin_guid{ m_Fan })->m_SubElements[k].m_PinGUID.m_Value;
+                    if (auto Why = WhyNot(Out, m_DragPin); !Why.empty()) Note(Why, ToWorld(IO.MousePos));
+                    else xeditor::Run(m_Undo, std::format("Connect -Output {:016X} -Input {:016X} -Connection {:016X}", Out, m_DragPin, xresource::guid_generator::Type64()));
+                }
+                else if (pTo && pTo->second.m_bOut != From.m_bOut)
                 {
                     const std::uint64_t Out = From.m_bOut ? m_DragPin : pTo->first, In = From.m_bOut ? pTo->first : m_DragPin;
-                    if (auto Why = WhyNot(Out, In); !Why.empty()) Note(Why, ToWorld(IO.MousePos));
-                    else xeditor::Run(m_Undo, std::format("Connect -Output {:016X} -Input {:016X} -Connection {:016X}", Out, In, xresource::guid_generator::Type64()));
+                    if (auto Why = WhyNot(Out, In); Why.empty()) xeditor::Run(m_Undo, std::format("Connect -Output {:016X} -Input {:016X} -Connection {:016X}", Out, In, xresource::guid_generator::Type64()));
+                    else if (OffersComponents(Out, In)) OpenComponents(Out, In, 0, IO.MousePos);          // the types refuse, components fit: which ones
+                    else Note(Why, ToWorld(IO.MousePos));
                 }
                 else if (!pTo && std::abs(IO.MousePos.x - m_DragFrom.x) + std::abs(IO.MousePos.y - m_DragFrom.y) > 8)
                     OpenSearch(From.m_bOut ? search::kind::FROM_OUTPUT : search::kind::FROM_INPUT, ToWorld(IO.MousePos), m_DragPin);
-                m_DragPin = 0;
+                m_DragPin = 0; m_Fan = 0;
             }
 
             // A step dragged up or down its column: the slot under the mouse, the layout it would give; a drop issues it only if it shows
@@ -252,7 +289,7 @@ namespace xmaterial_editor
             const auto Lit = Lighting();
             DrawRoutes(D, Lit);
             m_HoverStep = 0;
-            m_ChipAt.clear();
+            m_ChipAt.clear(); m_SuffixAt.clear(); m_ArrowAt.clear();
             m_GroupHint = std::move(m_GroupHintNext); m_GroupHintNext.clear();         // what the menu's Collapse would take, last frame
             std::erase_if(m_Group, [&](std::uint64_t s) { return !m_StepIndex.contains(s); });
             for (int g = 0; g < static_cast<int>(m_In.m_Steps.size()); ++g) DrawStep(D, g, Max);
@@ -265,6 +302,7 @@ namespace xmaterial_editor
 
             D->PopClipRect();
             ImGui::PopItemFlag();
+            DrawBreadcrumb();
             DrawPopups();
             ImGui::SetCursorScreenPos(m_Origin);
             ImGui::Dummy(Avail);                                                        // the last item: the cursor moves never extend the window
@@ -301,7 +339,7 @@ namespace xmaterial_editor
         float ChipW(const xmaterial_graph::input_pin& P) const noexcept
         {
             auto* pC = ConnectionOf(P);
-            return pC ? Measure(cmds::ChipText(m_Doc.m_Graph, pC->m_OutputPinGuid)) + 2 * stack_style::CHIP_PAD : 0.0f;
+            return pC ? Measure(cmds::InputChipText(m_Doc.m_Graph, *pC, P)) + 2 * stack_style::CHIP_PAD : 0.0f;
         }
         float InputW(const node&, const xmaterial_graph::input_pin& P) const noexcept { const float C = ChipW(P); return Measure(P.m_Name) + (C > 0 ? stack_style::ROW_GAP + C : 0.0f); }
 
@@ -354,7 +392,7 @@ namespace xmaterial_editor
 
         void Relayout() noexcept
         {
-            auto In = stack_routes::FromGraph(m_Doc.m_Graph, m_View.m_Measure, m_View.m_InputW, m_View.m_LitW, m_View.m_PreviewRows);
+            auto In = stack_routes::FromGraph(m_Doc.m_Graph, m_View.m_Measure, m_View.m_InputW, m_View.m_LitW, m_View.m_PreviewRows, nullptr, &m_View.m_Open);
             if (m_bLaidOut && Same(In, m_In)) return;
             m_In = std::move(In); m_bLaidOut = true; m_HoverEdge = -1;                 // an edge index of the old layout
             m_R  = stack_routes::Build(m_In.m_In, m_In.m_Edges);
@@ -381,15 +419,13 @@ namespace xmaterial_editor
                 const auto& b = m_R.m_Layout.m_Steps[g];
                 int Row = 0;
                 for (auto& P : pN->m_InputPins) m_PinAt[P.m_PinGUID.m_Value] = { { b.m_X, b.m_Y + stack_layout::RowY(Row++) }, pN->m_Guid.m_Value, false };
-                Row = 0;
-                for (std::size_t o = 0; o < pN->m_OutputPins.size(); ++o)
+                stack_routes::ForOutputRows(m_Doc.m_Graph, *pN, &m_View.m_Open, [&](int Row, const xmaterial_graph::output_pin& Op, int Sub)
                 {
-                    const auto& Op = pN->m_OutputPins[o];
-                    if (o > 0 && !IsUsed(Op)) continue;
-                    const ImVec2 W{ b.m_X + b.m_W, b.m_Y + stack_layout::RowY(Row++) };
+                    const ImVec2 W{ b.m_X + b.m_W, b.m_Y + stack_layout::RowY(Row) };
+                    if (Sub >= 0) { m_PinAt[Op.m_SubElements[Sub].m_PinGUID.m_Value] = { W, pN->m_Guid.m_Value, true }; return; }      // a shown component: a pin of its own
                     m_PinAt[Op.m_PinGUID.m_Value] = { W, pN->m_Guid.m_Value, true };
-                    for (auto& Sub : Op.m_SubElements) m_PinAt[Sub.m_PinGUID.m_Value] = { W, pN->m_Guid.m_Value, true, true };
-                }
+                    for (auto& S : Op.m_SubElements) m_PinAt[S.m_PinGUID.m_Value] = { W, pN->m_Guid.m_Value, true, true };
+                });
             }
         }
 
@@ -593,6 +629,11 @@ namespace xmaterial_editor
             ImGui::InvisibleButton("##Step", { std::max(1.0f, P1.x - P0.x), std::max(1.0f, P1.y - P0.y) });
             if (ImGui::IsItemHovered()) m_HoverStep = N.m_Guid.m_Value;
             if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) ClickStep(N.m_Guid.m_Value);
+            if (N.isGroupCallNode() && ImGui::IsItemHovered())
+            {
+                xeditor::hint::Text("Group: double click or Tab to go into its sub-graph");
+                if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) NoteIf(cmds::EnterGroup(m_Doc, N.m_Guid.m_Value), ToWorld(ImGui::GetIO().MousePos));
+            }
             if (ImGui::IsItemActive() && !m_DragStep && !m_DragPin && !m_bDragCancelled && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 6)
                 && ImGui::GetIO().MouseClickedPos[0].y < HeaderB) m_DragStep = N.m_Guid.m_Value;       // a header dragged: a move (7.3)
             if (N.m_HasErrMsg && !N.m_ErrMsg.empty() && ImGui::IsItemHovered()) xeditor::hint::Text("%s", N.m_ErrMsg.c_str());
@@ -613,12 +654,15 @@ namespace xmaterial_editor
                 {
                     // The chip of its source (6): an item over the step's button, so it takes the hover and the clicks
                     const std::uint64_t Id = pC->m_Guid.m_Value;
-                    const std::string Chip = cmds::ChipText(m_Doc.m_Graph, pC->m_OutputPinGuid);
+                    const std::string Chip   = cmds::InputChipText(m_Doc.m_Graph, *pC, P);
+                    const std::string Taken  = TakenComponents(m_Doc.m_Graph, *pC, P);
+                    const std::string Base   = Chip.substr(0, Chip.size() - (Taken.empty() ? 0 : Taken.size() + 1));
                     const float x = P0.x + Len(geo::PORT_PAD + Measure(P.m_Name) + st::ROW_GAP);
                     const ImVec2 C0{ x, cy - Len(st::CHIP_H) * 0.5f }, C1{ x + Len(ChipW(P)), cy + Len(st::CHIP_H) * 0.5f };
                     ImGui::SetCursorScreenPos(C0);
                     ImGui::PushID(Row);
-                    ImGui::InvisibleButton("##Chip", { std::max(1.0f, C1.x - C0.x), std::max(1.0f, C1.y - C0.y) });
+                    const float ChipEnd = Taken.empty() ? C1.x : C0.x + Len(st::CHIP_PAD) + TextW(Base);      // the suffix is a button of its own
+                    ImGui::InvisibleButton("##Chip", { std::max(1.0f, ChipEnd - C0.x), std::max(1.0f, C1.y - C0.y) });
                     ImGui::PopID();
                     const bool bHover = ImGui::IsItemHovered();
                     if (bHover) m_HoverChipNext = Id;
@@ -627,7 +671,24 @@ namespace xmaterial_editor
                     m_ChipAt[Id] = { (C0.x + C1.x) * 0.5f, cy };
                     D->AddRectFilled(C0, C1, bHover ? st::ChipHover : st::Chip, Len(2));
                     if (Id == m_SelConn) D->AddRect(C0, C1, st::Selected, Len(2), 0, 1.5f);         // the focused chip
-                    Text(D, { C0.x + Len(st::CHIP_PAD), cy - FontPx() * 0.5f }, bHover || Id == m_SelConn ? st::Text : st::TextDim, Chip);
+                    Text(D, { C0.x + Len(st::CHIP_PAD), cy - FontPx() * 0.5f }, bHover || Id == m_SelConn ? st::Text : st::TextDim, Base);
+                    if (!Taken.empty())                                                     // the components it takes: a button of their own, the picker
+                    {
+                        const float sx = C0.x + Len(st::CHIP_PAD) + TextW(Base);
+                        const ImVec2 S0{ sx, C0.y + Len(1) }, S1{ C1.x - Len(1), C1.y - Len(1) };
+                        ImGui::SetCursorScreenPos(S0);
+                        ImGui::PushID(Row);
+                        const bool bPicked = ImGui::InvisibleButton("##Suffix", { std::max(1.0f, S1.x - S0.x), std::max(1.0f, S1.y - S0.y) });     // on release: a popup opened on the press closes at once
+                        ImGui::PopID();
+                        const bool bSufHover = ImGui::IsItemHovered();
+                        if (bSufHover) { m_HoverChipNext = Id; xeditor::hint::Text("The components it takes: click to pick others (or select the chip and press .)"); }
+                        if (bPicked) Select(0, Id);
+                        if (bPicked) OpenComponents(pC->m_OutputPinGuid.m_Value, P.m_PinGUID.m_Value, Id, { S0.x, C1.y + 2 });
+                        m_SuffixAt[Id] = { (S0.x + S1.x) * 0.5f, cy };
+                        if (bSufHover) D->AddRectFilled(S0, S1, st::ChipHover, Len(2));
+                        Text(D, { sx, cy - FontPx() * 0.5f }, st::Component, "." + Taken);
+                        D->AddLine({ sx + Len(1), C1.y - Len(2.5f) }, { S1.x - Len(st::CHIP_PAD) + Len(2), C1.y - Len(2.5f) }, Alpha(st::Component, bSufHover ? 1.0f : 0.45f), 1.0f);     // underlined: it reads as a control
+                    }
                 }
                 else if (const float LW = LitW(N, P); LW > 0)
                 {
@@ -659,17 +720,48 @@ namespace xmaterial_editor
             ImGui::PopFont();
             ImGui::PopID();
 
-            // Output rows (right; the first always, the others when used): name right aligned, pin on the right edge
-            Row = 0;
-            for (std::size_t o = 0; o < N.m_OutputPins.size(); ++o)
+            // Output rows (right; the first always, the others when used): name right aligned, pin on the right edge. A vector output has an
+            // arrow left of its name: open, its components show as pins of their own under it (.x .y .z .w, .r .g .b .a); a connected
+            // component keeps them shown (stack_canvas.md 6.5)
+            ImGui::PushID(static_cast<int>(N.m_Guid.m_Value ^ (N.m_Guid.m_Value >> 32)));
+            stack_routes::ForOutputRows(m_Doc.m_Graph, N, &m_View.m_Open, [&](int r, const xmaterial_graph::output_pin& Op, int Sub)
             {
-                const auto& Op = N.m_OutputPins[o];
-                const bool bUsed = IsUsed(Op);
-                if (o > 0 && !bUsed) continue;
-                const float cy = P0.y + Len(stack_layout::RowY(Row++));
-                Text(D, { P1.x - Len(geo::PORT_PAD) - TextW(Op.m_Name), cy - FontPx() * 0.5f }, bUsed ? st::Text : st::TextDim, Op.m_Name);
+                const float cy = P0.y + Len(stack_layout::RowY(r));
+                if (Sub >= 0)
+                {
+                    const auto& S = Op.m_SubElements[Sub];
+                    const bool bUsed = Feeds(S.m_PinGUID.m_Value);
+                    const std::string L = stack_routes::ComponentLabel(Op, Sub);
+                    const float lx = P1.x - Len(geo::PORT_PAD + stack_routes::ARROW_W * 0.5f);
+                    Text(D, { P1.x - Len(geo::PORT_PAD) - TextW(L), cy - FontPx() * 0.5f }, bUsed ? st::Component : st::TextDim, L);
+                    D->AddLine({ lx - TextW(L), cy - Len(geo::ROW_H * 0.5f) }, { lx - TextW(L), cy }, Alpha(st::TextDim, 0.6f), 1.0f);            // a tree line from its output
+                    D->AddLine({ lx - TextW(L), cy }, { lx - TextW(L) + Len(4), cy }, Alpha(st::TextDim, 0.6f), 1.0f);
+                    Pin(D, { P1.x, cy }, TypeColor(S.m_TypeGUID), bUsed);
+                    return;
+                }
+                const bool bOpen = stack_routes::ShowsComponents(m_Doc.m_Graph, Op, &m_View.m_Open);
+                const bool bUsed = bOpen ? Feeds(Op.m_PinGUID.m_Value) : IsUsed(Op);
+                const float tx = P1.x - Len(geo::PORT_PAD) - TextW(Op.m_Name);
+                Text(D, { tx, cy - FontPx() * 0.5f }, bUsed || bOpen ? st::Text : st::TextDim, Op.m_Name);
                 Pin(D, { P1.x, cy }, TypeColor(Op.m_TypeGUID), bUsed);
-            }
+                if (Op.m_SubElements.empty()) return;
+                const ImVec2 A0{ tx - Len(stack_routes::ARROW_W), cy - Len(geo::ROW_H * 0.5f) }, A1{ tx - Len(1), cy + Len(geo::ROW_H * 0.5f) };
+                ImGui::SetCursorScreenPos(A0);
+                ImGui::PushID(static_cast<int>(Op.m_PinGUID.m_Value ^ (Op.m_PinGUID.m_Value >> 32)));
+                ImGui::InvisibleButton("##Open", { std::max(1.0f, A1.x - A0.x), std::max(1.0f, A1.y - A0.y) });
+                ImGui::PopID();
+                const bool bAuto  = bOpen && !m_View.m_Open.contains(Op.m_PinGUID.m_Value);    // a connected component holds it open
+                const bool bHover = ImGui::IsItemHovered();
+                if (bHover) xeditor::hint::Text("%s", bAuto ? "A component is connected: the components stay shown" : bOpen ? "Hide the components" : "Show the components as pins");
+                if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !bAuto) { if (bOpen) m_View.m_Open.erase(Op.m_PinGUID.m_Value); else m_View.m_Open.insert(Op.m_PinGUID.m_Value); }
+                m_ArrowAt[Op.m_PinGUID.m_Value] = { (A0.x + A1.x) * 0.5f, cy };
+                const float h = std::max(2.5f, Len(3.5f)), ax = (A0.x + A1.x) * 0.5f;
+                if (bHover) D->AddRectFilled(A0, A1, st::ChipHover, Len(2));
+                const ImU32 AC = bHover ? st::Text : bAuto ? st::TextDim : st::Component;
+                if (bOpen) D->AddTriangleFilled({ ax - h, cy - h * 0.6f }, { ax + h, cy - h * 0.6f }, { ax, cy + h * 0.8f }, AC);     // pointing down: shown
+                else       D->AddTriangleFilled({ ax - h * 0.6f, cy - h }, { ax - h * 0.6f, cy + h }, { ax + h * 0.8f, cy }, AC);     // pointing right: hidden
+            });
+            ImGui::PopID();
 
             DrawPreview(D, N, P0, P1);
 
@@ -687,7 +779,7 @@ namespace xmaterial_editor
         //------------------------------------------------------------------------------------------
         struct preview
         {
-            enum class kind : std::uint8_t { NONE, TEXTURE, COLOR } m_Kind = kind::NONE;
+            enum class kind : std::uint8_t { NONE, TEXTURE, COLOR, RENDER } m_Kind = kind::NONE;
             xresource::full_guid m_Texture = {};
             ImVec4               m_Color   = {};
         };
@@ -715,7 +807,7 @@ namespace xmaterial_editor
                 for (std::size_t i = 0; i < N.m_InputPins.size() && i < 4; ++i)
                 {
                     const auto& In = N.m_InputPins[i];
-                    if (ConnectionOf(In) || !HasParam(N, In) || N.m_Params[In.m_ParamIndex].m_Type != xmaterial_graph::node_param::type::FLOAT) return P;
+                    if (ConnectionOf(In) || !HasParam(N, In) || N.m_Params[In.m_ParamIndex].m_Type != xmaterial_graph::node_param::type::FLOAT) return Rendered(N);
                     v[i] = N.m_Params[In.m_ParamIndex].m_Value.get<float>();
                 }
                 // Literal colours are linear: encoded to sRGB (the exact piecewise curve) to be seen as they will look.
@@ -724,6 +816,14 @@ namespace xmaterial_editor
                 P.m_Kind  = preview::kind::COLOR;
                 P.m_Color = { Srgb(v[0]), Srgb(v[1]), Srgb(v[2]), 1.0f };
             }
+            return P.m_Kind == preview::kind::NONE ? Rendered(N) : P;
+        }
+
+        // Any other step with an output the material's colour can take: its output rendered (m_Renders, the session's; none headless)
+        preview Rendered(const node& N) const noexcept
+        {
+            preview P;
+            if (m_Renders && m_Renders(N)) P.m_Kind = preview::kind::RENDER;
             return P;
         }
 
@@ -731,7 +831,7 @@ namespace xmaterial_editor
         {
             switch (PreviewOf(N).m_Kind)
             {
-            case preview::kind::TEXTURE: return stack_style::THUMB_ROWS;
+            case preview::kind::TEXTURE: case preview::kind::RENDER: return stack_style::THUMB_ROWS;
             case preview::kind::COLOR:   return stack_style::SWATCH_ROWS;
             default:                     return 0;
             }
@@ -755,6 +855,16 @@ namespace xmaterial_editor
             }
             const float S = Bottom - Top, x = std::floor((P0.x + P1.x - S) * 0.5f);
             const ImVec2 a{ x, Top }, b{ x + S, Bottom };
+            if (P.m_Kind == preview::kind::RENDER)                                         // its picture; the older one while a newer is made
+            {
+                const auto R = m_Rendered(N);
+                D->AddRectFilled(a, b, st::OutputsHalf, Len(2));
+                if (R.m_pTexture) D->AddImage((ImTextureRef)(void*)R.m_pTexture, a, b, R.m_UV0, R.m_UV1);
+                else { const char* t = R.m_Why.empty() ? "..." : "no preview"; Text(D, { (P0.x + P1.x - TextW(t)) * 0.5f, (Top + Bottom - FontPx()) * 0.5f }, st::TextDim, t); }
+                if (!R.m_Why.empty() && ImGui::IsMouseHoveringRect(a, b)) xeditor::hint::Text("%s", R.m_Why.c_str());
+                D->AddRect(a, b, st::StepBorder, Len(2));
+                return;
+            }
             xresource_editor::plugin_icon_ref Pic;
             auto& Host = xresource_editor::g_ReferenceHost;
             if (!P.m_Texture.empty() && Host.m_Thumbnail) Pic = Host.m_Thumbnail(P.m_Texture);
@@ -765,15 +875,13 @@ namespace xmaterial_editor
             D->AddRect(a, b, st::StepBorder, Len(2));
         }
 
-        bool IsUsed(const xmaterial_graph::output_pin& Op) const noexcept
+        bool Feeds(std::uint64_t Pin) const noexcept
         {
-            for (auto& [Id, C] : m_Doc.m_Graph.m_Connections)
-            {
-                if (C->m_OutputPinGuid == Op.m_PinGUID) return true;
-                for (auto& Sub : Op.m_SubElements) if (C->m_OutputPinGuid == Sub.m_PinGUID) return true;
-            }
+            for (auto& [Id, C] : m_Doc.m_Graph.m_Connections) if (C->m_OutputPinGuid.m_Value == Pin) return true;
             return false;
         }
+
+        bool IsUsed(const xmaterial_graph::output_pin& Op) const noexcept { return stack_routes::OutputUsed(m_Doc.m_Graph, Op); }
 
         // A collapsed section (7.6): a box with a row per source feeding it from outside (left) and per output of it used outside (right).
         // A second card behind it says it holds several steps.
@@ -885,7 +993,7 @@ namespace xmaterial_editor
             if (!M.Check(G, S, G.m_Stack.m_Sections).empty()) return;
             auto Sections = G.m_Stack.m_Sections;
             for (std::size_t i = 0; i < S.size(); ++i) { Sections[i].m_Steps.clear(); for (int n : S[i]) Sections[i].m_Steps.push_back(M.m_Ids[n]); }
-            m_Drag.m_In = stack_routes::FromGraph(G, m_View.m_Measure, m_View.m_InputW, m_View.m_LitW, m_View.m_PreviewRows, &Sections);
+            m_Drag.m_In = stack_routes::FromGraph(G, m_View.m_Measure, m_View.m_InputW, m_View.m_LitW, m_View.m_PreviewRows, &Sections, &m_View.m_Open);
             m_Drag.m_R  = stack_routes::Build(m_Drag.m_In.m_In, m_Drag.m_In.m_Edges);
             for (int h = 0; h < static_cast<int>(m_Drag.m_In.m_Steps.size()); ++h) m_Drag.m_bChanges |= Moved(h);
         }
@@ -1062,14 +1170,14 @@ namespace xmaterial_editor
         bool Fits(xmaterial_graph::type_guid Out, xmaterial_graph::type_guid In) const noexcept { return AreTypesCompatible(m_Doc.m_Graph, Out, In); }
 
         // Why Connect would refuse Out -> In, checked before it runs so a refusal leaves no history (7.7); "" = it would connect
-        std::string WhyNot(std::uint64_t Out, std::uint64_t In) const noexcept
+        std::string WhyNot(std::uint64_t Out, std::uint64_t In, bool bTypes = true) const noexcept
         {
             auto& G = m_Doc.m_Graph;
             const node *pO = nullptr, *pI = nullptr;
             const auto *po = PinOf(Out, &pO), *pi = PinOf(In, &pI);
             if (!po || !pi) return "no such pin";
             if (pO == pI) return "the pins are on the same step";
-            if (!Fits(po->m_TypeGUID, pi->m_TypeGUID)) return cmds::TypesDiffer(G, *po, *pi);
+            if (bTypes && !Fits(po->m_TypeGUID, pi->m_TypeGUID)) return cmds::TypesDiffer(G, *po, *pi);
             std::vector<const node*> Todo{ pI };
             std::unordered_set<const node*> Seen{ pI };
             while (!Todo.empty())
@@ -1094,6 +1202,141 @@ namespace xmaterial_editor
                 if ((s.x - Mouse.x) * (s.x - Mouse.x) + (s.y - Mouse.y) * (s.y - Mouse.y) <= R * R) return &P;
             }
             return nullptr;
+        }
+
+        //------------------------------------------------------------------------------------------
+        // Components (6.5): the fan beside a vector output while an input is dragged, the picker
+        //------------------------------------------------------------------------------------------
+        // A whole output (or a component of one) of a vector with components to pick
+        bool HasComponents(std::uint64_t Pin) const noexcept { auto* p = MainOutput(m_Doc.m_Graph, xmaterial_graph::pin_guid{ Pin }); return p && !p->m_SubElements.empty(); }
+
+        // Out -> In refused by the types, but some components of Out's output would fit In (the picker can make it)
+        bool OffersComponents(std::uint64_t Out, std::uint64_t In) const noexcept
+        {
+            auto& G = m_Doc.m_Graph;
+            auto* pMain = MainOutput(G, xmaterial_graph::pin_guid{ Out });
+            auto* pIn   = PinOf(In);
+            return pMain && pIn && pMain->m_PinGUID.m_Value == Out && !pMain->m_SubElements.empty() && Components(G, pIn->m_TypeGUID) > 0
+                && !*ColorSpaceClash(pMain->m_TypeGUID, pIn->m_TypeGUID) && WhyNot(Out, In, false).empty();
+        }
+
+        // The fan: while an input is dragged over a vector output whose components are not shown, a slot per component beside its pin (screen px)
+        ImVec2 FanSlot(int k) const noexcept
+        {
+            const auto& P = m_PinAt.at(m_Fan);
+            const ImVec2 s = ToScreen(P.m_W.x, P.m_W.y);
+            return { s.x + 24 + 24 * static_cast<float>(k), s.y };
+        }
+        int FanSize() const noexcept { auto* p = m_Fan ? MainOutput(m_Doc.m_Graph, xmaterial_graph::pin_guid{ m_Fan }) : nullptr; return p ? static_cast<int>(p->m_SubElements.size()) : 0; }
+        int FanAt(ImVec2 M) const noexcept
+        {
+            for (int k = 0; k < FanSize(); ++k) { const ImVec2 c = FanSlot(k); if (std::abs(M.x - c.x) <= 11 && std::abs(M.y - c.y) <= 11) return k; }
+            return -1;
+        }
+        void UpdateFan(ImVec2 M) noexcept
+        {
+            if (!m_DragPin || m_PinAt.at(m_DragPin).m_bOut) { m_Fan = 0; return; }
+            if (m_Fan && !m_PinAt.contains(m_Fan)) m_Fan = 0;
+            if (const auto* p = PinAt(M); p && p->second.m_bOut)
+            {
+                auto* pMain = MainOutput(m_Doc.m_Graph, xmaterial_graph::pin_guid{ p->first });
+                const bool bFan = pMain && pMain->m_PinGUID.m_Value == p->first && !pMain->m_SubElements.empty() && !stack_routes::ShowsComponents(m_Doc.m_Graph, *pMain, &m_View.m_Open);
+                m_Fan = bFan ? p->first : 0;
+                return;
+            }
+            if (!m_Fan) return;
+            const ImVec2 a = FanSlot(0), b = FanSlot(FanSize() - 1);
+            if (M.x < a.x - 36 || M.x > b.x + 14 || std::abs(M.y - a.y) > 14) m_Fan = 0;     // left the pin and its slots
+        }
+
+        void DrawFan(ImDrawList* D) const noexcept
+        {
+            namespace st = stack_style;
+            const int n = FanSize();
+            if (!n) return;
+            auto* pMain = MainOutput(m_Doc.m_Graph, xmaterial_graph::pin_guid{ m_Fan });
+            const char* L = ComponentLetters(pMain->m_TypeGUID);
+            const ImVec2 a = FanSlot(0), b = FanSlot(n - 1);
+            D->AddRectFilled({ a.x - 14, a.y - 13 }, { b.x + 13, b.y + 13 }, st::OutputsHalf, 4);
+            D->AddRect({ a.x - 14, a.y - 13 }, { b.x + 13, b.y + 13 }, st::Component, 4, 0, 1.0f);
+            const int Hover = FanAt(ImGui::GetIO().MousePos);
+            for (int k = 0; k < n; ++k)
+            {
+                const ImVec2 c = FanSlot(k);
+                const bool bHover = k == Hover;
+                D->AddRectFilled({ c.x - 10, c.y - 10 }, { c.x + 10, c.y + 10 }, bHover ? st::Selected : st::Chip, 3);
+                const char Txt[3] = { '.', L[k], 0 };
+                const ImVec2 sz = m_pFont->CalcTextSizeA(m_FontSize, FLT_MAX, 0.0f, Txt);
+                D->AddText(m_pFont, m_FontSize, { c.x - sz.x * 0.5f, c.y - sz.y * 0.5f }, bHover ? st::Text : st::Component, Txt);
+            }
+        }
+
+        // The picker for In's components of Out's output: Conn 0 = a connection to make, else the one to change. At: screen.
+        void OpenComponents(std::uint64_t Out, std::uint64_t In, std::uint64_t Conn, ImVec2 At) noexcept
+        {
+            auto* pMain = MainOutput(m_Doc.m_Graph, xmaterial_graph::pin_guid{ Out });
+            if (!pMain) return;
+            m_Comp = {};
+            m_Comp.m_Out = pMain->m_PinGUID.m_Value; m_Comp.m_In = In; m_Comp.m_Conn = Conn; m_Comp.m_At = At;
+            m_Open = "##Components";
+        }
+
+        void DrawComponents() noexcept
+        {
+            namespace st = stack_style;
+            auto& G = m_Doc.m_Graph;
+            ImGui::SetNextWindowPos(m_Comp.m_At, ImGuiCond_Appearing);
+            if (!ImGui::BeginPopup("##Components")) return;
+            auto* pMain = MainOutput(G, xmaterial_graph::pin_guid{ m_Comp.m_Out });
+            auto* pIn   = PinOf(m_Comp.m_In);
+            auto* pConn = m_Comp.m_Conn ? Conn(m_Comp.m_Conn) : nullptr;
+            if (!pMain || !pIn || (m_Comp.m_Conn && !pConn)) { ImGui::CloseCurrentPopup(); ImGui::EndPopup(); return; }
+            const int nOut = Components(G, pMain->m_TypeGUID), nIn = Components(G, pIn->m_TypeGUID);
+            const char* L = ComponentLetters(pMain->m_TypeGUID);
+            auto Show = [&](const std::string& Ask) { std::string S = Ask; for (auto& c : S) if (auto k = std::string_view("xyzw").find(c); k != std::string_view::npos) c = L[k]; return "." + S; };
+            auto Apply = [&](const std::string& Ask)
+            {
+                const auto P = PickComponents(G, *pMain, Ask, *pIn);
+                if (!P.m_Error.empty()) return;
+                if (pConn) { if (P.m_Out != pConn->m_OutputPinGuid || P.m_Swizzle != pConn->m_Swizzle) xeditor::Run(m_Undo, std::format("SetInputSwizzle -Input {:016X} -Swizzle {}", m_Comp.m_In, Ask.empty() ? "all" : Ask)); }
+                else xeditor::Run(m_Undo, std::format("Connect -Output {:016X} -Input {:016X} -Connection {:016X}{}", m_Comp.m_Out, m_Comp.m_In, xresource::guid_generator::Type64(), Ask.empty() ? "" : " -Swizzle " + Ask));
+                ImGui::CloseCurrentPopup();
+            };
+
+            ImGui::TextDisabled("%s  ->  %s", cmds::ChipText(G, pMain->m_PinGUID).c_str(), PinLabel(m_Comp.m_In).c_str());
+            ImGui::Separator();
+            // the common picks: all of it (or its first ones), the other runs as long as the input, each component (a vector input splats it)
+            std::vector<std::pair<std::string, std::string>> Opt;                       // label, what to ask
+            if (PickComponents(G, *pMain, "", *pIn).m_Error.empty()) Opt.push_back({ Show(std::string("xyzw", nOut > nIn && nIn >= 2 ? nIn : nOut)) + (nOut > nIn && nIn >= 2 ? "   first " + std::to_string(nIn) : "   all"), "" });
+            for (int o = 1; nIn >= 2 && o + nIn <= nOut; ++o) Opt.push_back({ Show(std::string("xyzw" + o, nIn)), std::string("xyzw" + o, nIn) });
+            for (int k = 0; k < nOut && k < 4; ++k) Opt.push_back({ Show(std::string(1, "xyzw"[k])) + (nIn > 1 ? "   splat" : ""), std::string(1, "xyzw"[k]) });
+            for (int i = 0; i < static_cast<int>(Opt.size()); ++i)
+            {
+                const auto P = PickComponents(G, *pMain, Opt[i].second, *pIn);
+                if (!P.m_Error.empty()) continue;
+                const bool bNow = pConn && P.m_Out == pConn->m_OutputPinGuid && P.m_Swizzle == pConn->m_Swizzle;
+                ImGui::PushID(i);
+                if (ImGui::Selectable((" " + Opt[i].first).c_str(), bNow, ImGuiSelectableFlags_NoAutoClosePopups)) Apply(Opt[i].second);     // a space: the leading dot clears the edge
+                ImGui::PopID();
+            }
+            ImGui::Separator();
+            if (m_Comp.m_bFocus) ImGui::SetKeyboardFocusHere();                       // typing goes here from the start (asked until it holds: the click that opened it may still own the frame)
+            ImGui::SetNextItemWidth(150);
+            const bool bEnter = ImGui::InputTextWithHint("##Custom", nIn >= 2 ? "type: bgr, xxyy..." : "type: w, a...", m_Comp.m_Text, sizeof(m_Comp.m_Text), ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CharsNoBlank);
+            if (ImGui::IsItemActive()) m_Comp.m_bFocus = false;
+            if (m_Comp.m_Text[0])
+            {
+                const auto P = PickComponents(G, *pMain, m_Comp.m_Text, *pIn);
+                if (!P.m_Error.empty()) ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(st::Error), "%s", P.m_Error.c_str());
+                else
+                {
+                    std::string Ask = m_Comp.m_Text;
+                    for (auto& c : Ask) { c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); if (auto k = std::string_view("rgba").find(c); k != std::string_view::npos) c = "xyzw"[k]; }
+                    ImGui::TextDisabled("Enter: takes %s", Show(Ask).c_str());
+                    if (bEnter) Apply(Ask);
+                }
+            }
+            ImGui::EndPopup();
         }
 
         ImVec2 RouteMid(int e) const noexcept                                           // the middle of a route's longest segment
@@ -1151,6 +1394,7 @@ namespace xmaterial_editor
             else { m_Group.clear(); Select(0, 0); }
         }
 
+        void NoteIf(std::string Text, ImVec2 AtWorld) noexcept { if (!Text.empty()) Note(std::move(Text), AtWorld); }     // a refusal, when there is one
         void Note(std::string Text, ImVec2 AtWorld) noexcept { m_NoteText = std::move(Text); m_NoteAt = AtWorld; m_NoteUntil = ImGui::GetTime() + 3.0; }
         void DrawNote(ImDrawList* D, ImVec2 AtWorld, const std::string& S) const noexcept           // a refusal, flat, at the drop
         {
@@ -1191,12 +1435,20 @@ namespace xmaterial_editor
             const float mx = (a.x + b.x) * 0.5f;
             const ImVec2 Path[] = { a, { mx, a.y }, { mx, b.y }, b };
             D->AddPolyline(Path, 4, C, 0, stack_style::LIT_W);
+            DrawFan(D);
             if (const auto* pTo = PinAt(b); pTo && pTo->second.m_bOut != From.m_bOut)
             {
-                const auto Why = WhyNot(From.m_bOut ? m_DragPin : pTo->first, From.m_bOut ? pTo->first : m_DragPin);
-                if (!Why.empty()) DrawNote(D, ToWorld(b), Why);
-                else D->AddCircle(b, Len(stack_style::PIN_R) + 3, stack_style::Selected, 0, 2.0f);
+                const std::uint64_t Out = From.m_bOut ? m_DragPin : pTo->first, In = From.m_bOut ? pTo->first : m_DragPin;
+                const auto Why = WhyNot(Out, In);
+                if (Why.empty()) D->AddCircle(b, Len(stack_style::PIN_R) + 3, stack_style::Selected, 0, 2.0f);
+                else if (OffersComponents(Out, In))
+                {
+                    D->AddCircle(b, Len(stack_style::PIN_R) + 3, stack_style::Component, 0, 2.0f);
+                    if (!m_Fan) stack_style::Banner(D, m_pFont, m_FontSize, { b.x, b.y + 14 }, "release: pick components");
+                }
+                else DrawNote(D, ToWorld(b), Why);
             }
+            else if (const int k = FanAt(b); k >= 0) D->AddCircle(FanSlot(k), 12, stack_style::Selected, 0, 2.0f);
         }
 
         //------------------------------------------------------------------------------------------
@@ -1217,7 +1469,34 @@ namespace xmaterial_editor
             std::string                     m_Label;
             std::uint64_t                   m_Prefab = 0, m_Source = 0;     // a new step of a type, or an existing output (or sub-element)
             std::vector<std::pair<int,int>> m_Ports;                        // the new step's (input, output) that fit; -1 = none needed
+            std::uint64_t                   m_Subgraph = 0;                 // a group node of this sub-graph (m_Prefab: the Group type)
+            std::shared_ptr<const node>     m_pType;                        // its pins: the sub-graph's interface
         };
+
+        // The step type an entry makes: a node type, or a group node with its sub-graph's pins
+        const node* TypeOf(const entry& E) const noexcept
+        {
+            if (E.m_pType) return E.m_pType.get();
+            auto It = m_Doc.m_Graph.m_PrefabNodes.find(xmaterial_graph::node_guid{ E.m_Prefab });
+            return It == m_Doc.m_Graph.m_PrefabNodes.end() ? nullptr : It->second.get();
+        }
+
+        // The sub-graphs a group node here can call, as step types with their interfaces (read once per search: a file each). A sub-graph never
+        // offers itself or one that uses it.
+        void ReadSubgraphTypes() noexcept
+        {
+            m_SubgraphTypes.clear();
+            const auto Self = m_Doc.m_Graph.m_bSubgraph ? m_Doc.m_Guid.m_Instance.m_Value : 0;
+            for (auto& S : cmds::ListSubgraphs())
+            {
+                xmaterial_graph::graph Sub;
+                if (S.m_Guid == Self || !xmaterial_graph::LoadSubgraph(Sub, S.m_Path) || (Self && xmaterial_graph::UsesSubgraph(Sub, Self, cmds::SubgraphPath))) continue;
+                auto T = std::make_shared<node>(*m_Doc.m_Graph.m_PrefabNodes.at(xmaterial_graph::group_call_prefab_v));
+                T->m_Name = S.m_Name;
+                xmaterial_graph::CallPins(m_Doc.m_Graph, *T, Sub);          // the prefab's id as the group's: no instance pin matches, nothing is touched
+                m_SubgraphTypes.push_back({ S.m_Guid, std::move(T) });
+            }
+        }
 
         void OpenSearch(search::kind K, ImVec2 AtWorld, std::uint64_t Pin, std::uint64_t Connection = 0) noexcept
         {
@@ -1228,6 +1507,7 @@ namespace xmaterial_editor
             m_Picked.reset();
             m_HoverEntry = m_HoverPort = -1;
             m_Open = "##Search";
+            ReadSubgraphTypes();
         }
 
         bool FeedsAnInput() const noexcept { return m_Search.m_Kind == search::kind::FROM_INPUT || m_Search.m_Kind == search::kind::REPLACE_ALL; }
@@ -1288,12 +1568,14 @@ namespace xmaterial_editor
 
             // New steps of the types that fit, by name
             std::vector<const node*> Types;
-            for (auto& [Guid, pN] : G.m_PrefabNodes) if (!pN->isCommentNode()) Types.push_back(pN.get());
+            for (auto& [Guid, pN] : G.m_PrefabNodes) if (!pN->isCommentNode() && !pN->isGroupCallNode() && xmaterial_graph::IsAllowedIn(G, *pN)) Types.push_back(pN.get());     // a group node: one entry per sub-graph (below)
             std::sort(Types.begin(), Types.end(), [](auto* a, auto* b) { return a->m_Name < b->m_Name; });
+            if (m_Search.m_Kind != k::INSERT) for (auto& [Sub, pT] : m_SubgraphTypes) Types.push_back(pT.get());          // InsertOnConnection makes a type's step: not a group's
             for (auto* pT : Types)
             {
                 if (!Keep(pT->m_Name)) continue;
                 entry E{ pT->m_Name, pT->m_Guid.m_Value, 0, {} };
+                for (auto& [Sub, pS] : m_SubgraphTypes) if (pS.get() == pT) { E.m_Subgraph = Sub; E.m_pType = pS; E.m_Label += "  (sub-graph)"; }
                 const int nI = static_cast<int>(pT->m_InputPins.size()), nO = static_cast<int>(pT->m_OutputPins.size());
                 switch (m_Search.m_Kind)
                 {
@@ -1328,9 +1610,9 @@ namespace xmaterial_editor
                 if (!xeditor::RunGroup(m_Undo, "Replace source", Cmds)) Note("not connected", m_Search.m_At);
                 return;
             }
-            auto Type = G.m_PrefabNodes.find(xmaterial_graph::node_guid{ E.m_Prefab });
-            if (Type == G.m_PrefabNodes.end()) return;
-            const auto& T = *Type->second;
+            const auto* pType = TypeOf(E);
+            if (!pType) return;
+            const auto& T = *pType;
             const std::uint64_t Node = Id();
             auto PortName = [&](bool bOut, int i) { return xeditor::Quote(bOut ? T.m_OutputPins[i].m_Name : T.m_InputPins[i].m_Name); };
             if (m_Search.m_Kind == k::INSERT)
@@ -1357,6 +1639,7 @@ namespace xmaterial_editor
                 if (pFirst && InUserSection(pFirst->m_Guid.m_Value)) Place = std::format(" -Before {:016X}", pFirst->m_Guid.m_Value);
             }
             std::vector<std::string> Cmds{ std::format("CreateNode -Prefab {:016X} -Node {:016X} -Name {}{}", E.m_Prefab, Node, Name, Place) };
+            if (E.m_Subgraph) Cmds.push_back(std::format("SetSubgraph -Node {:016X} -Subgraph {:016X}", Node, E.m_Subgraph));     // a group node: its pins, before anything connects to them
             if (m_Search.m_Kind == k::FROM_OUTPUT)
                 Cmds.push_back(std::format("Connect -Output {:016X} -Input {} -Connection {:016X}", m_Search.m_Pin, xeditor::Quote("@" + Name + "." + T.m_InputPins[Port.first].m_Name), Id()));
             else for (auto In : Want)
@@ -1373,9 +1656,9 @@ namespace xmaterial_editor
             if (m_Search.m_Kind == k::NONE) return;
             const entry* pE = m_Picked ? &*m_Picked : m_HoverEntry >= 0 && m_HoverEntry < static_cast<int>(m_Entries.size()) ? &m_Entries[m_HoverEntry] : nullptr;
             if (!pE || !pE->m_Prefab) return;
-            auto Type = m_Doc.m_Graph.m_PrefabNodes.find(xmaterial_graph::node_guid{ pE->m_Prefab });
-            if (Type == m_Doc.m_Graph.m_PrefabNodes.end()) return;
-            const auto& T = *Type->second;
+            const auto* pType = TypeOf(*pE);
+            if (!pType) return;
+            const auto& T = *pType;
             const auto Port = pE->m_Ports[m_Picked && m_HoverPort >= 0 && m_HoverPort < static_cast<int>(pE->m_Ports.size()) ? m_HoverPort : 0];
 
             float InW = 0, OutW = 0;
@@ -1460,15 +1743,15 @@ namespace xmaterial_editor
 
             if (m_Picked)                                                               // the port chooser: several ports fit, the person picks one
             {
-                auto Type = m_Doc.m_Graph.m_PrefabNodes.find(xmaterial_graph::node_guid{ m_Picked->m_Prefab });
-                if (Type == m_Doc.m_Graph.m_PrefabNodes.end()) { m_Picked.reset(); ImGui::EndPopup(); return; }
+                const auto* pType = TypeOf(*m_Picked);
+                if (!pType) { m_Picked.reset(); ImGui::EndPopup(); return; }
                 const int Side = Varies(m_Picked->m_Ports);
                 ImGui::TextUnformatted(std::format("Which {} of {}?", Side == 3 ? "input and output" : Side == 1 ? "input" : "output", m_Picked->m_Label).c_str());
                 m_HoverPort = -1;
                 for (int i = 0; i < static_cast<int>(m_Picked->m_Ports.size()); ++i)
                 {
                     ImGui::PushID(i);
-                    if (ImGui::Selectable(PortLabel(*Type->second, Side, m_Picked->m_Ports[i]).c_str())) { Commit(*m_Picked, m_Picked->m_Ports[i]); ImGui::CloseCurrentPopup(); }
+                    if (ImGui::Selectable(PortLabel(*pType, Side, m_Picked->m_Ports[i]).c_str())) { Commit(*m_Picked, m_Picked->m_Ports[i]); ImGui::CloseCurrentPopup(); }
                     if (ImGui::IsItemHovered()) m_HoverPort = i;
                     ImGui::PopID();
                 }
@@ -1536,6 +1819,14 @@ namespace xmaterial_editor
                     const auto Block = Closure(Sel);
                     if (ImGui::MenuItem(std::format("Collapse {} step{}", Block.size(), Block.size() == 1 ? "" : "s").c_str(), "Ctrl+click adds")) Collapse(Sel);
                     if (ImGui::IsItemHovered()) m_GroupHintNext = Block;                // the steps it would take, outlined
+                    if (ImGui::MenuItem(std::format("Make sub-graph of {} step{}...", Block.size(), Block.size() == 1 ? "" : "s").c_str(), "Ctrl+G")) AskSubgraphName();
+                    if (ImGui::IsItemHovered()) m_GroupHintNext = Block;
+                    if (pN->isGroupCallNode())
+                    {
+                        ImGui::Separator();
+                        if (ImGui::MenuItem("Go into the sub-graph", "Tab")) NoteIf(cmds::EnterGroup(m_Doc, pN->m_Guid.m_Value), ToWorld(ImGui::GetIO().MousePos));
+                        if (ImGui::MenuItem("Ungroup (its steps here)")) if (!xeditor::RunGroup(m_Undo, "Ungroup", { std::format("UngroupStep -Node {:016X}", pN->m_Guid.m_Value) })) Note("not ungrouped", ToWorld(ImGui::GetIO().MousePos));
+                    }
                 }
                 if (pBox && ImGui::MenuItem("Expand")) Expand(pBox->m_Guid.m_Value);
                 ImGui::EndPopup();
@@ -1550,6 +1841,8 @@ namespace xmaterial_editor
                     ImGui::Separator();
                     if (ImGui::MenuItem("Go to source", "Enter")) GoToSource(Id);
                     if (ImGui::MenuItem("Find all uses"))       { m_UsesOf = c->m_OutputPinGuid.m_Value; m_Open = "##Uses"; }
+                    if (HasComponents(c->m_OutputPinGuid.m_Value) && ImGui::MenuItem("Components...", "."))
+                        OpenComponents(c->m_OutputPinGuid.m_Value, c->m_InputPinGuid.m_Value, Id, ImGui::GetIO().MousePos);
                     if (ImGui::MenuItem("Replace source..."))   if (auto P = m_PinAt.find(c->m_InputPinGuid.m_Value); P != m_PinAt.end()) OpenSearch(search::kind::FROM_INPUT, { P->second.m_W.x - 48, P->second.m_W.y }, P->first);
                     if (ImGui::MenuItem("Disconnect", "Del"))   Disconnect(Id);
                 }
@@ -1597,7 +1890,57 @@ namespace xmaterial_editor
                 ImGui::EndPopup();
             }
 
+            if (ImGui::BeginPopup("##MakeSubgraph"))                                 // Make sub-graph: its name, then one undo step here
+            {
+                ImGui::TextDisabled("New sub-graph of %d step%s", static_cast<int>(m_MakeSteps.size()), m_MakeSteps.size() == 1 ? "" : "s");
+                if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+                ImGui::SetNextItemWidth(240);
+                const bool bEnter = ImGui::InputText("##Name", m_MakeName, sizeof(m_MakeName), ImGuiInputTextFlags_EnterReturnsTrue);
+                if ((bEnter || ImGui::Button("Make")) && m_MakeName[0])
+                {
+                    std::string Ids;
+                    for (auto S : m_MakeSteps) Ids += std::format("{}{:016X}", Ids.empty() ? "" : ",", S);
+                    const bool bMade = xeditor::RunGroup(m_Undo, "Make sub-graph", { std::format("MakeSubgraph -Nodes {} -Name {} -Subgraph {:016X} -Node {:016X}", Ids, xeditor::Quote(m_MakeName), xresource::guid_generator::Instance64(), xresource::guid_generator::Type64()) });
+                    if (!bMade) Note("the sub-graph was not made (see the log)", m_MenuAt);
+                    m_Group.clear();
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
+            }
+
             DrawSearch();
+            DrawComponents();
+        }
+
+        // Make sub-graph (subgraphs_plan.md 2.9): the steps of the selection closed over its paths, then their name
+        void AskSubgraphName() noexcept
+        {
+            m_MakeSteps = Closure(Selection());
+            if (m_MakeSteps.empty()) return;
+            const auto* pFirst = m_Doc.FindNode(m_MakeSteps.front());
+            std::snprintf(m_MakeName, sizeof(m_MakeName), "%s Group", pFirst ? cmds::StepLabel(*pFirst).c_str() : "New");
+            m_MenuAt = ToWorld(ImGui::GetIO().MousePos);
+            m_Open = "##MakeSubgraph";
+        }
+
+        // A sub-graph entered from a group: the graphs above it, each a way back (Tab goes to the last)
+        void DrawBreadcrumb() noexcept
+        {
+            auto It = cmds::GroupTrails().find(m_Doc.m_Guid.m_Instance.m_Value);
+            if (It == cmds::GroupTrails().end() || It->second.empty()) return;
+            const ImVec2 Keep = ImGui::GetCursorScreenPos();
+            ImGui::SetCursorScreenPos({ ImGui::GetWindowPos().x + 8, ImGui::GetWindowPos().y + ImGui::GetWindowHeight() - ImGui::GetFrameHeight() - 6 });     // bottom left: the layout starts at the top
+            const int n = static_cast<int>(It->second.size());
+            for (int i = 0; i < n; ++i)
+            {
+                ImGui::PushID(i);
+                if (ImGui::SmallButton(It->second[i].m_Name.c_str())) NoteIf(cmds::ExitGroup(m_Doc, n - i), m_MenuAt);
+                if (ImGui::IsItemHovered()) xeditor::hint::Text(i == n - 1 ? "Back to the graph this one was entered from (Tab)" : "Back to this graph");
+                ImGui::PopID();
+                ImGui::SameLine(); ImGui::TextDisabled(">"); ImGui::SameLine();
+            }
+            ImGui::TextUnformatted(m_Doc.getDisplayName().c_str());
+            ImGui::SetCursorScreenPos(Keep);
         }
 
         graph_document&                             m_Doc;
@@ -1641,6 +1984,9 @@ namespace xmaterial_editor
         search                                      m_Search;
         std::vector<entry>                          m_Entries;          // what the search offers, last frame
         std::optional<entry>                        m_Picked;           // a pick waiting for its port
+        std::vector<std::pair<std::uint64_t, std::shared_ptr<const node>>> m_SubgraphTypes;    // the sub-graphs the search offers (ReadSubgraphTypes)
+        std::vector<std::uint64_t>                  m_MakeSteps;        // what Make sub-graph takes
+        char                                        m_MakeName[96] = {};
         int                                         m_HoverEntry = -1, m_HoverPort = -1;
         std::vector<std::uint64_t>                  m_Group;            // steps added to the selection with Ctrl+click
         std::vector<std::uint64_t>                  m_GroupHint, m_GroupHintNext;     // what the menu's Collapse would take (hovered)
@@ -1650,6 +1996,16 @@ namespace xmaterial_editor
         std::uint64_t                               m_PreviewPin = 0;   // the output previewed on the mesh (0: the material)
         std::string                                 m_PreviewStatus;
         bool                                        m_bPreviews = true; // in-node previews shown (T, the background menu)
+    public:
+        struct rendered { const void* m_pTexture = nullptr; ImVec2 m_UV0, m_UV1; std::string m_Why; };
+        std::function<bool(const node&)>            m_Renders;          // the session's rendered previews (none headless): whether a step shows one
+        std::function<rendered(const node&)>        m_Rendered;         //   and its picture (none yet) or why it has none
+    private:
+        std::unordered_map<std::uint64_t, ImVec2>   m_SuffixAt;         // connection guid -> its chip's component suffix centre on screen, last frame
+        std::unordered_map<std::uint64_t, ImVec2>   m_ArrowAt;          // output pin guid -> its open arrow's centre on screen, last frame
+        std::uint64_t                               m_Fan = 0;          // while an input is dragged: the vector output whose components fan out
+        struct components { std::uint64_t m_Out = 0, m_In = 0, m_Conn = 0; ImVec2 m_At = {}; char m_Text[8] = {}; bool m_bFocus = true; };
+        components                                  m_Comp;             // the component picker: whole output, input, connection (0: to make)
     };
 
     namespace cmds

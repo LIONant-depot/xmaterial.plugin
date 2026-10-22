@@ -477,7 +477,7 @@ namespace xmaterial_editor
             if (ImGui::BeginPopup("CreateNodePopup"))
             {
                 for (auto& [PrefabId, pPrefab] : G.m_PrefabNodes)
-                    if (ImGui::MenuItem(pPrefab->m_Name.c_str()))
+                    if (xmaterial_graph::IsAllowedIn(G, *pPrefab) && ImGui::MenuItem(pPrefab->m_Name.c_str()))
                         xeditor::Run(m_Undo, std::format("CreateNode -Prefab {:016X} -Node {:016X} -X {:.3f} -Y {:.3f}", PrefabId.m_Value, xresource::guid_generator::Type64(), m_MenuCanvasPos.x, m_MenuCanvasPos.y));
                 ImGui::EndPopup();
             }

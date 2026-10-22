@@ -4,6 +4,8 @@
 #include <fstream>
 #include <numeric>  // std::iota
 #include <filesystem>
+#include <thread>
+#include <chrono>
 #include <dependencies/xstrtool/source/xstrtool.h>
 
 #ifdef EDITOR
@@ -261,8 +263,14 @@ namespace xmaterial_graph
         xtextfile::stream TextFile;
         xproperty::settings::context Context;
         
-        if (auto Err = TextFile.Open(isReading, filepath
-            , xtextfile::file_type::TEXT, xtextfile::flags{ .m_isWriteFloats = true }); Err)
+        // The project's file watcher briefly opens what was just written (an undo snapshot, a saved descriptor): try again for a while
+        xerr OpenErr;
+        for (int Try = 0; Try < 40; ++Try)
+        {
+            if (!(OpenErr = TextFile.Open(isReading, filepath, xtextfile::file_type::TEXT, xtextfile::flags{ .m_isWriteFloats = true }))) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(25));
+        }
+        if (OpenErr)
         {
             assert(false);
         }
@@ -1020,6 +1028,69 @@ namespace xmaterial_graph
             g.CompletePrefab(finaloutputprefabs);
         }
 
+        // Output: PBR - the renderer's lit shading (xLIONRender mb_standard_pbr.frag PBRLighting: the scene's lights, shadows, GI and probes
+        // in the HDR variant; the LDR one tone maps for the editors). Albedo and Emissive linear; Normal tangent space (Normal Map decodes one).
+        // An unconnected Normal or Emissive takes its m_DefaultExpr; the floats are parameters (Roughness can be exposed like any float).
+        {
+            auto& PBR = g.CreatePrefabNode(node_guid{ xresource::type_guid{"pbroutprefabs"}.m_Value });
+            PBR.m_Name = "Output: PBR";
+            PBR.m_Code = "[TOP]<!#ifdef XLION_LDR_OUTPUT\n#define XLION_NO_SHADOW_MAP\n#endif\n"
+                         "#include \"Cache/dependencies/xLIONRender/src/shaders/mb_standard_pbr.frag\"\n"
+                         "#include \"Cache/dependencies/xLIONRender/src/shaders/mb_tone_mapper_lion.frag\"\n"
+                         "#include \"Cache/dependencies/xLIONRender/src/shaders/mb_lineartogamma.frag\"\n"
+                         "layout (location = 0) out vec4 outFragColor;\n!> "
+                         "[BOT]<!vec3 $var = PBRLighting($input[3], $input[0], $input[4]_prop[2], 0.04, $input[1]_prop[0], $input[2]_prop[1], $input[5]);\n"
+                         "#ifdef XLION_LDR_OUTPUT\n$var = linearToSrgb(ToneMapper_lion($var));\n#endif\n"
+                         "outFragColor = vec4($var, $input[6]_prop[3]);\n!>";
+
+            PBR.m_InputPins.resize(7);
+            PBR.m_InputPins[0].m_Name           = "Albedo(3)";
+            PBR.m_InputPins[0].m_TypeGUID       = typeVec3.m_GUID;
+            PBR.m_InputPins[1].m_Name           = "Roughness(1)";
+            PBR.m_InputPins[1].m_TypeGUID       = typeFloat.m_GUID;
+            PBR.m_InputPins[1].m_ParamIndex     = static_cast<int>(PBR.m_Params.size());
+            PBR.m_Params.emplace_back( "roughness", 0.5f );
+            PBR.m_InputPins[2].m_Name           = "Metallic(1)";
+            PBR.m_InputPins[2].m_TypeGUID       = typeFloat.m_GUID;
+            PBR.m_InputPins[2].m_ParamIndex     = static_cast<int>(PBR.m_Params.size());
+            PBR.m_Params.emplace_back( "metallic", 0.0f );
+            PBR.m_InputPins[3].m_Name           = "Normal(3)";
+            PBR.m_InputPins[3].m_TypeGUID       = typeVec3.m_GUID;
+            PBR.m_InputPins[3].m_DefaultExpr    = "vec3(0.0, 0.0, 1.0)";
+            PBR.m_InputPins[4].m_Name           = "AO(1)";
+            PBR.m_InputPins[4].m_TypeGUID       = typeFloat.m_GUID;
+            PBR.m_InputPins[4].m_ParamIndex     = static_cast<int>(PBR.m_Params.size());
+            PBR.m_Params.emplace_back( "ao", 1.0f );
+            PBR.m_InputPins[5].m_Name           = "Emissive(3)";
+            PBR.m_InputPins[5].m_TypeGUID       = typeVec3.m_GUID;
+            PBR.m_InputPins[5].m_DefaultExpr    = "vec3(0.0)";
+            PBR.m_InputPins[6].m_Name           = "A(1)";
+            PBR.m_InputPins[6].m_TypeGUID       = typeFloat.m_GUID;
+            PBR.m_InputPins[6].m_ParamIndex     = static_cast<int>(PBR.m_Params.size());
+            PBR.m_Params.emplace_back( "a", 1.0f );
+
+            g.CompletePrefab(PBR);
+        }
+
+        // Normal Map: a BC5 tangent-space normal map's sample (xy in .gr, as mb_material_pbr.glsl reads it) for Output: PBR's Normal; Strength
+        // exaggerates the bumps (1 = as authored)
+        {
+            auto& NormalMap = g.CreatePrefabNode(node_guid{ xresource::type_guid{"NormalMapPrefabs"}.m_Value });
+            NormalMap.m_Name = "Normal Map";
+            NormalMap.m_Code = "vec3 $var = vec3($input[0].gr * 2.0 - 1.0, 0.0);\n$var.z = sqrt(max(1.0 - dot($var.xy, $var.xy), 0.0));\n$var = normalize(vec3($var.xy * $input[1]_prop[0], $var.z));\n";
+            NormalMap.m_InputPins.resize(2);
+            NormalMap.m_InputPins[0].m_Name         = "A(4)";
+            NormalMap.m_InputPins[0].m_TypeGUID     = typeVec4.m_GUID;
+            NormalMap.m_InputPins[1].m_Name         = "Strength(1)";
+            NormalMap.m_InputPins[1].m_TypeGUID     = typeFloat.m_GUID;
+            NormalMap.m_InputPins[1].m_ParamIndex   = static_cast<int>(NormalMap.m_Params.size());
+            NormalMap.m_Params.emplace_back( "strength", 1.0f );
+            NormalMap.m_OutputPins.resize(1);
+            NormalMap.m_OutputPins[0].m_Name        = "Normal";
+            NormalMap.m_OutputPins[0].m_TypeGUID    = typeVec3.m_GUID;
+            g.CompletePrefab(NormalMap);
+        }
+
         // Output: Shader File
         {
             auto& finaloutputprefabs = g.CreatePrefabNode(node_guid{ xresource::type_guid{"frag_shader"}.m_Value });
@@ -1196,7 +1267,7 @@ namespace xmaterial_graph
         {
             auto& vertexInput = g.CreatePrefabNode(node_guid{ xresource::type_guid{"vertexPrefabs"}.m_Value });
             vertexInput.m_Name = "Input: Vertex Variants";
-            vertexInput.m_Code = "[TOP]<!layout(location = 0) in struct { vec4 wSpacePosition; vec4 ShadowPosition; vec4 VertColor; vec4 Tangent; vec3 Normal; vec2 UV; } In;\n!>";
+            vertexInput.m_Code = "[TOP]<!layout(location = 0) in struct { vec4 wSpacePosition; vec4 ShadowPosition; vec4 VertColor; vec4 Tangent; vec3 Normal; vec2 UV; } In;\n#define XMAT_VARYING_IN\n!>";      // (Output: PBR's lighting then reads this In)
 
             vertexInput.m_OutputPins.resize(2);
             vertexInput.m_OutputPins[0].m_Name          = "Color(4)";                // linear (no vertex format carries a colour yet: white)
@@ -1312,6 +1383,22 @@ namespace xmaterial_graph
             groupWithComment.m_Params.emplace_back( "Size width", 10.f );
             groupWithComment.m_Params.emplace_back( "Size Height", 10.f );
             g.CompletePrefab(groupWithComment);
+        }
+
+        // A sub-graph's interface (subgraphs_plan.md 2.2): no pins of their own, every instance gets its pins from AddGroupPin
+        {
+            auto& GroupInput = g.CreatePrefabNode(group_input_prefab_v);
+            GroupInput.m_Name = "Group Input";
+            g.CompletePrefab(GroupInput);
+
+            auto& GroupOutput = g.CreatePrefabNode(group_output_prefab_v);
+            GroupOutput.m_Name = "Group Output";
+            g.CompletePrefab(GroupOutput);
+
+            auto& Call = g.CreatePrefabNode(group_call_prefab_v);              // a group node: its pins come from its sub-graph (SetSubgraph)
+            Call.m_Name = "Group";
+            Call.m_Params.emplace_back("Subgraph", node_param::type::SUBGRAPH_RESOURCE, xresource::full_guid{});
+            g.CompletePrefab(Call);
         }
     }
 }

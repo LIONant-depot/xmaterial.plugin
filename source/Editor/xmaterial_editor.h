@@ -8,6 +8,7 @@
 // Hosts include this header and open editors through xeditor::open_resource_editors.
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_graph_canvas.h"
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_stack_canvas.h"
+#include "plugins/xmaterial.plugin/source/Editor/xmaterial_subgraph_commands.h"
 #include "source/Tools/Editor/xeditor_mesh_preview.h"
 #include "source/Tools/Editor/xeditor_text_widget.h"
 #include "dependencies/xresource_pipeline_v2/source/editor/xresource_editor_resources.h"
@@ -15,10 +16,9 @@
 #include "plugins/xmaterial.plugin/source/xmaterial_runtime.h"
 #include "plugins/xmaterial.plugin/source/xmaterial_xgpu_rsc_loader.cpp"        // the resource loader: compiled once, in the host's translation unit
 
+#include "plugins/xmaterial.plugin/source/Editor/xmaterial_step_previews.h"
 #include "plugins/xmaterial.plugin/source/Graph/xmaterial_step_names.h"
 #include <algorithm>
-#include <atomic>
-#include <thread>
 
 namespace xmaterial_editor
 {
@@ -28,6 +28,7 @@ namespace xmaterial_editor
         cmds::delete_node_cmd           m_DeleteNode;
         cmds::connect_cmd               m_Connect;
         cmds::disconnect_cmd            m_Disconnect;
+        cmds::set_input_swizzle_cmd     m_SetInputSwizzle;
         cmds::set_shader_file_cmd       m_SetShaderFile;
         cmds::move_node_cmd             m_MoveNode;
         cmds::set_node_property_cmd     m_SetNodeProperty;
@@ -59,6 +60,17 @@ namespace xmaterial_editor
         cmds::route_info_cmd            m_RouteInfo;
         cmds::repack_routes_cmd         m_RepackRoutes;
         cmds::stack_self_test_cmd       m_StackSelfTest;
+        cmds::add_group_pin_cmd         m_AddGroupPin    { m_Undo, m_Document };      // a sub-graph's interface (subgraphs_plan.md 2.2)
+        cmds::remove_group_pin_cmd      m_RemoveGroupPin { m_Undo, m_Document };
+        cmds::rename_group_pin_cmd      m_RenameGroupPin { m_Undo, m_Document };
+        cmds::retype_group_pin_cmd      m_RetypeGroupPin { m_Undo, m_Document };
+        cmds::list_group_pins_cmd       m_ListGroupPins  { m_Undo, m_Document };
+        cmds::set_subgraph_cmd          m_SetSubgraph    { m_Undo, m_Document };      // group nodes (subgraphs_plan.md 2.3)
+        cmds::list_subgraphs_cmd        m_ListSubgraphs  { m_Undo };
+        cmds::ungroup_step_cmd          m_UngroupStep    { m_Undo, m_Document };
+        cmds::make_subgraph_cmd         m_MakeSubgraph   { m_Undo, m_Document };
+        cmds::enter_group_cmd           m_EnterGroup     { m_Undo, m_Document };
+        cmds::exit_group_cmd            m_ExitGroup      { m_Undo, m_Document };
 
         graph_canvas                    m_Canvas;
         stack_canvas                    m_StackCanvas;
@@ -72,16 +84,15 @@ namespace xmaterial_editor
         xeditor::mesh_preview_cmds      m_PreviewCmds;
         TextEditor                      m_Shader;
         xrsc::material_ref              m_MaterialRef;
-        std::uint64_t                   m_PreviewPin = 0, m_PreviewGuid = 0;     // the output on the mesh instead of the material, its temporary resource
-        xrsc::material_ref              m_PreviewRef;
-        std::thread                     m_PreviewThread;                         // its compile
-        std::atomic<bool>               m_bPreviewDone = false;
-        std::shared_ptr<xresource_editor::compilation::historical_entry::log> m_PreviewLog;
+        std::uint64_t                   m_PreviewPin = 0;                        // the output on the mesh instead of the material
+        preview_compile                 m_PreviewJob;                            // its temporary copy
+        step_previews                   m_StepPreviews;                          // the outputs rendered in the steps
+        cmds::step_previews_cmd         m_StepPreviewsCmd;
 
         session(xresource::full_guid Guid, xresource_editor::library::guid LibraryGuid, xgpu::device* pDevice) noexcept
-            : document_editor("Material", Guid, LibraryGuid, pDevice)
+            : document_editor(Guid.m_Type == xmaterial_graph::subgraph_type_guid_v ? "Material Subgraph" : "Material", Guid, LibraryGuid, pDevice)
             , m_PreviewCmds(m_Undo, m_Preview)
-            , m_CreateNode(m_Undo, m_Document), m_DeleteNode(m_Undo, m_Document), m_Connect(m_Undo, m_Document), m_Disconnect(m_Undo, m_Document)
+            , m_CreateNode(m_Undo, m_Document), m_DeleteNode(m_Undo, m_Document), m_Connect(m_Undo, m_Document), m_Disconnect(m_Undo, m_Document), m_SetInputSwizzle(m_Undo, m_Document)
             , m_SetShaderFile(m_Undo, m_Document), m_MoveNode(m_Undo, m_Document), m_SetNodeProperty(m_Undo, m_Document)
             , m_ListNodeTypes(m_Undo, m_Document), m_ListNodes(m_Undo, m_Document), m_NodeProperties(m_Undo, m_Document)
             , m_PlaceSteps(m_Undo, m_Document), m_RenameStep(m_Undo, m_Document), m_CreateSection(m_Undo, m_Document), m_RenameSection(m_Undo, m_Document)
@@ -94,20 +105,35 @@ namespace xmaterial_editor
             , m_RepackRoutes(m_Undo, m_StackView), m_StackSelfTest(m_Undo)
             , m_Canvas(m_Document, m_Undo), m_StackCanvas(m_Document, m_Undo, m_StackView)
             , m_SelectStep(m_Undo, m_Document, m_StackCanvas), m_TraceRoute(m_Undo, m_Document, m_StackCanvas), m_PreviewStep(m_Undo, m_Document, m_StackCanvas)
+            , m_StepPreviewsCmd(m_Undo, m_StepPreviews)
         {
             xresource_editor::WireResourcePickerCallbacks(m_NodeInspector.m_Inspector);
             m_Shader.SetLanguageDefinition(TextEditor::LanguageDefinition::GLSL());
             m_Shader.SetImGuiChildIgnored(true);                // it draws in its panel's window
             m_Shader.SetReadOnly(true);                         // a view of the shader the graph makes (or of the node's shader file)
 
-            AddPanel("Mesh Preview",    dock::left,        [this] { UpdateStepPreview(); m_Preview.Render(); DrawPreviewBanner(); });
+            const bool bMaterial = Guid.m_Type != xmaterial_graph::subgraph_type_guid_v;     // a sub-graph compiles to no shader: no mesh, no shader text, no step renders; only the stack
+            if (bMaterial) AddPanel("Mesh Preview",    dock::left,        [this] { UpdateStepPreview(); m_Preview.Render(); DrawPreviewBanner(); });
             AddPanel("Node Properties", dock::left_bottom, [this] { RenderNodeProperties(); });
-            AddPanel("Material Graph",  dock::center,      [this] { m_Canvas.Render(); });       // ponytail: still editable until the stack canvas edits everything (stack_canvas.md task 12)
-            AddPanel("Material Stack",  dock::center,      [this] { m_StackCanvas.Render(); }, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);   // after the graph: it joins the graph's dock as a tab
-            AddPanel("Shader",          dock::bottom,      [this] { m_Shader.Render("Shader", ImVec2(0, 0), true, [] {}); }, ImGuiWindowFlags_HorizontalScrollbar);
+            if (bMaterial) AddPanel("Material Graph",  dock::center,      [this] { m_Canvas.Render(); });       // ponytail: still editable until the stack canvas edits everything (stack_canvas.md task 12)
+            AddPanel("Material Stack",  dock::center,      [this] { m_StepPreviews.Update(m_Document); m_StackCanvas.Render(); }, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);   // after the graph: it joins the graph's dock as a tab
+            if (bMaterial) AddPanel("Shader",          dock::bottom,      [this] { m_Shader.Render("Shader", ImVec2(0, 0), true, [] {}); }, ImGuiWindowFlags_HorizontalScrollbar);
 
             LoadShaderText(false);
-            if (pDevice && m_Preview.Init(*pDevice) && std::filesystem::exists(m_Document.m_ResourcePath)) ReloadPreview();
+            m_Document.m_OnRead = [](xmaterial_graph::graph& G) { cmds::RefreshGroupNodes(G); };    // group nodes follow their sub-graphs' interfaces
+            cmds::RefreshGroupNodes(m_Document.m_Graph);                                            // (the document was read before this hook existed)
+            if (pDevice && bMaterial && m_Preview.Init(*pDevice) && std::filesystem::exists(m_Document.m_ResourcePath)) ReloadPreview();
+            if (pDevice && bMaterial && m_StepPreviews.Init(*pDevice))
+            {
+                m_StackCanvas.m_Renders  = [this](const xmaterial_graph::node& N) { return m_StepPreviews.Shows(m_Document.m_Graph, N); };
+                m_StackCanvas.m_Rendered = [this](const xmaterial_graph::node& N)
+                {
+                    stack_canvas::rendered R;
+                    const auto P = m_StepPreviews.Picture(m_Document.m_Graph, N, R.m_Why);
+                    R.m_pTexture = P.m_pTexture; R.m_UV0 = P.m_UV0; R.m_UV1 = P.m_UV1;
+                    return R;
+                };
+            }
         }
 
         ~session() noexcept override { StopStepPreview(); xresource::g_Mgr.ReleaseRef(m_MaterialRef); }
@@ -197,6 +223,7 @@ namespace xmaterial_editor
         void ReloadPreview() noexcept
         {
             xresource::g_Mgr.ReleaseRef(m_MaterialRef);
+            if (m_Document.m_Graph.m_bSubgraph) return;
             m_MaterialRef.m_Instance = m_Document.m_Guid.m_Instance;
             if (!ShowMaterial(m_MaterialRef)) m_Preview.ClearMaterial();
         }
@@ -220,9 +247,7 @@ namespace xmaterial_editor
 
         //------------------------------------------------------------------------------------------
         // One intermediate preview (stack_canvas.md 10.4): P on the stack canvas (or PreviewStep) asks for an output; a copy of the graph whose
-        // output colour takes it is compiled by the material compiler as a temporary resource with its descriptor in Cache\Descriptors (where
-        // the pipeline keeps generated descriptors) and shown on the mesh. The asset, its descriptor, its compiled resource and the library
-        // are never touched; the temporary files go when the preview ends. Esc (canvas or Mesh Preview) returns to the material.
+        // output colour takes it (preview_compile) is shown on the mesh. Esc (canvas or Mesh Preview) returns to the material.
         //------------------------------------------------------------------------------------------
         void UpdateStepPreview() noexcept
         {
@@ -232,110 +257,18 @@ namespace xmaterial_editor
                 StopStepPreview();
                 m_PreviewPin = Want;
                 if (!Want) return;
-                const auto Err = StartStepPreview(Want);
+                const auto Err = m_PreviewJob.Start(m_Document, Want);
                 m_StackCanvas.PreviewStatus(Err.empty() ? "compiling..." : Err);
             }
-            if (!m_PreviewThread.joinable() || !m_bPreviewDone) return;
-            m_PreviewThread.join();
-            std::string Log; bool bOk;
-            {
-                xcontainer::lock::scope Lock(*m_PreviewLog);
-                Log = m_PreviewLog->get().m_Log;
-                bOk = m_PreviewLog->get().m_Result == xresource_editor::compilation::historical_entry::result::SUCCESS || m_PreviewLog->get().m_Result == xresource_editor::compilation::historical_entry::result::SUCCESS_WARNINGS;
-            }
-            if (bOk && ShowMaterial(m_PreviewRef)) { m_StackCanvas.PreviewStatus({}); return; }
-            const auto At = Log.find("ERROR");                                 // the compiler's first complaint says why
-            m_StackCanvas.PreviewStatus(At == std::string::npos ? std::string("the preview did not compile") : Log.substr(At, std::min<std::size_t>(Log.find('\n', At) - At, 120)));
+            const auto R = m_PreviewJob.Poll();
+            if (!R) return;
+            if (R->empty() && ShowMaterial(m_PreviewJob.m_Ref)) { m_StackCanvas.PreviewStatus({}); return; }
+            m_StackCanvas.PreviewStatus(R->empty() ? std::string("the preview did not load") : *R);
         }
 
-        // "" or why not. The copy: Output's colour input fed by the output (a float splats; another type through a conversion step that takes it).
-        std::string StartStepPreview(std::uint64_t Pin) noexcept
-        {
-            using namespace xmaterial_graph;
-            auto& LM = xresource_editor::g_LibMgr;
-            auto* pPlugin = LM.m_AssetPluginsDB.find(xrsc::material_type_guid_v);
-            if (!pPlugin) return "no material compiler";
-            std::wstring Exe;
-            {
-                std::scoped_lock Lk(LM.m_Compilation.m_Settings.m_Mutex);
-                Exe = (LM.m_Compilation.m_Settings.m_bUseDebugCompiler && !pPlugin->m_DebugCompiler.empty()) || pPlugin->m_ReleaseCompiler.empty() ? pPlugin->m_DebugCompiler : pPlugin->m_ReleaseCompiler;
-            }
-            if (Exe.empty()) return "no material compiler";
-            Exe = std::filesystem::path(std::format(L"{}\\{}", LM.m_ProjectPath, Exe)).lexically_normal().wstring();
-
-            const std::uint64_t G = xresource::guid_generator::Instance64();
-            const std::wstring  Rel = std::format(L"Cache\\Descriptors\\Material\\{:02X}\\{:02X}\\{:X}.desc", G & 0xff, (G >> 8) & 0xff, G);
-            const std::wstring  Dir = std::format(L"{}\\{}", LM.m_ProjectPath, Rel);
-            std::error_code Ec;
-            std::filesystem::create_directories(Dir, Ec);
-            const std::wstring File = Dir + L"\\Descriptor.txt";
-            if (Ec || !m_Document.WriteToFile(File)) return "could not write the preview's descriptor";
-            m_PreviewGuid = G;
-
-            graph Copy;
-            Copy.CreateGraph(Copy);
-            Copy.serialize(Copy, true, File);
-            auto* pSrc = Copy.findNodeByPin(pin_guid{ Pin });
-            bool bIn; int i, Sub;
-            const pin* pOut = pSrc ? Copy.findPinConst(*pSrc, pin_guid{ Pin }, bIn, i, Sub) : nullptr;
-            node* pFinal = nullptr; int iColor = -1;
-            for (auto& [Id, pN] : Copy.m_InstanceNodes)
-                if (pN->isOutputNode())
-                    for (int k = 0; k < static_cast<int>(pN->m_InputPins.size()) && iColor < 0; ++k)
-                        if (auto* t = Copy.findType(pN->m_InputPins[k].m_TypeGUID); t && t->m_CodeString.starts_with("vec")) { pFinal = pN.get(); iColor = k; }
-            if (!pOut || !pFinal) return "nothing to preview";
-            const auto Color = pFinal->m_InputPins[iColor];
-            const auto* tOut = Copy.findType(pOut->m_TypeGUID);
-            const auto* tIn  = Copy.findType(Color.m_TypeGUID);
-            if (!tOut || !tIn) return "nothing to preview";
-            if (Color.m_ConnectionGUID.m_Value) Copy.RemoveConnection(Color.m_ConnectionGUID);
-            std::uint64_t Feed = Pin;
-            if (tOut->m_CodeString != tIn->m_CodeString && tOut->m_CodeString != "float")     // by GLSL type: a Color is a vec4 as a Vector4 is
-            {
-                const node* pConv = nullptr;                                        // e.g. Vec4 To Vec3
-                auto SameGlsl = [&](xmaterial_graph::type_guid a, xmaterial_graph::type_guid b) { auto *ta = Copy.findType(a), *tb = Copy.findType(b); return ta && tb && ta->m_CodeString == tb->m_CodeString; };
-                for (auto& [Id, pT] : Copy.m_PrefabNodes)
-                    if (!pT->isInputNode() && !pT->isOutputNode() && pT->m_InputPins.size() == 1 && !pT->m_OutputPins.empty()
-                        && SameGlsl(pT->m_InputPins[0].m_TypeGUID, pOut->m_TypeGUID) && SameGlsl(pT->m_OutputPins[0].m_TypeGUID, Color.m_TypeGUID)) { pConv = pT.get(); break; }
-                if (!pConv) return std::format("a {} cannot show on the mesh", tOut->m_Name);
-                auto& Conv = Copy.CreateNode(pConv->m_Guid);
-                cmds::MakeLink(Copy, xresource::guid_generator::Type64(), pin_guid{ Pin }, Conv.m_InputPins[0].m_PinGUID);
-                Feed = Conv.m_OutputPins[0].m_PinGUID.m_Value;
-            }
-            cmds::MakeLink(Copy, xresource::guid_generator::Type64(), pin_guid{ Feed }, Color.m_PinGUID);
-            Copy.serialize(Copy, false, File);
-
-            const std::wstring Cmd = std::format(LR"("{}" -PROJECT "{}" -OPTIMIZATION {} -DEBUG {} -DESCRIPTOR "{}" -OUTPUT "{}\Cache\Resources\Platforms\WINDOWS")"
-                , Exe, LM.m_ProjectPath, LM.m_Compilation.m_Settings.getOptimizationLevelString(), LM.m_Compilation.m_Settings.getDebugLevelString(), Rel, LM.m_ProjectPath);
-            m_PreviewLog   = std::make_shared<xresource_editor::compilation::historical_entry::log>();
-            m_bPreviewDone = false;
-            m_PreviewThread = std::thread([this, Cmd, Log = m_PreviewLog] { xresource_editor::compilation::RunCommandLine(Cmd, *Log, false); m_bPreviewDone = true; });
-            m_PreviewRef = {};
-            m_PreviewRef.m_Instance.m_Value = G;
-            return {};
-        }
-
-        // Back to nothing: a running preview compile ends, its resource is let go of, its temporary files removed
         void StopStepPreview() noexcept
         {
-            if (m_PreviewThread.joinable())
-            {
-                xresource_editor::compilation::RequestCancel(*m_PreviewLog);
-                m_PreviewThread.join();
-            }
-            if (m_PreviewRef.m_Instance.m_Value) xresource::g_Mgr.ReleaseRef(m_PreviewRef);
-            m_PreviewRef = {};
-            if (const auto G = std::exchange(m_PreviewGuid, 0))
-            {
-                auto& LM = xresource_editor::g_LibMgr;
-                const std::wstring Sub = std::format(L"Material\\{:02X}\\{:02X}\\{:X}", G & 0xff, (G >> 8) & 0xff, G);
-                std::error_code Ec;
-                for (const std::filesystem::path P : { std::format(L"{}\\Cache\\Descriptors\\{}.desc", LM.m_ProjectPath, Sub), std::format(L"{}\\Cache\\Resources\\Platforms\\WINDOWS\\{}", LM.m_ProjectPath, Sub), std::format(L"{}\\Cache\\Resources\\Logs\\{}.log", LM.m_ProjectPath, Sub) })
-                {
-                    std::filesystem::remove_all(P, Ec);
-                    for (auto D = P.parent_path(); D.filename() != L"Cache" && std::filesystem::remove(D, Ec); D = D.parent_path()) {}     // its folders, while they hold nothing else
-                }
-            }
+            m_PreviewJob.Stop();
             m_PreviewPin = 0;
         }
 
@@ -370,6 +303,13 @@ namespace xmaterial_editor
 
     inline const xeditor::auto_register_resource_editor g_Registration
     { xrsc::material_type_guid_v
+    , [](xresource::full_guid Guid, xresource_editor::library::guid LibraryGuid, xgpu::device* pDevice) -> std::unique_ptr<xeditor::resource_editor>
+      { return std::make_unique<session>(Guid, LibraryGuid, pDevice); }
+    };
+
+    // A sub-graph is edited by the same editor: the same graph file, its interface instead of material outputs
+    inline const xeditor::auto_register_resource_editor g_SubgraphRegistration
+    { xmaterial_graph::subgraph_type_guid_v
     , [](xresource::full_guid Guid, xresource_editor::library::guid LibraryGuid, xgpu::device* pDevice) -> std::unique_ptr<xeditor::resource_editor>
       { return std::make_unique<session>(Guid, LibraryGuid, pDevice); }
     };

@@ -14,6 +14,9 @@
 
 namespace xmaterial_graph
 {
+    // The resource type of a sub-graph (plugins/xmaterial_subgraph.plugin): a graph file like a material's, with an interface (subgraphs_plan.md)
+    inline constexpr auto subgraph_type_guid_v = xresource::type_guid(xresource::guid_generator::Instance64FromString("MaterialSubgraph"));
+
     struct node_param
     {
         static constexpr wchar_t        file_filter_v[] = L"ShaderFile\0 *.glsl;*.frag\0Any Thing\0 *.*\0";
@@ -25,7 +28,8 @@ namespace xmaterial_graph
         , STRING
         , FILE
         , TEXTURE_RESOURCE
-        , UNKNOWN 
+        , UNKNOWN
+        , SUBGRAPH_RESOURCE         // a group node's MaterialSubgraph (subgraphs_plan.md 2.3); after UNKNOWN so the old numbers stay
         };
 
         node_param() = default;
@@ -59,9 +63,11 @@ namespace xmaterial_graph
         , xproperty::settings::enum_item{ "FILE",               type::FILE      }
         , xproperty::settings::enum_item{ "TEXTURE RESOURCE",   type::TEXTURE_RESOURCE }
         , xproperty::settings::enum_item{ "UNKNOWN",            type::UNKNOWN   }
+        , xproperty::settings::enum_item{ "SUBGRAPH RESOURCE",  type::SUBGRAPH_RESOURCE }
         };
 
-        inline static constexpr auto type_guid_filters_v = std::array{ xrsc::texture_type_guid_v };
+        inline static constexpr auto type_guid_filters_v     = std::array{ xrsc::texture_type_guid_v };
+        inline static constexpr auto subgraph_guid_filters_v = std::array{ subgraph_type_guid_v };
 
         void setupType(type Enum)
         {
@@ -75,6 +81,7 @@ namespace xmaterial_graph
             case type::STRING:              m_Value.set<std::string>({});             break;
             case type::FILE:                m_Value.set<std::wstring>({});            break;
             case type::TEXTURE_RESOURCE:    m_Value.set<xresource::full_guid>({});    break;
+            case type::SUBGRAPH_RESOURCE:   m_Value.set<xresource::full_guid>({});    break;
             }
         }
 
@@ -167,7 +174,24 @@ namespace xmaterial_graph
                 Flags.m_bDontShow       = O.m_Type != type::TEXTURE_RESOURCE;
                 Flags.m_bDontSave       = Flags.m_bDontShow;
                 return Flags;
-            } 
+            }
+            >>
+        , obj_member < "SubgraphRef", +[](node_param& O, bool bRead, xresource::full_guid& FullGuid)
+            {
+                if (O.m_Type != type::SUBGRAPH_RESOURCE) return;
+                if (bRead) FullGuid = O.m_Value.get<xresource::full_guid>();
+                else       O.m_Value.set<xresource::full_guid>(FullGuid);
+            }
+            , member_ui<xresource::full_guid>::type_filters<subgraph_guid_filters_v>
+            , member_dynamic_flags < +[](const node_param& O)
+            {
+                xproperty::flags::type Flags={};
+                Flags.m_bDontShow       = O.m_Type != type::SUBGRAPH_RESOURCE;
+                Flags.m_bDontSave       = Flags.m_bDontShow;
+                Flags.m_bShowReadOnly   = true;             // SetSubgraph changes it: the group node's pins must follow
+
+                return Flags;
+            }
             >>
         , obj_member< "bCanExpose", &node_param::m_bCanExpose, member_flags<flags::DONT_SHOW>>
         , obj_member< "bExpose", &node_param::m_bExpose 
@@ -201,6 +225,10 @@ namespace xmaterial_graph
     };
     XPROPERTY_REG(node_param)
 
+    inline constexpr auto group_input_prefab_v  = node_guid{ xresource::type_guid{"GroupInputPrefabs"}.m_Value };
+    inline constexpr auto group_output_prefab_v = node_guid{ xresource::type_guid{"GroupOutputPrefabs"}.m_Value };
+    inline constexpr auto group_call_prefab_v   = node_guid{ xresource::type_guid{"SubgraphCallPrefabs"}.m_Value };     // a group node: calls a sub-graph
+
     struct node //serialize instance guid ,type guid and position putting graph -> shader
     {
         node_guid                       m_Guid              = {};  //instance guid
@@ -217,9 +245,13 @@ namespace xmaterial_graph
         int                             m_MaxInputChars     = 0;
         int                             m_MaxOutputChars    = 0;
 
-        inline bool isCommentNode       (void) const { return m_OutputPins.empty() && m_InputPins.empty(); }
-        inline bool isOutputNode        (void) const { return m_OutputPins.empty() && !isCommentNode(); }
-        inline bool isInputNode         (void) const { return m_InputPins.empty() && !isCommentNode(); }
+        // A sub-graph's interface (subgraphs_plan.md 2.2): its pins are its own, so it can have none and still be no comment
+        inline bool isGroupInputNode    (void) const { return m_PrefabGuid == group_input_prefab_v  || m_Guid == group_input_prefab_v; }
+        inline bool isGroupOutputNode   (void) const { return m_PrefabGuid == group_output_prefab_v || m_Guid == group_output_prefab_v; }
+        inline bool isGroupCallNode     (void) const { return m_PrefabGuid == group_call_prefab_v   || m_Guid == group_call_prefab_v; }      // its pins mirror its sub-graph's interface
+        inline bool isCommentNode       (void) const { return m_OutputPins.empty() && m_InputPins.empty() && !isGroupInputNode() && !isGroupOutputNode() && !isGroupCallNode(); }
+        inline bool isOutputNode        (void) const { return isGroupOutputNode() || (m_OutputPins.empty() && !isCommentNode() && !isGroupInputNode() && !isGroupCallNode()); }
+        inline bool isInputNode         (void) const { return isGroupInputNode()  || (m_InputPins.empty()  && !isCommentNode() && !isGroupOutputNode()); }
         inline bool isFunctionNode      (void) const { return !m_OutputPins.empty() && !m_InputPins.empty(); }
 
         inline void ComputeMaxInputChars()

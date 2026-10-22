@@ -639,6 +639,48 @@ namespace xmaterial_editor::stack_routes
         std::vector<std::string>                m_SectionNames;
     };
 
+    constexpr float ARROW_W = 14.0f;    // the open / close arrow left of a vector output's name, and the indent of its component rows
+
+    // A pin of O, or one of its components, feeds something
+    inline bool OutputUsed(const xmaterial_graph::graph& G, const xmaterial_graph::output_pin& O) noexcept
+    {
+        for (auto& [Id, C] : G.m_Connections)
+        {
+            if (C->m_OutputPinGuid == O.m_PinGUID) return true;
+            for (auto& S : O.m_SubElements) if (C->m_OutputPinGuid == S.m_PinGUID) return true;
+        }
+        return false;
+    }
+
+    // An output shows its components (.x .y .z .w; .r .g .b .a for a colour) as pins of their own on rows under it when one of them feeds
+    // something (so a component's route always leaves from its own pin) or when the person opened it (pOpen: output pins, view state).
+    inline bool ShowsComponents(const xmaterial_graph::graph& G, const xmaterial_graph::output_pin& O, const std::unordered_set<std::uint64_t>* pOpen) noexcept
+    {
+        if (O.m_SubElements.empty()) return false;
+        if (pOpen && pOpen->contains(O.m_PinGUID.m_Value)) return true;
+        for (auto& [Id, C] : G.m_Connections) for (auto& S : O.m_SubElements) if (C->m_OutputPinGuid == S.m_PinGUID) return true;
+        return false;
+    }
+
+    // A component row's label: .x / .r
+    inline std::string ComponentLabel(const xmaterial_graph::output_pin& O, int Sub) noexcept { return std::string(".") + xmaterial_graph::ComponentLetters(O.m_TypeGUID)[Sub & 3]; }
+
+    // The output rows of a step, top to bottom: every output shown (the first always, the others when used), each followed by its component
+    // rows when it shows them. Fn(Row, Output, Sub): Sub -1 for the output itself, else the component. Returns the number of rows.
+    template<typename T_FN>
+    int ForOutputRows(const xmaterial_graph::graph& G, const xmaterial_graph::node& N, const std::unordered_set<std::uint64_t>* pOpen, T_FN&& Fn) noexcept
+    {
+        int Row = 0;
+        for (std::size_t o = 0; o < N.m_OutputPins.size(); ++o)
+        {
+            const auto& O = N.m_OutputPins[o];
+            if (o > 0 && !OutputUsed(G, O)) continue;
+            Fn(Row++, O, -1);
+            if (ShowsComponents(G, O, pOpen)) for (int k = 0; k < static_cast<int>(O.m_SubElements.size()); ++k) Fn(Row++, O, k);
+        }
+        return Row;
+    }
+
     inline std::string BoxTitle(const std::string& Name, int nSteps) { return std::format("{}  {} step{}", Name, nSteps, nSteps == 1 ? "" : "s"); }
 
     // A chip's text (cmds::ChipText): Step, Step.Output (several outputs), Step.x (a sub-element)
@@ -656,17 +698,16 @@ namespace xmaterial_editor::stack_routes
         return "?";
     }
 
-    // PreviewRows: rows under a step's ports its in-node preview takes (stack_canvas.md 13); no port sits there, so routes never aim at them
+    // PreviewRows: rows under a step's ports its in-node preview takes (stack_canvas.md 13); no port sits there, so routes never aim at them.
+    // pOpen: the outputs the person opened (ShowsComponents).
     template<typename T_MEASURE, typename T_INPUT_W, typename T_LIT_W, typename T_PREVIEW_ROWS>
-    graph_input FromGraph(const xmaterial_graph::graph& G, T_MEASURE&& Measure, T_INPUT_W&& InputW, T_LIT_W&& LitW, T_PREVIEW_ROWS&& PreviewRows, const std::vector<xmaterial_graph::section>* pSections = nullptr) noexcept
+    graph_input FromGraph(const xmaterial_graph::graph& G, T_MEASURE&& Measure, T_INPUT_W&& InputW, T_LIT_W&& LitW, T_PREVIEW_ROWS&& PreviewRows, const std::vector<xmaterial_graph::section>* pSections = nullptr
+                         , const std::unordered_set<std::uint64_t>* pOpen = nullptr) noexcept
     {
         graph_input R;
         const auto& Sections = pSections ? *pSections : G.m_Stack.m_Sections;
         std::unordered_map<std::uint64_t, std::uint64_t> MainOf;                    // output or sub-element pin -> its output pin
         for (auto& [Id, pN] : G.m_InstanceNodes) for (auto& O : pN->m_OutputPins) { MainOf[O.m_PinGUID.m_Value] = O.m_PinGUID.m_Value; for (auto& s : O.m_SubElements) MainOf[s.m_PinGUID.m_Value] = O.m_PinGUID.m_Value; }
-        std::unordered_set<std::uint64_t> Used;                                     // output pins feeding something (directly or by a sub-element)
-        for (auto& [Id, C] : G.m_Connections) if (auto It = MainOf.find(C->m_OutputPinGuid.m_Value); It != MainOf.end()) Used.insert(It->second);
-
         std::unordered_map<std::uint64_t, std::pair<int,int>> OutRow, InRow;        // pin -> (global step, row)
         std::unordered_map<std::uint64_t, int> BoxOf;                               // a node inside a collapsed section -> its box's global step
         for (int s = 0; s < static_cast<int>(Sections.size()); ++s)
@@ -698,15 +739,13 @@ namespace xmaterial_editor::stack_routes
                 float InW = 0, OutW = 0, Lit = 0;
                 int nIn = 0, nOut = 0;
                 for (auto& P : N.m_InputPins) { InRow[P.m_PinGUID.m_Value] = { g, nIn++ }; InW = std::max(InW, InputW(N, P)); Lit = std::max(Lit, LitW(N, P)); }
-                for (std::size_t o = 0; o < N.m_OutputPins.size(); ++o)
+                nOut = ForOutputRows(G, N, pOpen, [&](int Row, const xmaterial_graph::output_pin& P, int Sub)
                 {
-                    const auto& P = N.m_OutputPins[o];
-                    if (o > 0 && !Used.contains(P.m_PinGUID.m_Value)) continue;
-                    OutRow[P.m_PinGUID.m_Value] = { g, nOut };
-                    for (auto& Sub : P.m_SubElements) OutRow[Sub.m_PinGUID.m_Value] = { g, nOut };
-                    OutW = std::max(OutW, Measure(P.m_Name));
-                    ++nOut;
-                }
+                    if (Sub >= 0) { OutRow[P.m_SubElements[Sub].m_PinGUID.m_Value] = { g, Row }; OutW = std::max(OutW, ARROW_W + Measure(ComponentLabel(P, Sub))); return; }
+                    OutRow[P.m_PinGUID.m_Value] = { g, Row };
+                    for (auto& S : P.m_SubElements) OutRow[S.m_PinGUID.m_Value] = { g, Row };       // a component's route leaves from its output's row unless it has its own (below)
+                    OutW = std::max(OutW, (P.m_SubElements.empty() ? 0.0f : ARROW_W) + Measure(P.m_Name));
+                });
                 const float TextW = std::max(Measure(N.m_StepName.empty() ? N.m_Name : N.m_StepName + "  " + N.m_Name), InW + OutW + (nIn && nOut ? sl::geo::MID_GAP : 0));
                 Sec.m_Steps.push_back({ Guid.m_Value, sl::StepW(TextW), std::max({ 1, nIn, nOut }) + PreviewRows(N), Lit });
             }
@@ -784,12 +823,13 @@ namespace xmaterial_editor::cmds
         std::function<float(const xmaterial_graph::node&, const xmaterial_graph::input_pin&)> m_LitW = [](const xmaterial_graph::node& N, const xmaterial_graph::input_pin& P)
             { return !P.m_ConnectionGUID.m_Value && P.m_ParamIndex >= 0 && P.m_ParamIndex < static_cast<int>(N.m_Params.size()) ? stack_routes::LIT_W : 0.0f; };
         std::function<int(const xmaterial_graph::node&)> m_PreviewRows = [](const xmaterial_graph::node&) { return 0; };     // the canvas's in-node previews (none headless)
+        std::unordered_set<std::uint64_t>                m_Open;            // the vector outputs the person opened on the canvas: their components show (ShowsComponents)
     };
 
     // The layout the canvas shows
     inline stack_routes::result StackLayoutOf(const graph_document& Doc, const stack_view& View, stack_routes::graph_input& In, double& Ms) noexcept
     {
-        In = stack_routes::FromGraph(Doc.m_Graph, View.m_Measure, View.m_InputW, View.m_LitW, View.m_PreviewRows);
+        In = stack_routes::FromGraph(Doc.m_Graph, View.m_Measure, View.m_InputW, View.m_LitW, View.m_PreviewRows, nullptr, &View.m_Open);
         const auto T0 = std::chrono::steady_clock::now();
         auto R = stack_routes::Build(In.m_In, In.m_Edges);
         Ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count();

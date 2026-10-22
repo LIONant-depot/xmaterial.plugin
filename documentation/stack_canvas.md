@@ -34,7 +34,7 @@ source/Editor/xmaterial_graph_widgets.h     param widgets moved out of xmaterial
   reusable interface.
 - Move ≠ insert. Moving changes presentation and keeps bindings. Inserting on a connection routes that connection through the new step.
   Moving to another section changes organisation only. Duplicating copies bindings explicitly.
-- Type rule: a connection needs equal types, except that a float (or a sub-element such as `Vec2.x`) may feed a vec2/vec3/vec4 input, compiled as a splat `vecN(x)`; types of one GLSL type connect (`Color` and `Vector4`, both `vec4`); mismatched vector widths, float to int and vector to scalar are refused. Colour spaces are guarded: an `SColor` (sRGB-encoded) feeds only `SColor` inputs and a `Color` (linear) never feeds an `SColor` input, refused with "SColor is sRGB-encoded; convert with 'SColor To Color'" / "Color is linear; convert with 'Color To SColor'" (material_contract.md §3). The rule is `AreTypesCompatible` (types alone) under `IsPinCompatible`, its message `TypesDiffer`, all in `xmaterial_graph_editing.h`.
+- Type rule: a connection needs equal types, except that a float (or a sub-element such as `Vec2.x`) may feed a vec2/vec3/vec4 input, compiled as a splat `vecN(x)`; types of one GLSL type connect (`Color` and `Vector4`, both `vec4`); a longer vector feeds a shorter vector input, taking its first components (truncation, compiled `.xyz`, shown on the chip, §6.5); a narrower vector into a wider input, float to int and vector to scalar are refused (a sub-element or a swizzle, §6.5, picks components). Colour spaces are guarded: an `SColor` (sRGB-encoded) feeds only `SColor` inputs and a `Color` (linear) never feeds an `SColor` input, refused with "SColor is sRGB-encoded; convert with 'SColor To Color'" / "Color is linear; convert with 'Color To SColor'" (material_contract.md §3). The rule is `AreTypesCompatible` (types alone) under `IsPinCompatible`, its message `TypesDiffer`, all in `xmaterial_graph_editing.h`.
 - No auto-wiring by type. A binding is made only by an explicit pick. If several ports fit, the user chooses.
 - The system owns every route: wires never cross steps, direction picks the side, distance picks the lane, one trunk per source output.
 - Step names are identity for people (chips, console symbols, GLSL variable names). GUIDs stay the identity for storage and undo.
@@ -254,7 +254,7 @@ Deterministic and memoryless: the same graph always gives the same picture, a lo
 
 Inputs on the left half, outputs on the right half (the old canvas), side by side: input i and output o share row height, `RowY(r)` from the
 top. Header: step name, then the type dimmed if different. An input row holds its name and, when connected, its source chip (§6). Outputs:
-the first always, the others when used; sub-element pins (`x/y/z/w`) are never rows (a connection from one shows as `UV.x` on the chip).
+the first always, the others when used; a vector output's components (`x/y/z/w`) are rows of their own under it only when shown (§6.5), else a connection from one leaves from the output's row and shows as `UV.x` on the chip.
 Width = max(header, widest input + `MID_GAP` + widest output) + padding; height = `HEADER_H + max(inputs, outputs) * ROW_H + pad`. The
 literal of an unconnected input with a parameter is drawn outside, left of its pin (label, widget, a link to the pin; gone once connected);
 its width is the step's `LitW`.
@@ -341,7 +341,7 @@ waits at the bottom of column 0.
 ## 6. Source chips
 
 Every connected input row shows, after the input's name, a flat chip with the source's name: `StepName` for a single-output step,
-`StepName.Output` for multi-output (`Wetness.Roughness`), `StepName.x` for a sub-element. Chips never change with zoom or distance. An
+`StepName.Output` for multi-output (`Wetness.Roughness`), `StepName.x` for a sub-element, then the components the input takes when it does not take all of them (§6.5: `Albedo.xyz`, `Albedo.zyx`). Chips never change with zoom or distance. An
 unconnected input shows no chip: its literal sits outside the step (§4.2).
 
 | Gesture on a chip | Result | Command |
@@ -360,6 +360,42 @@ the focused chip (= the selected connection) has a blue border and lights its ro
 for a connection that really ends at that input and leaves from a pin of a node: a stale `ConnectionGUID` (old files can name a connection
 between pins that no longer exist) shows the input's literal, as the old canvas does. Go to source / Find all uses' pick centre the step and
 push the history; refusals and validation are checked before a command runs, so a refused gesture leaves no history.
+
+### 6.5 Components (swizzle and downcast)
+
+Taking part of a vector is done often (a texture's RGB into a colour, its alpha as a mask, one channel splatted), so it has three gestures and
+is always visible on the chip. How others do it: Unreal truncates a float4 into a float3 implicitly and has a ComponentMask node and fixed
+RGB/R/G/B/A outputs on Texture Sample; Unity truncates and pads, with Split/Swizzle/Combine nodes; Godot truncates and puts an expand arrow on
+vector outputs that reveals x/y/z/w ports; Blender has Separate/Combine nodes. Here (no new node: the components are a property of the input):
+
+- **Truncation**: a longer vector feeds a shorter vector input, taking its first components; the chip shows it (`Albedo.xyz`). Widening is
+  refused (a component splats; a swizzle as long as the input widens explicitly: `.xyxy`). A vector never feeds a float implicitly (which
+  component is a choice). SColor stays guarded (no components).
+- **Component pins**: the arrow left of a vector output's name shows its components as pins on rows of their own (`.x .y .z .w`, `.r .g .b .a`
+  for a Color; view state, `stack_view::m_Open`); while one of them is connected they stay shown, so a component's route always leaves from its
+  own pin. While an input is dragged over a vector output whose components are hidden, they fan out beside its pin (an overlay: the layout does
+  not move): release on one to connect it.
+- **The picker**: a chip's component suffix (`.xyz`, `.a`, underlined), chip menu Components..., or `.` on a focused chip; and a drop the types
+  refuse but components can fix (a Vec4 onto a float input, a Vec2 onto a vec4) opens it at the drop. It lists all of it (or its first
+  components), the other runs as long as the input (`.yzw`), each component (splatted into a vector input), and a field to type any swizzle
+  (`bgr`, `xxyy`, Enter; focused when it opens, so a pick is letters + Enter).
+
+One form for each meaning (`PickComponents`, `xmaterial_graph_editing.h`), so both canvases and the compiler agree: one component (or one
+repeated) is the output's sub-element connection (what the old canvas's sub-element pins make); the first components in order are no swizzle
+(truncation or exact); anything else is `connection::m_Swizzle` (2 to 4 letters, `xyzw`, as long as the input), compiled as `.zyx` after the
+source. Commands: `Connect -Swizzle`, `SetInputSwizzle -Input -Swizzle <letters>|all` (the connection keeps its id); `InsertOnConnection`
+keeps the swizzle on the new step's input when it fits, `DuplicateStep` copies it. The file stores `Swizzle` only on connections that have one
+(like `ParamID`): files without swizzles stay byte-identical and older files read as before, so no version bump was needed.
+
+Clicks and keys (left drag = 1 drag; old = the Material Graph canvas before this, which always shows sub-element pins; new stack canvas):
+
+| Gesture | Old canvas | Stack canvas before | Stack canvas now |
+|---|---|---|---|
+| (a) Texture RGB into a vec3 input | right click, pick `Vec4 To Vec3`, 2 drags (4) | drag the input into empty space, type `to vec3`, Enter, then drag the Texture onto the new step (2 drags + ~8 keys) | 1 drag (truncation) |
+| (b) Texture alpha as a float mask | 1 drag (from the `w` sub-pin) | drag the input into empty space, pick `Texture.w` in the search (1 drag + 1 click) | 1 drag (fan), or 1 drag + `a` Enter (picker), or arrow click + 1 drag |
+| (c) Vec2.x splat into a vec4 input | 1 drag (from the `x` sub-pin) | as (b) (1 drag + 1 click) | 1 drag (fan) |
+| (c') Vec2.x into the 4 inputs of a Vec4 | right click, pick Vec4, 5 drags | 4 x (1 drag + 1 click) + adding the Vec4 | not needed: (c) |
+| a reorder (`.bgr`) | not possible without nodes | not possible | 1 click on the suffix + 3 letters + Enter |
 
 ## 7. Interaction contract
 
@@ -451,7 +487,7 @@ A collapsed group is a USER section with `m_bCollapsed` set: organisation data o
 
 ### 7.7 Validation messages (shown as a tooltip at the drop; nothing in history)
 
-`types differ (Vec3 -> Float); use a sub-element or a conversion` · `would make a cycle through <step>` · `<producer> is after <consumer>` (opens
+`types differ (Vec3 -> Float); use a sub-element or a conversion` (when components can fix it the drop opens the picker instead, §6.5) · `would make a cycle through <step>` · `<producer> is after <consumer>` (opens
 §7.3) · `the output stack accepts only outputs` · `name already used`.
 
 ## 8. Migration adapter (`xmaterial_stack_adapter.h`)
@@ -499,6 +535,7 @@ the new node's guid, like pin guids today.
 | `RenameSection -Section -Name`, `MoveSection -Section (-After\|-Before) <s> [-Resolve ...]` | |
 | `DeleteSection -Section [-MergeInto <s>]` | refused if non-empty without `-MergeInto`; OUTPUT refused; never deletes nodes |
 | `SetSectionCollapsed -Section -Collapsed 0\|1` | value-based |
+| `SetInputSwizzle -Input <pin> -Swizzle <letters>\|all`, `Connect ... -Swizzle <letters>` | the components an input takes (§6.5) |
 
 ### 9.3 New queries (no undo)
 
@@ -548,7 +585,15 @@ no port sits in those rows. One hook in the canvas, `PreviewOf(node)`, says the 
   is the editor's thumbnail cache through `xresource_editor::g_ReferenceHost.m_Thumbnail` (what every resource reference shows), the type's
   picture until it is ready, "no texture" when none is assigned. Readiness never changes the layout.
 - colour: a Vec3 / Vec4 constant whose inputs are all literals shows a swatch of them (1 row; the literals are linear, clamped to 0-1 and encoded to sRGB for display; alpha ignored).
-- next: a rendered intermediate (below, §13).
+- rendered (2026-10-22): any other step whose first output the material's colour can take (directly, a float splatted, or through a
+  conversion prefab, the §10.4 rule) shows that output on a flat quad (4 rows), from UV 0..1, unlit as the output writes it. The session's
+  `step_previews` (`xmaterial_step_previews.h`) makes them: a step on the screen asks for its picture each frame with a key, a hash of
+  everything upstream of it (prefabs, literals, connections, swizzles) and the declared parameters, so an edit makes again only the steps
+  downstream of it. One step at a time: the §10.4 copy (`preview_compile`, shared with P) is compiled (~230 ms in Debug on the example),
+  drawn by the mesh preview's own drawing (the PLANE3D model, no background) into a 64 px target, read back and written into the step's cell
+  of one 1024 px atlas page (256 pictures, 4 MB, a cell freed by a step gone or not on the screen when one is needed). The older picture
+  shows until the newer is ready; "..." before the first; "no preview" when it failed (hover: why). Headless there is none: the layout is
+  unchanged. `StepPreviews` lists them (current, stale, none, failed; times made). Test: `smoke/test_material_step_previews.py`.
 `T` (the panel focused) or the background menu's Show previews in steps toggles them (view state, on by default); off, the steps are as before.
 
 ### 10.3 GLSL names
@@ -592,6 +637,10 @@ segments crossing steps = 0, order invariant holds, one undo step per gesture, u
 | 7 | Collapse steps (v2) | Ctrl+click steps with external inputs and an output used outside; Collapse | one box `Group  N steps`, a row per external source and per output used outside; boundary routes end at it; expand restores the identical layout | undo steps = 1; `LayoutStats` before collapse = after expand; segments through steps = 0 |
 | 8 | Change an instance value | edit a Float widget on an unconnected input | value changes, nothing moves | step rects diff = 0; lane diff = 0; undo steps = 1 |
 | 9 | Invalid connection | Vec3 output onto Float input; producer below consumer; a cycle | type and cycle refused with the message, no history; order case (producer below consumer): `Connect` moves the consumer and its dependents after the producer, one undo step (§7.3's popup was not built) | history size unchanged for refusals |
+| 11 | Texture RGB into a vec3 input (§6.5) | drag the Texture's output onto the colour input | connects, chip `Albedo.xyz` | drags 1; undo steps 1 |
+| 12 | Texture alpha as a float mask | from the alpha input over the Texture's pin to the fanned `.w`; then by the drop picker; then by the arrow | chip `Albedo.w`, the output's component pins shown | fan 1 drag; picker 1 drag + 2 keys; arrow 1 click + 1 drag; undo steps 1 each |
+| 13 | Vec2.x splat into a vec4 input | from the vec4 input over the Vec2's pin to the fanned `.x` | chip `UV2.x` | drags 1; undo steps 1 |
+| 14 | Swizzle from the chip | click the suffix of `Albedo.xyz`, type `bgr`, Enter; then `w`; `SetInputSwizzle all`; wrong lengths | `Albedo.zyx` (connection id kept), `Albedo.w`, back to `Albedo.xyz`, refusals change nothing | 1 click + 4 keys; undo steps 1 each |
 | 10 | Add one node to a large material | 200 steps; background menu Add step, then one reorder drag | the unwired new step waits at the bottom of column 0, nothing else moves; the drag preview costs one layout per slot change | steps moved by the add = 0; layout ms (`[A]` budget 2 ms; ~8 ms at 200 steps in release, §4.4 ponytail) |
 
 ### Results (2026-10-22, Debug xLION.exe, `test_material_stack_canvas.py`: 10 passed in 170 s)
@@ -668,14 +717,17 @@ Sized for one Sonnet session each. "Done" includes: builds, old canvas still wor
     panel, new commands). Done: all 10 pass; the owner decides when the old canvas goes.
     Status: done (2026-10-22): results in §11; `editor.md` describes the panel, its keys and every command.
 
+15. **Components (swizzle and downcast)** — `xmaterial_stack_canvas.h`, `xmaterial_stack_routes.h` (component rows), `xmaterial_graph_editing.h`
+    (truncation in `AreTypesCompatible`, `PickComponents`, `Connect -Swizzle`, `SetInputSwizzle`), `xmaterial_stack_commands.h` (chips),
+    `Graph/xmaterial_graph.h` (`connection::m_Swizzle`), `Compiler/xmaterial_compiler.cpp` (`GetInputExpr`). §6.5.
+    Status: done. Tests 11 to 14 by mouse; the 8 materials (7 examples + slice `5E1CE0A110000001`, copies) compile to the same SPIR-V hashes;
+    a copy with a truncated and a swizzled connection compiles to `vec4(Vec4_Multiply3.xyz,1.0)` and `Texture.zyxw * Vec4`.
+
 ## 13. Deferred (not in the first milestone)
 
 Expression steps, the structured text view, always-live thumbnails and typed on-demand previews, loop/switch regions (E27 owned markers and
 scope depth), semantic zoom, subgraphs with interfaces, pin modifier chains (`[Texture.R] -> OneMinus -> Clamp01`; sketch: modifier nodes
 owned by an input, like E27's owned markers, promotable to steps by clearing the owner), VERTEX stage in the output stack, saved lane hints, section slots on the canvas ("New section here", once sections are drawn again).
 
-Next step for in-node previews: a rendered intermediate in every visible step (a Vec4 Multiply showing its result), as a third kind of
-`PreviewOf`. The P-key step preview (§10.4) already compiles a temporary copy of the graph whose output takes one step's output; the way is
-the same copy rendered small: on demand for the steps on screen, one at a time, into a cached small render target (a 64 px flat quad, not
-the mesh) keyed by step and the graph's revision, dropped when the graph changes, the old picture kept until the new one is ready. It needs
-an offscreen GPU path in the editor (the thumbnail renderers' kind, `xeditor_thumbnail.h`), so it is not done yet.
+In-node rendered previews: done (§10.2). Open: a texture or shader file compiled again is not seen by the key (same guid); several compiles
+at once if a large material fills slowly; each compile logs its temporary log folder as unknown to the library (as P does).

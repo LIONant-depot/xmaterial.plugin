@@ -20,6 +20,7 @@
 
 #include "source/xmaterial_data_file.h"
 #include "source/Graph/xmaterial_step_names.h"
+#include "source/Graph/xmaterial_subgraph.h"
 
 #include "plugins/xmaterial_instance.plugin/source/xmaterial_intance_descriptor.h"
 
@@ -272,36 +273,32 @@ namespace xmaterial_compiler
                         const pin* outPin = g.findPinConst(*srcNode, conn.m_OutputPinGuid, dummy, idx, sub);
                         if (outPin)
                         {
-                            // a float feeding a vecN input is splatted: vecN(x)
-                            auto Splat = [&](std::string E)
-                            {
-                                auto* pO = g.findType(outPin->m_TypeGUID); auto* pI = g.findType(ip.m_TypeGUID);
-                                return pO && pI && pO->m_GUID != pI->m_GUID && pO->m_CodeString == "float" ? pI->m_CodeString + "(" + E + ")" : E;
-                            };
+                            // The source: a direct GLSL expr (like "In.Color" or "In.UV") or the step's variable, a sub-element as .x/.y/.z/.w
+                            std::string E = outPin->m_DefaultExpr.empty() ? PinToVarName(*srcNode, idx) : outPin->m_DefaultExpr;
+                            if (sub >= 0 && sub < 4) E += std::string(".") + "xyzw"[sub];
 
-                            if (!outPin->m_DefaultExpr.empty())
+                            // The components it gives (1 float, N vecN), then the input takes: the connection's swizzle, or the first ones of a
+                            // longer vector (truncation); a float feeding a vecN input is splatted: vecN(x) (the rules: AreTypesCompatible, xmaterial_graph_editing.h)
+                            auto* pI = g.findType(ip.m_TypeGUID);
+                            int nOut = xmaterial_graph::Components(g, outPin->m_TypeGUID);
+                            const int nIn = xmaterial_graph::Components(g, ip.m_TypeGUID);
+                            if (!conn.m_Swizzle.empty())
                             {
-                                // Direct GLSL expr (like "In.Color" or "In.UV")
-                                if (sub >= 0 && sub < 4)
-                                {
-                                    static const char* swizzle[4] = { "x","y","z","w" };
-                                    return Splat(outPin->m_DefaultExpr + "." + swizzle[sub]);
-                                }
-                                return Splat(outPin->m_DefaultExpr);
+                                if (sub >= 0 || conn.m_Swizzle.size() > 4 || conn.m_Swizzle.find_first_not_of(std::string_view("xyzw", std::max(0, std::min(nOut, 4)))) != std::string::npos)
+                                    Fail(std::format("E_SWIZZLE: node '{}' input '{}' takes .{} of a source without those components", n.m_Name, ip.m_Name, conn.m_Swizzle));
+                                E += "." + conn.m_Swizzle;
+                                nOut = static_cast<int>(conn.m_Swizzle.size());
                             }
-                            auto baseVar = PinToVarName(*srcNode, idx);
-                            if (sub >= 0 && sub < 4) // sub-output like .x/.y/.z/.w
-                            {
-                                static const char* swizzle[4] = { "x","y","z","w" };
-                                return Splat(baseVar + "." + swizzle[sub]);
-                            }
-                            return Splat(baseVar);
+                            else if (nIn >= 2 && nOut > nIn) { E += "." + std::string("xyzw", nIn); nOut = nIn; }
+                            if (nOut == 1 && nIn > 1) E = pI->m_CodeString + "(" + E + ")";
+                            return E;
                         }
                     }
                 }
             }
 
-            // 2. Not connected
+            // 2. Not connected: an optional input's value (Output: PBR's Normal, Emissive), else strict inputs fail
+            if (!ip.m_DefaultExpr.empty()) return ip.m_DefaultExpr;
             if (requireConnectionOnly)
             {
                 // strict mode → must be connected
@@ -545,6 +542,48 @@ namespace xmaterial_compiler
             Graph.CreateGraph(Graph);
             Graph.serialize(Graph, true, DescriptorFileName);
 
+            // Group nodes: each is replaced by a copy of its sub-graph's steps (nested ones too), before anything reads the graph. The sub-graphs'
+            // files are dependencies: editing one compiles every material that uses it again.
+            {
+                std::vector<std::wstring> Used;
+                const auto PathOf = [&](std::uint64_t Guid) { return std::format(L"{}/MaterialSubgraph/{:02X}/{:02X}/{:X}.desc/Descriptor.txt", m_ProjectPaths.m_Descriptors, Guid & 0xff, (Guid >> 8) & 0xff, Guid); };
+                const auto Why = FlattenCalls(Graph, PathOf, &Used);
+                for (const auto& Path : Used)
+                {
+                    std::error_code Ec;
+                    const auto Relative = std::filesystem::relative(Path, m_ProjectPaths.m_Project, Ec);
+                    m_Dependencies.m_Assets.push_back(Ec ? Path : Relative.wstring());
+                }
+                if (!Why.empty())
+                {
+                    LogMessage(xresource_pipeline::msg_type::ERROR, "E_GROUP: " + Why);
+                    return xerr::create_f<state, "A group node could not be expanded (see the log)">();
+                }
+            }
+
+            // A sub-graph (plugins/xmaterial_subgraph.plugin uses this compiler): checked, and its interface written as its resource. It makes no
+            // shader of its own: the materials that use it copy its steps in.
+            if (std::wstring_view(m_InputSrcDescriptorPath).find(L"MaterialSubgraph") != std::wstring_view::npos)
+            {
+                Graph.m_bSubgraph = true;
+                if (const auto Why = ValidateSubgraph(Graph); !Why.empty())
+                {
+                    LogMessage(xresource_pipeline::msg_type::ERROR, "E_SUBGRAPH: " + Why);
+                    return xerr::create_f<state, "The sub-graph is not valid (see the log)">();
+                }
+                const auto Interface = InterfaceText(Graph);
+                LogMessage(xresource_pipeline::msg_type::INFO, "Sub-graph interface:\n" + Interface);
+                for (auto& T : m_Target)
+                    if (T.m_bValid)
+                    {
+                        std::error_code Ec; std::filesystem::create_directories(std::filesystem::path(T.m_DataPath).parent_path(), Ec);
+                        std::ofstream Out(std::filesystem::path(T.m_DataPath), std::ios::binary | std::ios::trunc);
+                        if (!Out) return xerr::create_f<state, "Fail to write the sub-graph's interface">();
+                        Out << Interface;
+                    }
+                return {};
+            }
+
             const auto& shaderString = GenerateGLSL(Graph);
             if (not m_bManifest) BuildManifest(Graph);                  // a shader-file material reads no parameters: its manifest is only the declarations
 
@@ -658,7 +697,7 @@ namespace xmaterial_compiler
             MaterialDataFile.m_pShaderHDR       = spirvHDR.data();
             MaterialDataFile.m_ShaderSizeHDR    = static_cast<std::uint32_t>(spirvHDR.size());
             MaterialDataFile.m_Flags.m_bAlpha   = false;
-            MaterialDataFile.m_Flags.m_bSamplersFrom1 = m_bSamplers;
+            MaterialDataFile.m_Flags.m_bSamplersFrom1 = Graph.findFullShaderNode() == nullptr;   // every graph material: also one without textures (Output: PBR samples the shadow atlas, slot 0)
             MaterialDataFile.m_pDefaultTextures = Graph.m_FinalTextureNodes.m_Textures.empty()? nullptr : Textures.get();
             MaterialDataFile.m_nDefaultTextures = static_cast<std::uint8_t>(Graph.m_FinalTextureNodes.m_Textures.size());
 
