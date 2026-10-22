@@ -206,6 +206,29 @@ namespace xmaterial_compiler
             m_bManifest = true;
 
             auto Decls = g.m_Params;
+            if (m_Reads.contains(alpha_cutoff_param_id_v) && std::ranges::find(Decls, alpha_cutoff_param_id_v, &param_decl::m_ID) == Decls.end())
+            {
+                auto& D = Decls.emplace_back();         // Masked: the cutoff, an instance parameter (render_settings_plan.md section 3)
+                D.m_ID       = alpha_cutoff_param_id_v;
+                D.m_Name     = "Alpha Cutoff";
+                D.m_Default  = { g.m_Render.m_AlphaCutoff, 0, 0, 0 };
+                D.m_ValidMin = { 0, 0, 0, 0 };
+                D.m_ValidMax = { 1, 1, 1, 1 };
+                D.m_UiMax    = { 1, 1, 1, 1 };
+                D.m_Order    = 1000000;                     // not the graph's: after its own parameters (a number xtextfile reads back)
+            }
+            if (std::ranges::find(Decls, double_sided_param_id_v, &param_decl::m_ID) == Decls.end())
+            {
+                auto& D = Decls.emplace_back();         // every material: an instance may make it double sided (render_settings_plan.md part three)
+                D.m_ID       = double_sided_param_id_v;
+                D.m_Name     = "Double Sided";
+                D.m_Kind     = param_kind::STATIC;      // no storage: the pipeline's state, resolved by the instance compiler
+                D.m_Default  = { g.m_Render.m_bDoubleSided ? 1.0f : 0.0f, 0, 0, 0 };
+                D.m_ValidMin = { 0, 0, 0, 0 };
+                D.m_ValidMax = { 1, 1, 1, 1 };
+                D.m_UiMax    = { 1, 1, 1, 1 };
+                D.m_Order    = 1000000;
+            }
             std::vector<param_id> Used;
             std::array<param_id, 4> Owner = {};                                     // entity field -> the parameter that has it
 
@@ -231,7 +254,7 @@ namespace xmaterial_compiler
             }
 
             for (const auto& D : Decls)
-                if (not m_Reads.contains(D.m_ID)) LogMessage(xresource_pipeline::msg_type::WARNING, std::format("W_UNUSED: parameter '{}' ({:016X}) is declared but nothing reads it", D.m_Name, D.m_ID));
+                if (not m_Reads.contains(D.m_ID) && D.m_Kind == param_kind::DYNAMIC) LogMessage(xresource_pipeline::msg_type::WARNING, std::format("W_UNUSED: parameter '{}' ({:016X}) is declared but nothing reads it", D.m_Name, D.m_ID));
 
             m_Manifest = Pack(Decls, Used);
 
@@ -488,6 +511,9 @@ namespace xmaterial_compiler
             if (auto str = HandleShaderOnlyGraphs(g); not str.empty())
                 return str;
 
+            const bool bMasked = g.m_Render.m_BlendMode == xmaterial::render_settings::blend_mode::MASKED;
+            if (bMasked) m_Reads.emplace(xmaterial::alpha_cutoff_param_id_v, xmaterial::param_type::FLOAT);
+
 
             // Header (always)
             std::ostringstream ss;
@@ -571,6 +597,12 @@ namespace xmaterial_compiler
 
             // xLIONRender keeps sampler 0 (the shadow atlas): the HDR variant binds a graph's textures from 1, the editors' LDR one from 0
             if (m_bSamplers) ss << "#ifdef XLION_LDR_OUTPUT\n    #define XMAT_SAMPLER(i) (i)\n#else\n    #define XMAT_SAMPLER(i) ((i) + 1)\n#endif\n";
+            if (bMasked)            // the output nodes' cut (XMAT_MASKED, a compile option)
+            {
+                auto Cutoff = std::format("#define XMAT_ALPHA_CUTOFF (\x01{:016X}\x02)\n", xmaterial::alpha_cutoff_param_id_v);
+                ResolveReads(Cutoff);
+                ss << Cutoff;
+            }
             ss << ParamTop() << topCode << "\n";
             ss << "void main() \n{\n";
             ss << botCode;
@@ -667,6 +699,8 @@ namespace xmaterial_compiler
                 options.SetOptimizationLevel(shaderc_optimization_level_performance);
                 options.SetTargetSpirv(shaderc_spirv_version_1_0);
                 if (bLDR) options.AddMacroDefinition("XLION_LDR_OUTPUT");
+                if (Graph.m_Render.m_BlendMode == xmaterial::render_settings::blend_mode::MASKED) options.AddMacroDefinition("XMAT_MASKED");
+                if (Graph.m_Render.m_BackNormal == xmaterial::render_settings::back_normal::NONE) options.AddMacroDefinition("XMAT_BACK_FACE_AS_FRONT");     // else back faces flip their normal: always compiled in, so an instance can make it double sided
                 auto result = compiler.CompileGlslToSpv( shaderString
                                                        , shaderc_glsl_default_fragment_shader
                                                        , "shader.glsl"
@@ -701,6 +735,7 @@ namespace xmaterial_compiler
             // Print the generated shader
             //
             LogMessage(xresource_pipeline::msg_type::INFO, shaderString);
+            LogMessage(xresource_pipeline::msg_type::INFO, std::format("Render settings: blend {}, double sided {}, depth write {}, cast shadows {}, wireframe {}", int(Graph.m_Render.m_BlendMode), Graph.m_Render.m_bDoubleSided, Graph.m_Render.WritesDepth(), Graph.m_Render.m_bCastShadows, Graph.m_Render.m_bWireframe));
 
             //
             // Add the dependencies
@@ -751,7 +786,7 @@ namespace xmaterial_compiler
             MaterialDataFile.m_ShaderSize       = static_cast<std::uint32_t>(spirv.size());
             MaterialDataFile.m_pShaderHDR       = spirvHDR.data();
             MaterialDataFile.m_ShaderSizeHDR    = static_cast<std::uint32_t>(spirvHDR.size());
-            MaterialDataFile.m_Flags.m_bAlpha   = false;
+            MaterialDataFile.m_Render           = Graph.m_Render;
             MaterialDataFile.m_Flags.m_bSamplersFrom1 = Graph.findFullShaderNode() == nullptr;   // every graph material: also one without textures (Output: PBR samples the shadow atlas, slot 0)
             MaterialDataFile.m_pDefaultTextures = Graph.m_FinalTextureNodes.m_Textures.empty()? nullptr : Textures.get();
             MaterialDataFile.m_nDefaultTextures = static_cast<std::uint8_t>(Graph.m_FinalTextureNodes.m_Textures.size());

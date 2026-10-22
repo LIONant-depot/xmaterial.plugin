@@ -35,6 +35,8 @@ namespace xmaterial_editor
         cmds::list_node_types_cmd       m_ListNodeTypes;
         cmds::list_nodes_cmd            m_ListNodes;
         cmds::node_properties_cmd       m_NodeProperties;
+        cmds::set_render_setting_cmd    m_SetRenderSetting   { m_Undo, m_Document };
+        cmds::list_render_settings_cmd  m_ListRenderSettings { m_Undo, m_Document };
         cmds::place_steps_cmd           m_PlaceSteps;
         cmds::place_step_cmd            m_PlaceStep  { m_Undo, m_Document };        // the person's place on the canvas
         cmds::clean_graph_cmd           m_CleanGraph { m_Undo, m_Document };
@@ -220,6 +222,8 @@ namespace xmaterial_editor
                 {
                     m_NodeInspector.m_Inspector.AppendEntity();
                     m_NodeInspector.AppendComponent(*xproperty::getObject(*pNode), pNode);
+                    if (pNode->isOutputNode() && !m_Document.m_Graph.m_bSubgraph)        // the material's render settings, whichever output is selected
+                        m_NodeInspector.AppendComponent(*xproperty::getObject(m_Document.m_Graph.m_Render), &m_Document.m_Graph.m_Render);
                     m_NodeInspector.m_Inspector.m_OnChangeEvent.m_Delegates.clear();
                     m_NodeInspector.m_Inspector.m_OnChangeEvent.Register<&session::OnNodePropertyChange>(*this);
                 }
@@ -233,7 +237,14 @@ namespace xmaterial_editor
         {
             m_Document.m_bDirty = true;
             auto* pNode = m_Document.FindNode(m_InspectedNode);
-            if (!pNode || !Cmd.m_NewValue.m_pType || !Cmd.m_Original.m_pType || !xeditor::cmd_util::IsAtomicType(Cmd.m_NewValue.getTypeGuid())) return;
+            if (!Cmd.m_NewValue.m_pType || !Cmd.m_Original.m_pType) return;
+            if (Cmd.m_Name.starts_with("render_settings/"))                 // the Material group (enums too: they are set by their item's name)
+            {
+                xeditor::Run(m_Undo, std::format("SetRenderSetting -Name {} -Value {} -Before {}", xeditor::Quote(Cmd.m_Name.substr(16))
+                    , xeditor::Quote(xeditor::cmd_util::FormatValue(Cmd.m_NewValue)), xeditor::Quote(xeditor::cmd_util::FormatValue(Cmd.m_Original))));
+                return;
+            }
+            if (!pNode || !xeditor::cmd_util::IsAtomicType(Cmd.m_NewValue.getTypeGuid())) return;
             xeditor::Run(m_Undo, std::format("SetNodeProperty -Node {:016X} -Path {} -Value {} -Before {}", pNode->m_Guid.m_Value, xeditor::Quote(Cmd.m_Name)
                 , xeditor::Quote(xeditor::cmd_util::FormatValue(Cmd.m_NewValue)), xeditor::Quote(xeditor::cmd_util::FormatValue(Cmd.m_Original))));
         }

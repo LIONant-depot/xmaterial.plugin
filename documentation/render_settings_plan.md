@@ -1,7 +1,9 @@
 # Material render settings (plan)
 
-Status: **proposal, not built**. Agreed so far (2026-10-22): the pipeline settings belong to the material, not the instance (each
-combination is its own Vulkan pipeline); they are edited on the output node but stored once on the material.
+Status: **built** (2026-10-23), with the open points decided as defaults: masked surfaces are solid for the GI, one masked shadow
+pipeline per material, translucent lit like opaque, no per-entity sort priority. The pipeline settings belong to the material, not the
+instance (each combination is its own Vulkan pipeline); they are edited on the output node but stored once on the material. A masked
+output writes alpha 1 where it is kept (the alpha is the tone map's coverage), as opaque does.
 
 `file:line` points at the code as it was when this was written.
 
@@ -53,7 +55,7 @@ Named settings, the way Unreal, Unity and Godot expose them, never raw Vulkan st
 - Writes the settings into the data file.
 - Masked: emits the cutoff `discard` after the output's alpha is known (`Output: PBR` and `Output: Target Color` read their A input) and
   declares `Alpha Cutoff` as a material parameter.
-- Double Sided with Flip: defines `XMAT_DOUBLE_SIDED` so `PBRLighting` (xLIONRender `mb_standard_pbr.frag`) flips N when
+- Double Sided with Flip (superseded by part three: the flip is always compiled in, None defines `XMAT_BACK_FACE_AS_FRONT`): defines `XMAT_DOUBLE_SIDED` so `PBRLighting` (xLIONRender `mb_standard_pbr.frag`) flips N when
   `!gl_FrontFacing` (one guard there).
 - `Output: Shader File` materials get the same settings; their shader handles masking and flipping itself.
 
@@ -95,7 +97,16 @@ Named settings, the way Unreal, Unity and Godot expose them, never raw Vulkan st
 
 # Part two: constants × textures in the default PBR material (plan)
 
-Status: **proposal, not built** (2026-10-22). The ORME packing stays (every channel is needed). The question is what a material does when
+Status: **built** (2026-10-23). Default PBR Material and PBR Alpha Test (Masked) are graphs on `Output: PBR`; their texture parameters
+keep the ids of the old shader file's slots (#6E normal, #78 albedo, #82 ORME), so the instances made before keep their textures. As built:
+NormalStrength defaults to 1.5 (what mb_material_pbr.glsl used), AO is a `Float Mix` step (mix(1, ORME.r, AOStrength)), the colours are
+vec3 (`Vec3 Multiply`): Base Color = Albedo.rgb × BaseColorFactor.rgb × the vertex colour (white without a COLOR0 stream), and the
+emission multiplies that base colour (an emitter without a color map has its colour in BaseColorFactor). The alpha test's cut is
+Albedo.a × BaseColorFactor.a × the vertex colour's alpha. The normal map step is `Normal Map (BC5: xy in GR)`; `(BC3: xy in AG)` and `(RGB: BC7, uncompressed)`
+decode the other ways the texture compiler stores a normal (the default material, like the old shader, expects BC5). The importer writes the
+factors only into instances it makes; an existing instance keeps its constant textures (they are the user's).
+
+The ORME packing stays (every channel is needed). The question is what a material does when
 a model has no map for a channel, so that constants become instance parameters instead of textures made per material.
 
 ## What the competition does (read in their source, E:\source_code)
@@ -132,3 +143,27 @@ Normal     = Normal Map step, Strength (FLOAT, 1)
 
 Decided (2026-10-22): emission keeps today's rule, EmissiveColor × ORME.a × Albedo, never a separate emissive map: fewer textures is the
 goal, and the ORME layout already carries it.
+
+# Part three: the material instance (built 2026-10-23)
+
+Agreed with the owner 2026-10-22.
+
+- **One section.** The instance's inspector is its descriptor only. The material's parameters are its properties (`Parameters`:
+  Textures, Colors, Values, Vectors2/3/4, by name): the value this instance sets is marked and `>` goes back to inheriting it; a
+  parent's value or the material's default shows unmarked. The view is filled from the resolved instance, never saved; an edit is a
+  `SetOverride`, a revert a `ClearOverride`. The hand-made Parameters panel is gone. xproperty grew `vector4_group` and `color_group`
+  (four cells on one row; a colour also shows its swatch) for these rows.
+- **Base.** One field takes a Material or a Material Instance (a variant of it): picking runs `SetMaterial` or `SetParent`. With an
+  instance as the base, MaterialRef shows read only (it is the base's); ParentRef is not shown. The chain is resolved by the compiler:
+  the compiled instance has one block and one texture list, no chain at runtime.
+- **Render Settings section:** an instance shows the material's system parameters (not the graph's) under Base, in a section of their own:
+  Double Sided, and Alpha Cutoff for a Masked material. Both are overrides like the parameters (marked when the instance sets them, `>`
+  reverts). The material compiler declares them: Alpha Cutoff with storage (the shader reads it), Double Sided STATIC (no storage, the
+  layout hash is unchanged), default the material's setting (`xmaterial::double_sided_param_id_v`). The instance compiler resolves it
+  through the chain into the instance data file (v3 `m_DoubleSided`: -1 the material's, else the value), mapped by
+  `xmaterial::RenderState(Settings, DoubleSided)`. The back-face normal flip is always compiled in (`gl_FrontFacing ? N : -N`, never taken
+  while back faces are culled), so double sided is pipeline state only: no second shader. Back Face Normal "None" stays a material setting
+  (`XMAT_BACK_FACE_AS_FRONT`). Each instance already has its own renderer material, so no pipeline cache was needed.
+- **Order:** a material parameter has an `Order` (SetParamInfo -Order): an instance lists its parameters by it (ties as declared). Default
+  PBR: each value under its texture.
+- Alpha Cutoff was already an instance parameter (part one).

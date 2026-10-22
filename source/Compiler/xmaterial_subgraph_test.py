@@ -1,10 +1,10 @@
 """Group nodes compile like the same steps written inline (documentation/subgraphs_plan.md phase 2), with no editor: this writes a tiny
 project in a temp folder (a sub-graph that adds its two inputs, a material that calls it twice, one call nested in another sub-graph) and runs
-the Debug material compiler on it. Run: python xmaterial_subgraph_test.py (Windows; the compiler must be built)."""
-import re, shutil, subprocess, tempfile
+the Debug material compiler on it. Run: python xmaterial_subgraph_test.py [path to xmaterial_compiler.exe] (Windows; default: the Debug build)."""
+import re, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
-COMPILER = Path(__file__).resolve().parents[2] / "build" / "xmaterial_compiler.vs2022" / "Debug" / "xmaterial_compiler.exe"
+COMPILER = Path(sys.argv[1]) if __name__ == "__main__" and len(sys.argv) > 1 else Path(__file__).resolve().parents[2] / "build" / "xmaterial_compiler.vs2022" / "Debug" / "xmaterial_compiler.exe"
 M64 = (1 << 64) - 1
 
 

@@ -48,20 +48,28 @@ namespace xmaterial
         , xproperty::settings::enum_item{ "Off",         depth_write::OFF        }
         };
 
+        // Settings that do not apply are greyed out, not hidden (render_settings_plan.md section 6)
         XPROPERTY_DEF
         ( "render_settings", render_settings
         , obj_member<"Blend Mode",       &render_settings::m_BlendMode,    member_enum_span<blend_mode_enum_v>,  member_help<"Opaque, Masked (alpha below the cutoff is cut out), Translucent (alpha blended), Additive">>
-        , obj_member<"Alpha Cutoff",     &render_settings::m_AlphaCutoff,  member_ui<float>::drag_bar<0.005f, 0.0f, 1.0f>, member_help<"Masked: alpha below this is cut out (a material parameter: instances may change it)">>
+        , obj_member<"Alpha Cutoff",     &render_settings::m_AlphaCutoff,  member_ui<float>::drag_bar<0.005f, 0.0f, 1.0f>, member_help<"Masked: alpha below this is cut out (a material parameter: instances may change it)">, member_dynamic_flags<+[](const render_settings& O) { xproperty::flags::type F{}; F.m_bShowReadOnly = O.m_BlendMode != blend_mode::MASKED; return F; }>>
         , obj_member<"Double Sided",     &render_settings::m_bDoubleSided, member_help<"Back faces are drawn too (a pipeline without culling)">>
-        , obj_member<"Back Face Normal", &render_settings::m_BackNormal,   member_enum_span<back_normal_enum_v>, member_help<"Double sided: Flip lights a back face by its own side, None lights it as the front (foliage cards)">>
+        , obj_member<"Back Face Normal", &render_settings::m_BackNormal,   member_enum_span<back_normal_enum_v>, member_help<"Double sided (here or on an instance): Flip lights a back face by its own side, None lights it as the front (foliage cards)">>
         , obj_member<"Depth Write",      &render_settings::m_DepthWrite,   member_enum_span<depth_write_enum_v>, member_help<"Auto: on for Opaque and Masked, off for Translucent and Additive">>
         , obj_member<"Depth Test",       &render_settings::m_bDepthTest>
         , obj_member<"Cast Shadows",     &render_settings::m_bCastShadows>
-        , obj_member<"Sort Priority",    &render_settings::m_SortPriority, member_help<"Translucent and Additive: lower priorities are drawn first, back to front within one">>
+        , obj_member<"Sort Priority",    &render_settings::m_SortPriority, member_help<"Translucent and Additive: lower priorities are drawn first, back to front within one">, member_dynamic_flags<+[](const render_settings& O) { xproperty::flags::type F{}; F.m_bShowReadOnly = !O.isBlended(); return F; }>>
         , obj_member<"Wireframe",        &render_settings::m_bWireframe,   member_help<"Debug: draws the triangles' edges">>
         )
     };
     XPROPERTY_REG(render_settings)
+
+    // The render settings an instance may set (system parameters: the compiler declares them, not the graph; an instance overrides them like any parameter)
+    //   Alpha Cutoff: a masked material's, default m_AlphaCutoff; read by the shader (it has storage in the block)
+    //   Double Sided: every material's, default m_bDoubleSided (0 or 1); no storage (STATIC): the instance compiler resolves it into the pipeline's state
+    inline static constexpr std::uint64_t alpha_cutoff_param_id_v = 0xA1FAC0700FF00001ull;
+    inline static constexpr std::uint64_t double_sided_param_id_v = 0xD0B1E51DED000001ull;
+    constexpr bool isRenderSettingParam(std::uint64_t ID) noexcept { return ID == alpha_cutoff_param_id_v || ID == double_sided_param_id_v; }
 
     static_assert(std::is_trivially_copyable_v<render_settings> && sizeof(render_settings) == 12);
 }

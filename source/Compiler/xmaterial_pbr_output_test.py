@@ -4,7 +4,7 @@
 #   python xmaterial_pbr_output_test.py [path to xmaterial_compiler.exe]     (default: the Debug build)
 import os, shutil, subprocess, sys
 
-HERE    = os.path.dirname(os.path.abspath(__file__))
+HERE    = os.path.dirname(os.path.realpath(__file__))                                    # the plugin folder is a link into the project's Cache/Plugins
 PROJECT = os.path.normpath(os.path.join(HERE, '../../../../..'))                     # example.lionprj
 EXE     = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, '../../build/xmaterial_compiler.vs2022/Debug/xmaterial_compiler.exe')
 SLICE   = os.path.join(PROJECT, 'Descriptors/Material/01/00/5E1CE0A110000001.desc/Descriptor.txt')
@@ -20,7 +20,7 @@ def main():
                             '-OUTPUT', os.path.join(PROJECT, r'Cache\Resources\Platforms\WINDOWS')], capture_output=True, text=True, errors='replace', timeout=120)
         Log = R.stdout + R.stderr
         assert R.returncode == 0 and '[COMPILATION_SUCCESS]' in Log, Log[-3000:]
-        assert 'PBRLighting(vec3(0.0, 0.0, 1.0), ToRGB, 1.0, 0.04, Roughness, 0.0, vec3(0.0))' in Log, 'the roughness does not reach the lighting'
+        assert 'PBRLighting(vec3(0.0, 0.0, 1.0), vec3(ToRGB.xyz), 1.0, 0.04, Roughness, 0.0, vec3(0.0))' in Log, 'the roughness does not reach the lighting'
         assert '#define XMAT_VARYING_IN' in Log and '#define XLION_NO_SHADOW_MAP' in Log
     finally:
         for p in TEMP: shutil.rmtree(p, ignore_errors=True) if os.path.isdir(p) else (os.path.exists(p) and os.remove(p))

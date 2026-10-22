@@ -282,13 +282,14 @@ namespace xmaterial_graph
             graph.m_Connections.clear();  //make sure the connection container is empty
             graph.m_Stack = {};
             graph.m_Params.clear();
+            graph.m_Render = {};                  // v3 files: the defaults (Opaque, single sided: as they rendered)
         }
         //
         //for reading and writing of nodes
         //
         int nNodeCount = static_cast<int>(graph.m_InstanceNodes.size());
         int nConnectionsCount = static_cast<int>(graph.m_Connections.size());
-        int  Version = 3, nParameters = int(graph.m_Params.size());
+        int  Version = 4, nParameters = int(graph.m_Params.size());
         xerr Error;
 
         TextFile.Record("Info"
@@ -436,6 +437,16 @@ namespace xmaterial_graph
                 {
                     assert(false);
                 }
+            }
+        }
+        //
+        // The material's render settings (v4 only, documentation/render_settings_plan.md)
+        //
+        if (Version >= 4)
+        {
+            if (auto Err = xproperty::sprop::serializer::Stream(TextFile, graph.m_Render, Context); Err)
+            {
+                assert(false);
             }
         }
         if (TextFile.isReading() && Version < 2) stack_adapter::Migrate(graph);   // v1: no stack yet, sort the graph into one
@@ -1015,7 +1026,7 @@ namespace xmaterial_graph
         {
             auto& finaloutputprefabs = g.CreatePrefabNode(node_guid{ xresource::type_guid{"fragoutprefabs"}.m_Value });
             finaloutputprefabs.m_Name = "Output: Target Color";
-            finaloutputprefabs.m_Code = "[TOP]<!layout (location = 0) out  vec4 outFragColor;\n!> [BOT]<!outFragColor = vec4($input[0],$input[1]_prop[0]);\n!>";
+            finaloutputprefabs.m_Code = "[TOP]<!layout (location = 0) out  vec4 outFragColor;\n!> [BOT]<!#ifdef XMAT_MASKED\nif ($input[1]_prop[0] < XMAT_ALPHA_CUTOFF) discard;\n#endif\noutFragColor = vec4($input[0],$input[1]_prop[0]);\n!>";
 
             finaloutputprefabs.m_InputPins.resize(2);
             finaloutputprefabs.m_InputPins[0].m_Name        = "Color(3)";
@@ -1039,9 +1050,13 @@ namespace xmaterial_graph
                          "#include \"Cache/dependencies/xLIONRender/src/shaders/mb_tone_mapper_lion.frag\"\n"
                          "#include \"Cache/dependencies/xLIONRender/src/shaders/mb_lineartogamma.frag\"\n"
                          "layout (location = 0) out vec4 outFragColor;\n!> "
-                         "[BOT]<!vec3 $var = PBRLighting($input[3], $input[0], $input[4]_prop[2], 0.04, $input[1]_prop[0], $input[2]_prop[1], $input[5]);\n"
+                         // Masked (render settings): cut below the cutoff; in xLIONRender's shadow pass (LightParams.w) the cut is all it does
+                         "[BOT]<!#ifdef XMAT_MASKED\nif ($input[6]_prop[3] < XMAT_ALPHA_CUTOFF) discard;\n"
+                         "#ifndef XLION_LDR_OUTPUT\nif (UBOLight.LightParams.w > 0.5) { outFragColor = vec4(0.0); return; }\n#endif\n#endif\n"
+                         "vec3 $var = PBRLighting($input[3], $input[0], $input[4]_prop[2], 0.04, $input[1]_prop[0], $input[2]_prop[1], $input[5]);\n"
                          "#ifdef XLION_LDR_OUTPUT\n$var = linearToSrgb(ToneMapper_lion($var));\n#endif\n"
-                         "outFragColor = vec4($var, $input[6]_prop[3]);\n!>";
+                         "#ifdef XMAT_MASKED\noutFragColor = vec4($var, 1.0);\n#else\n"         // masked: solid where it is kept (the alpha is the coverage), as opaque
+                         "outFragColor = vec4($var, $input[6]_prop[3]);\n#endif\n!>";
 
             PBR.m_InputPins.resize(7);
             PBR.m_InputPins[0].m_Name           = "Albedo(3)";
@@ -1072,12 +1087,19 @@ namespace xmaterial_graph
             g.CompletePrefab(PBR);
         }
 
-        // Normal Map: a BC5 tangent-space normal map's sample (xy in .gr, as mb_material_pbr.glsl reads it) for Output: PBR's Normal; Strength
-        // exaggerates the bumps (1 = as authored)
+        // Normal Map: a tangent-space normal map's sample for Output: PBR's Normal, one step per way the texture compiler stores the normal
+        // (xtexture_compiler.cpp RunGenericFilters), named by it so the step says what it decodes. Strength exaggerates the bumps (1 = as authored).
+        //   BC5 (RG_BC5):                          x in G, y in R (BC5_8YX_NORMAL), z rebuilt (as mb_material_pbr.glsl reads it)
+        //   BC3 (RGBA_BC3_A8):                     x in A, y in G (BC3_81Y0X_NORMAL), z rebuilt
+        //   RGB (RGBA_BC7, RGBA_UNCOMPRESSED):     xyz in RGB as authored
+        struct normal_decode { xresource::type_guid m_Guid; const char* m_pName; const char* m_pCode; };
+        for (const auto& D : { normal_decode{ xresource::type_guid{"NormalMapPrefabs"},    "Normal Map (BC5: xy in GR)",               "vec3 $var = vec3($input[0].gr * 2.0 - 1.0, 0.0);\n$var.z = sqrt(max(1.0 - dot($var.xy, $var.xy), 0.0));\n" }
+                             , normal_decode{ xresource::type_guid{"NormalMapBC3Prefabs"}, "Normal Map (BC3: xy in AG)",               "vec3 $var = vec3($input[0].ag * 2.0 - 1.0, 0.0);\n$var.z = sqrt(max(1.0 - dot($var.xy, $var.xy), 0.0));\n" }
+                             , normal_decode{ xresource::type_guid{"NormalMapRGBPrefabs"}, "Normal Map (RGB: BC7, uncompressed)",      "vec3 $var = $input[0].rgb * 2.0 - 1.0;\n" } })
         {
-            auto& NormalMap = g.CreatePrefabNode(node_guid{ xresource::type_guid{"NormalMapPrefabs"}.m_Value });
-            NormalMap.m_Name = "Normal Map";
-            NormalMap.m_Code = "vec3 $var = vec3($input[0].gr * 2.0 - 1.0, 0.0);\n$var.z = sqrt(max(1.0 - dot($var.xy, $var.xy), 0.0));\n$var = normalize(vec3($var.xy * $input[1]_prop[0], $var.z));\n";
+            auto& NormalMap = g.CreatePrefabNode(node_guid{ D.m_Guid.m_Value });
+            NormalMap.m_Name = D.m_pName;
+            NormalMap.m_Code = std::string(D.m_pCode) + "$var = normalize(vec3($var.xy * $input[1]_prop[0], $var.z));\n";
             NormalMap.m_InputPins.resize(2);
             NormalMap.m_InputPins[0].m_Name         = "A(4)";
             NormalMap.m_InputPins[0].m_TypeGUID     = typeVec4.m_GUID;
@@ -1179,6 +1201,25 @@ namespace xmaterial_graph
             multiplyVec4.m_OutputPins[0].m_TypeGUID     = typeVec4.m_GUID;
 
             g.CompletePrefab(multiplyVec4);
+        }
+
+        //Vec3 Multiply
+        {
+            auto& multiplyVec3 = g.CreatePrefabNode(node_guid{ xresource::type_guid{"MultiplyVec3Prefabs"}.m_Value });
+            multiplyVec3.m_Name = "Vec3 Multiply";
+            multiplyVec3.m_Code = "vec3 $var = $input[0] * $input[1];\n";
+
+            multiplyVec3.m_InputPins.resize(2);
+            multiplyVec3.m_InputPins[0].m_Name          = "A(3)";
+            multiplyVec3.m_InputPins[0].m_TypeGUID      = typeVec3.m_GUID;
+            multiplyVec3.m_InputPins[1].m_Name          = "B(3)";
+            multiplyVec3.m_InputPins[1].m_TypeGUID      = typeVec3.m_GUID;
+
+            multiplyVec3.m_OutputPins.resize(1);
+            multiplyVec3.m_OutputPins[0].m_Name         = "Vec3";
+            multiplyVec3.m_OutputPins[0].m_TypeGUID     = typeVec3.m_GUID;
+
+            g.CompletePrefab(multiplyVec3);
         }
 
         // Vec4 add
@@ -1376,6 +1417,26 @@ namespace xmaterial_graph
             floatDivider.m_OutputPins[0].m_TypeGUID = typeFloat.m_GUID;
 
             g.CompletePrefab(floatDivider);
+        }
+
+        // Float Mix: A to B by T (GLSL mix), e.g. the default PBR material's AO strength: mix(1, ORME.r, AOStrength)
+        {
+            auto& floatMix = g.CreatePrefabNode(node_guid{ xresource::type_guid{"FloatMixPrefabs"}.m_Value });
+            floatMix.m_Name                     = "Float Mix";
+            floatMix.m_Code                     = "float $var = mix($input[0], $input[1], $input[2]);\n";
+            floatMix.m_InputPins.resize(3);
+            floatMix.m_InputPins[0].m_Name      = "A(1)";
+            floatMix.m_InputPins[0].m_TypeGUID  = typeFloat.m_GUID;
+            floatMix.m_InputPins[1].m_Name      = "B(1)";
+            floatMix.m_InputPins[1].m_TypeGUID  = typeFloat.m_GUID;
+            floatMix.m_InputPins[2].m_Name      = "T(1)";
+            floatMix.m_InputPins[2].m_TypeGUID  = typeFloat.m_GUID;
+
+            floatMix.m_OutputPins.resize(1);
+            floatMix.m_OutputPins[0].m_Name     = "A(1)";
+            floatMix.m_OutputPins[0].m_TypeGUID = typeFloat.m_GUID;
+
+            g.CompletePrefab(floatMix);
         }
 
         // Comment

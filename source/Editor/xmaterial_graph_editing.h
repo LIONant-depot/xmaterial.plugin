@@ -849,6 +849,55 @@ namespace xmaterial_editor
             xcmdline::parser::handle m_hNode, m_hPath, m_hValue, m_hBefore;
         };
 
+        //---- The material's render settings (documentation/render_settings_plan.md): one record for the material, shown under its output nodes
+        inline property_target RenderTarget(xmaterial_graph::graph& G) noexcept { return { xproperty::getObject(G.m_Render), &G.m_Render }; }
+        inline std::string     RenderPath  (std::string Name) noexcept { return Name.starts_with("render_settings/") ? Name : "render_settings/" + Name; }
+
+        //---- SetRenderSetting: one render setting by name (Blend Mode, Double Sided, ...), by value
+        struct set_render_setting_cmd : xundo::command_base
+        {
+            graph_document& m_Doc;
+            set_render_setting_cmd(xundo::system& System, graph_document& Doc) noexcept : command_base(System, "SetRenderSetting", nullptr), m_Doc(Doc) { RegisterArguments(); }
+            const char* getCommandHelp() const noexcept override { return "Sets one of the material's render settings (undoable): see ListRenderSettings for the names. Usage: SetRenderSetting -Name text -Value text [-Before text]"; }
+            void RegisterArguments() noexcept override
+            {
+                m_hName   = m_Parser.addOption("Name",   "The setting, e.g. \"Blend Mode\"",  true,  1);
+                m_hValue  = m_Parser.addOption("Value",  "New value",                         true,  1);
+                m_hBefore = m_Parser.addOption("Before", "Previous value",                    false, 1);
+            }
+            std::string Redo() noexcept override
+            {
+                std::string Name, Value;
+                if (!GetArg(m_Parser, m_hName, Name) || !GetArg(m_Parser, m_hValue, Value)) return "SetRenderSetting: bad arguments";
+                if (!m_Doc.isLoaded() || m_Doc.m_Graph.m_bSubgraph) return "SetRenderSetting: only a material has render settings";
+                xproperty::any Current;
+                if (!FindProperty(RenderTarget(m_Doc.m_Graph), RenderPath(Name), Current)) return std::format("SetRenderSetting: no setting '{}'", Name);
+                if (!SetValue(RenderTarget(m_Doc.m_Graph), RenderPath(Name), Current.getTypeGuid(), Value)) return std::format("SetRenderSetting: '{}' does not take '{}'", Name, Value);
+                m_Doc.m_bDirty = true;
+                return {};
+            }
+            void BackupCurrenState(xundo::undo_file& File) noexcept override
+            {
+                std::string Name, Before;
+                std::uint32_t TypeGuid = 0;
+                if (GetArg(m_Parser, m_hName, Name) && m_Doc.isLoaded())
+                    if (xproperty::any Current; FindProperty(RenderTarget(m_Doc.m_Graph), RenderPath(Name), Current)) { TypeGuid = Current.getTypeGuid(); Before = FormatValue(Current); }
+                if (std::string Given; GetArg(m_Parser, m_hBefore, Given)) Before = Given;
+                File.Write(TypeGuid);
+                xeditor::WriteString(File, Name);
+                xeditor::WriteString(File, Before);
+            }
+            void Undo(xundo::undo_file& File) noexcept override
+            {
+                std::uint32_t TypeGuid = 0;
+                File.Read(TypeGuid);
+                const std::string Name   = xeditor::ReadString(File);
+                const std::string Before = xeditor::ReadString(File);
+                if (m_Doc.isLoaded() && TypeGuid) { SetValue(RenderTarget(m_Doc.m_Graph), RenderPath(Name), TypeGuid, Before); m_Doc.m_bDirty = true; }
+            }
+            xcmdline::parser::handle m_hName, m_hValue, m_hBefore;
+        };
+
         //---- Parameters (documentation/material_contract.md): an unconnected float or texture input can read a declared parameter instead of its literal.
         inline xmaterial::param_decl* FindParam(xmaterial_graph::graph& G, xmaterial::param_id ID) noexcept
         {
@@ -1018,7 +1067,7 @@ namespace xmaterial_editor
         struct set_param_info_cmd : graph_cmd
         {
             set_param_info_cmd(xundo::system& System, graph_document& Doc) noexcept : graph_cmd(System, Doc, "SetParamInfo") { RegisterArguments(); }
-            const char* getCommandHelp() const noexcept override { return "Sets what a parameter says about itself (undoable). Usage: SetParamInfo -Id hexguid|@Name [-Name text] [-Group text] [-UiMin v] [-UiMax v] [-ValidMin v] [-ValidMax v] [-HDR 0|1] [-Alpha 0|1] [-EntityField NONE|TINT|PARAM0|PARAM1]. A range is 1 to 4 numbers separated by commas (one number sets all four)."; }
+            const char* getCommandHelp() const noexcept override { return "Sets what a parameter says about itself (undoable). Usage: SetParamInfo -Id hexguid|@Name [-Name text] [-Group text] [-UiMin v] [-UiMax v] [-ValidMin v] [-ValidMax v] [-HDR 0|1] [-Alpha 0|1] [-EntityField NONE|TINT|PARAM0|PARAM1] [-Order n]. A range is 1 to 4 numbers separated by commas (one number sets all four)."; }
             void RegisterArguments() noexcept override
             {
                 m_hId       = m_Parser.addOption("Id",          "The parameter: id hex or @Name",      true,  1);
@@ -1031,6 +1080,7 @@ namespace xmaterial_editor
                 m_hHDR      = m_Parser.addOption("HDR",         "COLOR: 1 lets rgb exceed 1",          false, 1);
                 m_hAlpha    = m_Parser.addOption("Alpha",       "COLOR: 0 forces w to 1",              false, 1);
                 m_hField    = m_Parser.addOption("EntityField", "NONE, TINT, PARAM0 or PARAM1",        false, 1);
+                m_hOrder    = m_Parser.addOption("Order",       "Where an instance lists it: lower first, ties as declared", false, 1);
             }
             static bool Vec(const std::string& Text, xmaterial::float4v& Out) noexcept
             {
@@ -1072,11 +1122,18 @@ namespace xmaterial_editor
                     if (It == xmaterial::entity_field_enum_v.end()) return "-EntityField takes NONE, TINT, PARAM0 or PARAM1";
                     D.m_EntityField = static_cast<xmaterial::entity_field>(It->m_Value); bAny = true;
                 }
+                if (GetArg(m_Parser, m_hOrder, Text))
+                {
+                    int Order = 0;
+                    const auto R = std::from_chars(Text.data(), Text.data() + Text.size(), Order);
+                    if (R.ec != std::errc() || R.ptr != Text.data() + Text.size()) return std::format("-Order takes a whole number, not '{}'", Text);
+                    D.m_Order = Order; bAny = true;
+                }
                 if (!bAny) return "nothing to set";
                 *FindParam(G, ID) = D;
                 return {};
             }
-            xcmdline::parser::handle m_hId, m_hName, m_hGroup, m_hUiMin, m_hUiMax, m_hValidMin, m_hValidMax, m_hHDR, m_hAlpha, m_hField;
+            xcmdline::parser::handle m_hId, m_hName, m_hGroup, m_hUiMin, m_hUiMax, m_hValidMin, m_hValidMax, m_hHDR, m_hAlpha, m_hField, m_hOrder;
         };
 
         //---- The migration ops (documentation/material_contract.md section 6): a graph edit that may also rewrite the instance files of the material. The undo puts both back.
@@ -1238,7 +1295,7 @@ namespace xmaterial_editor
                     if (bLast)
                         if (auto It = std::ranges::find(Last.m_Entries, D.m_ID, &xmaterial::manifest_entry::m_ID); It != Last.m_Entries.end())
                             Where = It->m_Type == xmaterial::param_type::TEXTURE ? std::format("sampler {}", It->m_Sampler) : std::format("byte {}", It->m_ByteOffset);
-                    Out += std::format("{:016X}  {}  {}  entity={}  offset={}  readers={}:", D.m_ID, D.m_Name, xmaterial::param_type_enum_v[int(D.m_Type)].m_pName, xmaterial::entity_field_enum_v[int(D.m_EntityField)].m_pName, Where, Readers.size());
+                    Out += std::format("{:016X}  {}  {}  entity={}  order={}  offset={}  readers={}:", D.m_ID, D.m_Name, xmaterial::param_type_enum_v[int(D.m_Type)].m_pName, xmaterial::entity_field_enum_v[int(D.m_EntityField)].m_pName, D.m_Order, Where, Readers.size());
                     for (auto& R : Readers) Out += " " + R;
                     Out += '\n';
                 }
@@ -1319,6 +1376,19 @@ namespace xmaterial_editor
                 return ListProperties(set_node_property_cmd::TargetOf(*pNode), Filter) + ParamLinks(m_Doc.m_Graph, *pNode);
             }
             xcmdline::parser::handle m_hNode, m_hFilter;
+        };
+
+        struct list_render_settings_cmd : xundo::query_command_base
+        {
+            graph_document& m_Doc;
+            list_render_settings_cmd(xundo::system& System, graph_document& Doc) noexcept : query_command_base(System, "ListRenderSettings", nullptr), m_Doc(Doc) { RegisterArguments(); }
+            const char* getCommandHelp() const noexcept override { return "Lists the material's render settings (path = value), the names SetRenderSetting takes. Usage: ListRenderSettings"; }
+            void RegisterArguments() noexcept override {}
+            std::string Query() noexcept override
+            {
+                if (!m_Doc.isLoaded() || m_Doc.m_Graph.m_bSubgraph) return "ListRenderSettings: only a material has render settings";
+                return ListProperties(RenderTarget(m_Doc.m_Graph), "");
+            }
         };
     }
 }

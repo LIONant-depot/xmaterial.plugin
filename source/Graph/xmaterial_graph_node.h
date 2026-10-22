@@ -85,10 +85,16 @@ namespace xmaterial_graph
             }
         }
 
+        // The value as the inspector shows it: a view of its type over this param (node_param_*_view below), not saved (the typed members are)
+        static std::pair<const xproperty::type::object*, void*> ValueView(node_param& O) noexcept;
+
+        // One row in the inspector (sprop_union_group): the name, then the value. The typed members after them are what is saved, not shown.
         XPROPERTY_DEF
-        ( "Props", node_param
+        ( "Props", node_param, xproperty::settings::sprop_union_group
         , obj_member<"Name", &node_param::m_Name
             , member_flags<flags::SHOW_READONLY>>
+        , obj_member<"Value", +[](node_param& O) -> std::pair<const xproperty::type::object*, void*> { return ValueView(O); }
+            , member_flags<flags::DONT_SAVE>>
         , obj_member<"Type", +[](node_param& O, bool bRead, type& Enum)
             {
                 if (bRead) Enum = O.m_Type;
@@ -107,8 +113,8 @@ namespace xmaterial_graph
             , member_dynamic_flags < +[](const node_param& O)
             {
                 xproperty::flags::type Flags = {};
-                Flags.m_bDontShow       = O.m_Type != type::FLOAT;
-                Flags.m_bDontSave       = Flags.m_bDontShow;
+                Flags.m_bDontSave       = O.m_Type != type::FLOAT;
+                Flags.m_bDontShow       = true;
                 return Flags;
             } >>
         , obj_member< "Int", +[](node_param& O, bool bRead, int& Value)
@@ -122,8 +128,8 @@ namespace xmaterial_graph
             , member_dynamic_flags < +[](const node_param& O)
             {
                 xproperty::flags::type Flags={};
-                Flags.m_bDontShow       = O.m_Type != type::INT;
-                Flags.m_bDontSave       = Flags.m_bDontShow;
+                Flags.m_bDontSave       = O.m_Type != type::INT;
+                Flags.m_bDontShow       = true;
                 return Flags;
             } >>
         , obj_member< "String", +[](node_param& O, bool bRead, std::string& Value)
@@ -137,8 +143,8 @@ namespace xmaterial_graph
             , member_dynamic_flags < +[](const node_param& O)
             {
                 xproperty::flags::type Flags={};
-                Flags.m_bDontShow       = O.m_Type != type::STRING;
-                Flags.m_bDontSave       = Flags.m_bDontShow;
+                Flags.m_bDontSave       = O.m_Type != type::STRING;
+                Flags.m_bDontShow       = true;
                 return Flags;
             } >>
         , obj_member< "File", +[](node_param& O, bool bRead, std::wstring& Value)
@@ -153,8 +159,8 @@ namespace xmaterial_graph
             {
                 xproperty::flags::type Flags;
                 Flags.m_bShowReadOnly   = false;
-                Flags.m_bDontShow       = O.m_Type != type::FILE;
-                Flags.m_bDontSave       = Flags.m_bDontShow;
+                Flags.m_bDontSave       = O.m_Type != type::FILE;
+                Flags.m_bDontShow       = true;
                 return Flags;
             }> 
             , member_ui<std::wstring>::file_dialog<file_filter_v, true, 1
@@ -171,8 +177,8 @@ namespace xmaterial_graph
             , member_dynamic_flags < +[](const node_param& O)
             {
                 xproperty::flags::type Flags={};
-                Flags.m_bDontShow       = O.m_Type != type::TEXTURE_RESOURCE;
-                Flags.m_bDontSave       = Flags.m_bDontShow;
+                Flags.m_bDontSave       = O.m_Type != type::TEXTURE_RESOURCE;
+                Flags.m_bDontShow       = true;
                 return Flags;
             }
             >>
@@ -186,8 +192,8 @@ namespace xmaterial_graph
             , member_dynamic_flags < +[](const node_param& O)
             {
                 xproperty::flags::type Flags={};
-                Flags.m_bDontShow       = O.m_Type != type::SUBGRAPH_RESOURCE;
-                Flags.m_bDontSave       = Flags.m_bDontShow;
+                Flags.m_bDontSave       = O.m_Type != type::SUBGRAPH_RESOURCE;
+                Flags.m_bDontShow       = true;
                 Flags.m_bShowReadOnly   = true;             // SetSubgraph changes it: the group node's pins must follow
 
                 return Flags;
@@ -224,6 +230,62 @@ namespace xmaterial_graph
         )
     };
     XPROPERTY_REG(node_param)
+
+    // node_param's value, one view per type (the union's sides): each is the param itself, seen with one member
+    struct node_param_float_view : node_param
+    {
+        XPROPERTY_DEF("node_param: Float", node_param_float_view
+        , obj_member<"Float", +[](node_param_float_view& O, bool bRead, float& V) { if (bRead) V = O.m_Value.get<float>(); else O.m_Value.set<float>(V); }>)
+    };
+    struct node_param_int_view : node_param
+    {
+        XPROPERTY_DEF("node_param: Int", node_param_int_view
+        , obj_member<"Int", +[](node_param_int_view& O, bool bRead, int& V) { if (bRead) V = O.m_Value.get<int>(); else O.m_Value.set<int>(V); }>)
+    };
+    struct node_param_string_view : node_param
+    {
+        XPROPERTY_DEF("node_param: String", node_param_string_view
+        , obj_member<"String", +[](node_param_string_view& O, bool bRead, std::string& V) { if (bRead) V = O.m_Value.get<std::string>(); else O.m_Value.set<std::string>(V); }>)
+    };
+    struct node_param_file_view : node_param
+    {
+        XPROPERTY_DEF("node_param: File", node_param_file_view
+        , obj_member<"File", +[](node_param_file_view& O, bool bRead, std::wstring& V) { if (bRead) V = O.m_Value.get<std::wstring>(); else O.m_Value.set<std::wstring>(V); }
+            , member_ui<std::wstring>::file_dialog<node_param::file_filter_v, true, 1>>)
+    };
+    struct node_param_texture_view : node_param
+    {
+        XPROPERTY_DEF("node_param: TextureRef", node_param_texture_view
+        , obj_member<"TextureRef", +[](node_param_texture_view& O, bool bRead, xresource::full_guid& V) { if (bRead) V = O.m_Value.get<xresource::full_guid>(); else O.m_Value.set<xresource::full_guid>(V); }
+            , member_ui<xresource::full_guid>::type_filters<node_param::type_guid_filters_v>>)
+    };
+    struct node_param_subgraph_view : node_param
+    {
+        XPROPERTY_DEF("node_param: SubgraphRef", node_param_subgraph_view
+        , obj_member<"SubgraphRef", +[](node_param_subgraph_view& O, bool bRead, xresource::full_guid& V) { if (bRead) V = O.m_Value.get<xresource::full_guid>(); else O.m_Value.set<xresource::full_guid>(V); }
+            , member_ui<xresource::full_guid>::type_filters<node_param::subgraph_guid_filters_v>
+            , member_flags<flags::SHOW_READONLY>>)        // SetSubgraph changes it: the group node's pins must follow
+    };
+    XPROPERTY_REG(node_param_float_view)
+    XPROPERTY_REG(node_param_int_view)
+    XPROPERTY_REG(node_param_string_view)
+    XPROPERTY_REG(node_param_file_view)
+    XPROPERTY_REG(node_param_texture_view)
+    XPROPERTY_REG(node_param_subgraph_view)
+
+    inline std::pair<const xproperty::type::object*, void*> node_param::ValueView(node_param& O) noexcept
+    {
+        switch (O.m_Type)
+        {
+        case type::FLOAT:               return { xproperty::getObjectByType<node_param_float_view>(),    &O };
+        case type::INT:                 return { xproperty::getObjectByType<node_param_int_view>(),      &O };
+        case type::STRING:              return { xproperty::getObjectByType<node_param_string_view>(),   &O };
+        case type::FILE:                return { xproperty::getObjectByType<node_param_file_view>(),     &O };
+        case type::TEXTURE_RESOURCE:    return { xproperty::getObjectByType<node_param_texture_view>(),  &O };
+        case type::SUBGRAPH_RESOURCE:   return { xproperty::getObjectByType<node_param_subgraph_view>(), &O };
+        default:                        return { nullptr, nullptr };
+        }
+    }
 
     inline constexpr auto group_input_prefab_v  = node_guid{ xresource::type_guid{"GroupInputPrefabs"}.m_Value };
     inline constexpr auto group_output_prefab_v = node_guid{ xresource::type_guid{"GroupOutputPrefabs"}.m_Value };

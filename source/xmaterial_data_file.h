@@ -3,6 +3,7 @@
 
 #include "dependencies/xserializer/source/xserializer.h"
 #include "plugins/xtexture.plugin/source/xtexture_xgpu_rsc_loader.h"
+#include "xmaterial_render_settings.h"
 
 namespace xmaterial
 {
@@ -11,7 +12,8 @@ namespace xmaterial
         // v2: second shader, the scene-linear HDR variant for xLIONRender
         // v3: the parameter block: layout hash + byte size + the default block (documentation/material_contract.md section 2). A v2 file (older size and version) is refused by
         //     the serializer and loads as null, exactly like an uncompiled resource; the pipeline recompiles it because the compiler executable is newer.
-        inline static constexpr auto xserializer_version_v = 3;
+        // v4: the render settings (xmaterial_render_settings.h) instead of the alpha flag
+        inline static constexpr auto xserializer_version_v = 4;
 
         struct flags
         {
@@ -21,7 +23,6 @@ namespace xmaterial
 
                 struct
                 {
-                    bool m_bAlpha:1;
                     bool m_bSamplersFrom1:1;    // a graph material: the HDR shader's textures are samplers 1.. (xLIONRender keeps 0), the texture list has no slot-0 entry
                 };
             };
@@ -69,6 +70,7 @@ namespace xmaterial
         std::uint16_t       m_BlockBytes;               // the material's parameter block, a multiple of 16 (0: the shader reads no parameters)
         float*              m_pDefaultBlock;            // m_BlockBytes/4 floats: every parameter at its default (the material's own instance)
         std::uint64_t       m_LayoutHash;               // xmaterial::Hash of the manifest: a material instance must carry the same
+        render_settings     m_Render;                   // its pipeline: blend, culling, depth, shadows (the renderer: xmaterial_xlionrender.h)
     };
 
     //-------------------------------------------------------------------------
@@ -101,6 +103,7 @@ namespace xserializer::io_functions
         || (Err = Stream.Serialize(Material.m_pDefaultBlock, Material.m_BlockBytes / 4u))
         || (Err = Stream.Serialize(Material.m_BlockBytes))
         || (Err = Stream.Serialize(Material.m_LayoutHash))
+        || (Err = Stream.Serialize(*(std::array<std::byte, sizeof(xmaterial::render_settings)>*)&Material.m_Render))
         ;
 
         return Err;

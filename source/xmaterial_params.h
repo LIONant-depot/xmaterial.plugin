@@ -71,6 +71,7 @@ namespace xmaterial
         bool            m_bAlpha        = true;         // COLOR: w is meaningful
         entity_field    m_EntityField   = entity_field::NONE;   // "allow entity override": which schema field may replace it
         std::string     m_Group;                        // inspector grouping
+        std::int32_t    m_Order         = 0;            // where an instance's inspector lists it: lower first, ties as declared (a value right under its texture)
 
         XPROPERTY_DEF
         ( "param_decl", param_decl
@@ -89,6 +90,7 @@ namespace xmaterial
         , obj_member<"bAlpha",          &param_decl::m_bAlpha>
         , obj_member<"EntityField",     &param_decl::m_EntityField, member_enum_span<entity_field_enum_v>>
         , obj_member<"Group",           &param_decl::m_Group>
+        , obj_member<"Order",           &param_decl::m_Order>
         )
     };
     XPROPERTY_REG(param_decl)
