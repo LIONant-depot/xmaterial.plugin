@@ -15,8 +15,9 @@
 // Inserting (section 7): a (+) on the selected route and the route menu insert on that connection; a drag from a pin onto a pin connects,
 // into empty space opens a search of what fits (a ghost of the new step, a port chooser when several fit); the background menu adds a step.
 // Every edit is a command (one undo step); nothing is wired without an explicit pick.
-// Moves and collapse (section 7.3, 7.6): drag a step's header up or down its column to change its reading order; the layout it would give is
-// previewed while dragging, and a drop that would change nothing visible issues nothing. Ctrl+click adds steps to the selection; the step
+// Moves and collapse (section 7.3, 7.6): drag a step's header to a column (any it may sit in) and a height: the person decides, the place is
+// saved (PlaceStep) and the layout keeps it, previewed while dragging; Clean graph (top right, background menu) forgets every place
+// (CleanGraph). Ctrl+click adds steps to the selection; the step
 // menu's Collapse puts them (and every step on a path between them) in a new collapsed section: one box with a row per source crossing in
 // and per output crossing out. Double click a box (or its menu) to expand it. Bindings never change.
 // Preview (section 10.4): P shows the selected step's output on the Mesh Preview, Esc returns to the material (the session compiles it).
@@ -265,12 +266,19 @@ namespace xmaterial_editor
                 m_DragPin = 0; m_Fan = 0;
             }
 
-            // A step dragged up or down its column: the slot under the mouse, the layout it would give; a drop issues it only if it shows
+            // A step dragged: to the column under the mouse (clamped into its free ones) and that height; the layout it would give; a drop
+            // that moves it is one PlaceStep
             if (m_DragStep && !m_StepIndex.contains(m_DragStep)) m_DragStep = 0;
-            if (m_DragStep) PlanDrag(ToWorld(IO.MousePos).y);
+            if (m_DragStep) PlanDrag(ToWorld(IO.MousePos));
             if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
             {
-                if (m_DragStep && m_Drag.m_bChanges) xeditor::Run(m_Undo, std::format("PlaceSteps -Nodes {:016X} -{} {:016X} -Resolve dependents", m_DragStep, m_Drag.m_bAfter ? "After" : "Before", m_Drag.m_Anchor));
+                if (m_DragStep && m_Drag.m_Column >= 0)
+                {
+                    const int g = m_StepIndex.at(m_DragStep);
+                    const auto& L = m_R.m_Layout;
+                    if (m_Drag.m_Column != L.m_Column[g] || std::abs(m_Drag.m_Y - L.m_Steps[g].m_Y) > 0.5f)
+                        xeditor::Run(m_Undo, std::format("PlaceStep -Node {:016X} -Column {} -Y {:.0f}", m_DragStep, m_Drag.m_Column, m_Drag.m_Y));
+                }
                 m_DragStep = 0; m_bDragCancelled = false; m_Drag = {};
             }
 
@@ -303,6 +311,7 @@ namespace xmaterial_editor
             D->PopClipRect();
             ImGui::PopItemFlag();
             DrawBreadcrumb();
+            DrawCleanButton();
             DrawPopups();
             ImGui::SetCursorScreenPos(m_Origin);
             ImGui::Dummy(Avail);                                                        // the last item: the cursor moves never extend the window
@@ -380,7 +389,8 @@ namespace xmaterial_editor
             {
                 const auto& a = A.m_In[s].m_Steps; const auto& b = B.m_In[s].m_Steps;
                 if (A.m_In[s].m_Id != B.m_In[s].m_Id || A.m_In[s].m_bOutput != B.m_In[s].m_bOutput || a.size() != b.size()) return false;
-                for (std::size_t i = 0; i < a.size(); ++i) if (a[i].m_Id != b[i].m_Id || a[i].m_W != b[i].m_W || a[i].m_nRows != b[i].m_nRows || a[i].m_LitW != b[i].m_LitW) return false;
+                for (std::size_t i = 0; i < a.size(); ++i) if (a[i].m_Id != b[i].m_Id || a[i].m_W != b[i].m_W || a[i].m_nRows != b[i].m_nRows || a[i].m_LitW != b[i].m_LitW
+                                                              || a[i].m_PinColumn != b[i].m_PinColumn || a[i].m_PinY != b[i].m_PinY) return false;
             }
             for (std::size_t i = 0; i < A.m_Edges.size(); ++i)
             {
@@ -635,7 +645,8 @@ namespace xmaterial_editor
                 if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) NoteIf(cmds::EnterGroup(m_Doc, N.m_Guid.m_Value), ToWorld(ImGui::GetIO().MousePos));
             }
             if (ImGui::IsItemActive() && !m_DragStep && !m_DragPin && !m_bDragCancelled && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 6)
-                && ImGui::GetIO().MouseClickedPos[0].y < HeaderB) m_DragStep = N.m_Guid.m_Value;       // a header dragged: a move (7.3)
+                && ImGui::GetIO().MouseClickedPos[0].y < HeaderB)                                       // a header dragged: a move (7.3)
+                { m_DragStep = N.m_Guid.m_Value; m_DragDy = ToWorld(ImGui::GetIO().MouseClickedPos[0]).y - m_R.m_Layout.m_Steps[g].m_Y; }
             if (N.m_HasErrMsg && !N.m_ErrMsg.empty() && ImGui::IsItemHovered()) xeditor::hint::Text("%s", N.m_ErrMsg.c_str());
 
             // Input rows (left): pin on the left edge, name, the chip of its source; an unconnected input's literal outside, left of its pin
@@ -955,47 +966,33 @@ namespace xmaterial_editor
         }
 
         //------------------------------------------------------------------------------------------
-        // Moves (7.3): a step dragged up or down its column changes its reading order, which the layout follows where it has a free choice
+        // Moves (7.3): the person is the authority on where a step sits: a header dragged to a column (any it may sit in: after what it
+        // reads, before what reads it) and a height. The place is saved (PlaceStep); the layout keeps it and moves the rest out of its way.
         //------------------------------------------------------------------------------------------
         struct move_plan
         {
-            int                         m_Column  = -1;
-            std::uint64_t               m_Anchor  = 0;          // PlaceSteps -Before / -After this step
-            bool                        m_bAfter  = false, m_bChanges = false;
-            float                       m_LineY   = 0;          // world: where the slot line is drawn
+            int                         m_Column = -1;          // where the drop puts the step: the column (clamped), its top
+            float                       m_Y      = 0;
+            int                         m_Under  = -1;          // the column under the mouse (planned already)
             stack_routes::graph_input   m_In;                   // the layout the drop would give
             stack_routes::result        m_R;
         };
 
-        void PlanDrag(float y) noexcept
+        void PlanDrag(ImVec2 W) noexcept
         {
-            namespace geo = stack_layout::geo;
             const auto& L = m_R.m_Layout;
-            const int g = m_StepIndex.at(m_DragStep), c = L.m_Column[g];
-            std::vector<int> Col;                                                       // the other steps of its column, top to bottom
-            for (int it : L.m_Order[c]) if (const int s = L.m_Items[it].m_Step; s >= 0 && s != g && m_In.m_Box[s] < 0) Col.push_back(s);
-            if (Col.empty()) { m_Drag = {}; return; }
-            const auto It = std::find_if(Col.begin(), Col.end(), [&](int s) { return L.m_Steps[s].m_Y + L.m_Steps[s].m_H * 0.5f > y; });
-            const int  s  = It != Col.end() ? *It : Col.back();
-            const bool bAfter = It == Col.end();
-            if (m_Drag.m_Column == c && m_Drag.m_Anchor == m_In.m_Steps[s].m_Value && m_Drag.m_bAfter == bAfter) return;     // planned already
+            const int g = m_StepIndex.at(m_DragStep);
+            int c = 0;
+            while (c + 1 < L.m_K && W.x >= L.m_X[c + 1]) ++c;                          // the column under the mouse
+            const float y = std::round(W.y - m_DragDy);
+            if (m_Drag.m_Under == c && m_Drag.m_Y == y) return;                         // planned already
             m_Drag = {};
-            m_Drag.m_Column = c; m_Drag.m_Anchor = m_In.m_Steps[s].m_Value; m_Drag.m_bAfter = bAfter;
-            m_Drag.m_LineY  = bAfter ? L.m_Steps[s].m_Y + L.m_Steps[s].m_H + geo::NODE_GAP * 0.5f : L.m_Steps[s].m_Y - geo::NODE_GAP * 0.5f;
-
-            // The order PlaceSteps -Resolve dependents gives (producers it moves above come along: they stay in earlier columns), laid out
-            auto& G = m_Doc.m_Graph;
-            G.m_Stack.Reindex();
-            const cmds::order_model M(G);
-            const auto A = G.m_Stack.m_Where.at(xmaterial_graph::node_guid{ m_DragStep }), X = G.m_Stack.m_Where.at(xmaterial_graph::node_guid{ m_Drag.m_Anchor });
-            const int Slot = X.second + (bAfter ? 1 : 0) - (A.first == X.first && A.second < X.second ? 1 : 0);
-            const auto S = xmaterial_graph::stack_order::ResolveMove(M.m_S, M.m_E, { M.m_Id.at(xmaterial_graph::node_guid{ m_DragStep }) }, X.first, Slot).m_Dependents;
-            if (!M.Check(G, S, G.m_Stack.m_Sections).empty()) return;
-            auto Sections = G.m_Stack.m_Sections;
-            for (std::size_t i = 0; i < S.size(); ++i) { Sections[i].m_Steps.clear(); for (int n : S[i]) Sections[i].m_Steps.push_back(M.m_Ids[n]); }
-            m_Drag.m_In = stack_routes::FromGraph(G, m_View.m_Measure, m_View.m_InputW, m_View.m_LitW, m_View.m_PreviewRows, &Sections, &m_View.m_Open);
-            m_Drag.m_R  = stack_routes::Build(m_Drag.m_In.m_In, m_Drag.m_In.m_Edges);
-            for (int h = 0; h < static_cast<int>(m_Drag.m_In.m_Steps.size()); ++h) m_Drag.m_bChanges |= Moved(h);
+            m_Drag.m_Under = c; m_Drag.m_Y = y;
+            m_Drag.m_In = m_In;
+            int h = 0;
+            for (auto& S : m_Drag.m_In.m_In) for (auto& s : S.m_Steps) { if (h++ == g) { s.m_PinColumn = c; s.m_PinY = y; } }
+            m_Drag.m_R = stack_routes::Build(m_Drag.m_In.m_In, m_Drag.m_In.m_Edges);
+            m_Drag.m_Column = m_Drag.m_R.m_Layout.m_Column[g];
         }
 
         bool Moved(int h) const noexcept                                                // a step of the drag's layout sits elsewhere than now
@@ -1006,34 +1003,22 @@ namespace xmaterial_editor
             return std::abs(a.m_X - b.m_X) > 0.5f || std::abs(a.m_Y - b.m_Y) > 0.5f;
         }
 
-        // The slot under the mouse, every step that would move outlined where it would go, the routes it would draw, what the drop does
+        // Every step that would move outlined where it would go (the dragged one too), the routes it would draw
         void DrawMove(ImDrawList* D) const noexcept
         {
             namespace st = stack_style;
             if (!m_DragStep || m_Drag.m_Column < 0) return;
-            const auto& L = m_R.m_Layout;
-            const int   c = m_Drag.m_Column;
-            Line(D, L.m_X[c] + L.m_Band[c] - 6, m_Drag.m_LineY, L.m_X[c] + L.m_Band[c] + L.m_W[c] + 6, m_Drag.m_LineY, st::Selected, 2.5f);
-            if (m_Drag.m_bChanges)
+            for (auto& W : m_Drag.m_R.m_Wires) Line(D, W.m_X0, W.m_Y0, W.m_X1, W.m_Y1, Alpha(st::Selected, 0.35f), 1.0f);
+            for (int h = 0; h < static_cast<int>(m_Drag.m_In.m_Steps.size()); ++h)
             {
-                for (auto& W : m_Drag.m_R.m_Wires) Line(D, W.m_X0, W.m_Y0, W.m_X1, W.m_Y1, Alpha(st::Selected, 0.35f), 1.0f);
-                for (int h = 0; h < static_cast<int>(m_Drag.m_In.m_Steps.size()); ++h)
-                {
-                    if (!Moved(h)) continue;
-                    const auto& b = m_Drag.m_R.m_Layout.m_Steps[h];
-                    const ImVec2 a0 = ToScreen(b.m_X, b.m_Y), a1 = ToScreen(b.m_X + b.m_W, b.m_Y + b.m_H);
-                    auto* pN = m_Doc.FindNode(m_Drag.m_In.m_Steps[h].m_Value);                          // a flat card with its name: "this one goes here"
-                    D->AddRectFilled(a0, a1, Alpha(st::OutputsHalf, 0.92f), Len(st::ROUND));
-                    D->AddRect(a0, a1, st::Selected, Len(st::ROUND), 0, 1.5f);
-                    if (pN) Text(D, { a0.x + Len(stack_layout::geo::PORT_PAD), a0.y + (Len(stack_layout::geo::HEADER_H) - FontPx()) * 0.5f }, st::Text, cmds::StepLabel(*pN));
-                }
+                if (!Moved(h)) continue;
+                const auto& b = m_Drag.m_R.m_Layout.m_Steps[h];
+                const ImVec2 a0 = ToScreen(b.m_X, b.m_Y), a1 = ToScreen(b.m_X + b.m_W, b.m_Y + b.m_H);
+                auto* pN = m_Doc.FindNode(m_Drag.m_In.m_Steps[h].m_Value);                          // a flat card with its name: "this one goes here"
+                D->AddRectFilled(a0, a1, Alpha(st::OutputsHalf, 0.92f), Len(st::ROUND));
+                D->AddRect(a0, a1, st::Selected, Len(st::ROUND), 0, 1.5f);
+                if (pN) Text(D, { a0.x + Len(stack_layout::geo::PORT_PAD), a0.y + (Len(stack_layout::geo::HEADER_H) - FontPx()) * 0.5f }, st::Text, cmds::StepLabel(*pN));
             }
-            auto* pA = m_Doc.FindNode(m_DragStep);
-            auto* pX = m_Doc.FindNode(m_Drag.m_Anchor);
-            const std::string S = !m_Drag.m_bChanges ? std::string("nothing moves here: the layout keeps its order (fewer crossings)")
-                                : pA && pX ? std::format("{} {} {}", cmds::StepLabel(*pA), m_Drag.m_bAfter ? "after" : "before", cmds::StepLabel(*pX)) : std::string();
-            const ImVec2 m = ImGui::GetIO().MousePos;
-            DrawBanner(D, { m.x + 16 + m_pFont->CalcTextSizeA(m_FontSize, FLT_MAX, 0.0f, S.c_str()).x * 0.5f, m.y + 12 }, S);
         }
 
         //------------------------------------------------------------------------------------------
@@ -1887,6 +1872,7 @@ namespace xmaterial_editor
             {
                 if (ImGui::MenuItem("Add step...")) OpenSearch(search::kind::ADD, m_MenuAt, 0);
                 if (ImGui::MenuItem("Show previews in steps", "T", m_bPreviews)) m_bPreviews = !m_bPreviews;
+                if (ImGui::MenuItem("Clean graph", nullptr, false, !m_Doc.m_Graph.m_Stack.m_Places.empty())) xeditor::Run(m_Undo, "CleanGraph");
                 ImGui::EndPopup();
             }
 
@@ -1921,6 +1907,19 @@ namespace xmaterial_editor
             std::snprintf(m_MakeName, sizeof(m_MakeName), "%s Group", pFirst ? cmds::StepLabel(*pFirst).c_str() : "New");
             m_MenuAt = ToWorld(ImGui::GetIO().MousePos);
             m_Open = "##MakeSubgraph";
+        }
+
+        // Clean graph (top right): the layout places every step again, forgetting where the person put them (one undo step)
+        void DrawCleanButton() noexcept
+        {
+            const ImVec2 Keep = ImGui::GetCursorScreenPos();
+            const char*  pLabel = "Clean graph";
+            ImGui::SetCursorScreenPos({ m_Origin.x + m_Avail.x - ImGui::CalcTextSize(pLabel).x - ImGui::GetStyle().FramePadding.x * 2 - 8, m_Origin.y + 6 });
+            ImGui::BeginDisabled(m_Doc.m_Graph.m_Stack.m_Places.empty());
+            if (ImGui::SmallButton(pLabel)) xeditor::Run(m_Undo, "CleanGraph");
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) xeditor::hint::Text("Lay out every step again, forgetting where you put them (Ctrl+Z brings them back)");
+            ImGui::SetCursorScreenPos(Keep);
         }
 
         // A sub-graph entered from a group: the graphs above it, each a way back (Tab goes to the last)
@@ -1990,7 +1989,8 @@ namespace xmaterial_editor
         int                                         m_HoverEntry = -1, m_HoverPort = -1;
         std::vector<std::uint64_t>                  m_Group;            // steps added to the selection with Ctrl+click
         std::vector<std::uint64_t>                  m_GroupHint, m_GroupHintNext;     // what the menu's Collapse would take (hovered)
-        std::uint64_t                               m_DragStep = 0;     // a step being dragged up or down its column
+        std::uint64_t                               m_DragStep = 0;     // a step being dragged to a column and a height
+        float                                       m_DragDy   = 0;     // the grab: mouse minus the step's top, world
         bool                                        m_bDragCancelled = false;          // Esc during a drag: nothing until the button is released
         move_plan                                   m_Drag;
         std::uint64_t                               m_PreviewPin = 0;   // the output previewed on the mesh (0: the material)

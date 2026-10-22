@@ -412,9 +412,12 @@ namespace xmaterial_editor::stack_routes
             assert(P.back().m_X == B.m_X && P.back().m_Y == B.m_Y + sl::RowY(E[i].m_ToRow));
             for (std::size_t k = 0; k + 1 < P.size(); ++k) assert((P[k].m_X == P[k + 1].m_X || P[k].m_Y == P[k + 1].m_Y) && P[k].m_X <= P[k + 1].m_X);
         }
+        std::vector<int> First(L.m_Steps.size(), 1);                                         // a step reading nothing: right before its first consumer (else column 0)
+        std::vector<char> Feeds(L.m_Steps.size(), 0);
+        for (auto& e : E) { First[e.m_From] = Feeds[e.m_From] ? std::min(First[e.m_From], L.m_Column[e.m_To]) : L.m_Column[e.m_To]; Feeds[e.m_From] = 1; }
         int g = 0;
         for (auto& S : In)
-            for ([[maybe_unused]] auto& s : S.m_Steps) { assert(Fed[g] || S.m_bOutput || L.m_Column[g] == 0); assert(!S.m_bOutput || L.m_Column[g] == L.m_K - 1); ++g; }
+            for ([[maybe_unused]] auto& s : S.m_Steps) { assert(Fed[g] || S.m_bOutput || s.m_PinColumn >= 0 || L.m_Column[g] == First[g] - 1); assert(!S.m_bOutput || L.m_Column[g] == L.m_K - 1); ++g; }
         for (std::size_t a = 0; a < L.m_Steps.size(); ++a)                                    // steps of a column never overlap
             for (std::size_t b = a + 1; b < L.m_Steps.size(); ++b)
                 if (L.m_Column[a] == L.m_Column[b]) assert(L.m_Steps[a].m_Y + L.m_Steps[a].m_H <= L.m_Steps[b].m_Y || L.m_Steps[b].m_Y + L.m_Steps[b].m_H <= L.m_Steps[a].m_Y);
@@ -551,6 +554,32 @@ namespace xmaterial_editor::stack_routes
             CheckRoutes(R, C.m_E, C.m_In);
             assert(R.m_Layout.m_K == 7 && R.m_Crossings.size() <= 3);
             Out += std::format("one texture ok: columns {}, crossings {}, route length {:.0f}, ink {:.0f}\n", R.m_Layout.m_K, R.m_Crossings.size(), R.m_Length, R.m_Ink);
+        }
+
+        // Owner 2026-10-22: a Vec2 feeding two multiplies sits in the Textures' column, between them (not in column 0, its wires through
+        // that column). The person's place wins: a column it may take and a top, kept exactly; a column it may not take is clamped.
+        {
+            test_case C;
+            C.Section(); const int sa = C.Step(1, 1), sb = C.Step(1, 1), in = C.Step(0, 2), v = C.Step(2, 1, 110);
+            C.Section(); const int t1 = C.Step(2, 1, 230), t2 = C.Step(2, 1, 230), m1 = C.Step(2, 1), m2 = C.Step(2, 1);
+            C.Section(true); const int o = C.Step(2, 0);
+            C.Link(sa, 0, t1, 0); C.Link(in, 1, t1, 1); C.Link(sb, 0, t2, 0); C.Link(in, 1, t2, 1);
+            C.Link(t1, 0, m1, 0); C.Link(v, 0, m1, 1, 1); C.Link(t2, 0, m2, 0); C.Link(v, 0, m2, 1, 2); C.Link(m1, 0, o, 0); C.Link(m2, 0, o, 1);
+            const auto R = Build(C.m_In, C.m_E);
+            CheckRoutes(R, C.m_E, C.m_In);
+            const auto& L = R.m_Layout;
+            [[maybe_unused]] const auto Mid = [&](int s) { return L.m_Steps[s].m_Y + L.m_Steps[s].m_H * 0.5f; };
+            assert(L.m_Column[v] == L.m_Column[t1] && L.m_Column[t1] == L.m_Column[t2]);
+            assert(std::min(Mid(t1), Mid(t2)) < Mid(v) && Mid(v) < std::max(Mid(t1), Mid(t2)));
+
+            auto D = C;
+            D.m_In[0].m_Steps[v].m_PinColumn = 0; D.m_In[0].m_Steps[v].m_PinY = 600;
+            const auto P = Build(D.m_In, D.m_E);
+            CheckRoutes(P, D.m_E, D.m_In);
+            assert(P.m_Layout.m_Column[v] == 0 && P.m_Layout.m_Steps[v].m_Y == 600);
+            D.m_In[0].m_Steps[v].m_PinColumn = 9;
+            assert(Build(D.m_In, D.m_E).m_Layout.m_Column[v] == L.m_Column[m1] - 1);
+            Out += std::format("vec2 between the textures ok: column {}; placed by hand: column 0 at 600 kept, column 9 clamped to {}\n", L.m_Column[v], L.m_Column[m1] - 1);
         }
 
         // Test 10: 200 steps in 12 sections; adding one unwired step moves no wired step (it waits at the bottom of column 0)
@@ -798,6 +827,11 @@ namespace xmaterial_editor::stack_routes
             if (O != OutRow.end() && I != InRow.end() && O->second.first != I->second.first)
                 R.m_Edges.push_back({ O->second.first, O->second.second, I->second.first, I->second.second, C->m_OutputPinGuid.m_Value, Id.m_Value });
         }
+
+        // Where the person put steps (the layout keeps them there)
+        if (!G.m_Stack.m_Places.empty())
+            for (auto& Sec : R.m_In) for (auto& s : Sec.m_Steps)
+                for (auto& P : G.m_Stack.m_Places) if (P.m_Step.m_Value == s.m_Id) { s.m_PinColumn = std::max(0, P.m_Column); s.m_PinY = P.m_Y; }
         return R;
     }
 }

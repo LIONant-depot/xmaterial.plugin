@@ -36,6 +36,8 @@ namespace xmaterial_editor
         cmds::list_nodes_cmd            m_ListNodes;
         cmds::node_properties_cmd       m_NodeProperties;
         cmds::place_steps_cmd           m_PlaceSteps;
+        cmds::place_step_cmd            m_PlaceStep  { m_Undo, m_Document };        // the person's place on the canvas
+        cmds::clean_graph_cmd           m_CleanGraph { m_Undo, m_Document };
         cmds::rename_step_cmd           m_RenameStep;
         cmds::create_section_cmd        m_CreateSection;
         cmds::rename_section_cmd        m_RenameSection;

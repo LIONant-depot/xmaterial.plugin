@@ -99,6 +99,49 @@ namespace xmaterial_editor::cmds
         placement_options        m_Place;
     };
 
+    //---- PlaceStep: where the person put a step on the canvas (its depth column and top); the layout keeps it there
+    struct place_step_cmd : graph_cmd
+    {
+        place_step_cmd(xundo::system& System, graph_document& Doc) noexcept : graph_cmd(System, Doc, "PlaceStep") { RegisterArguments(); }
+        const char* getCommandHelp() const noexcept override { return "Puts a step at a column and a top on the canvas (undoable); the layout keeps it there, clamping the column into the ones the step may sit in (after what it reads, before what reads it). A collapsed section is named by its guid. Usage: PlaceStep -Node hexguid|@StepName -Column int -Y float"; }
+        void RegisterArguments() noexcept override
+        {
+            m_hNode   = m_Parser.addOption("Node",   "The step",              true, 1);
+            m_hColumn = m_Parser.addOption("Column", "Its depth column, 0 = leftmost", true, 1);
+            m_hY      = m_Parser.addOption("Y",      "Its top, layout units", true, 1);
+        }
+        std::string Apply() noexcept override
+        {
+            auto& S = m_Doc.m_Graph.m_Stack;
+            std::uint64_t Node = 0; std::string Err;
+            if (!ResolveNodeArg(m_Doc, m_Parser, m_hNode, Node, &Err)) return Err;
+            S.Reindex();
+            if (!S.m_Where.contains(xmaterial_graph::node_guid{ Node }) && std::none_of(S.m_Sections.begin(), S.m_Sections.end(), [&](auto& s) { return s.m_Guid.m_Value == Node; })) return "not a step";
+            float Column = 0, Y = 0;
+            if (!FloatArg(m_Parser, m_hColumn, Column) || !FloatArg(m_Parser, m_hY, Y) || Column < 0) return "bad -Column or -Y";
+            auto It = std::find_if(S.m_Places.begin(), S.m_Places.end(), [&](auto& P) { return P.m_Step.m_Value == Node; });
+            if (It == S.m_Places.end()) It = S.m_Places.insert(S.m_Places.end(), { xmaterial_graph::node_guid{ Node } });
+            It->m_Column = static_cast<int>(Column);
+            It->m_Y      = Y;
+            return {};
+        }
+        xcmdline::parser::handle m_hNode, m_hColumn, m_hY;
+    };
+
+    //---- CleanGraph: forget every place the person gave; the layout places everything again
+    struct clean_graph_cmd : graph_cmd
+    {
+        clean_graph_cmd(xundo::system& System, graph_document& Doc) noexcept : graph_cmd(System, Doc, "CleanGraph") { RegisterArguments(); }
+        const char* getCommandHelp() const noexcept override { return "Clears every place a step was put by hand, so the layout places all steps again (undoable). Usage: CleanGraph"; }
+        void RegisterArguments() noexcept override {}
+        std::string Apply() noexcept override
+        {
+            if (m_Doc.m_Graph.m_Stack.m_Places.empty()) return "nothing placed by hand";
+            m_Doc.m_Graph.m_Stack.m_Places.clear();
+            return {};
+        }
+    };
+
     //---- RenameStep
     struct rename_step_cmd : graph_cmd
     {
@@ -471,7 +514,7 @@ namespace xmaterial_editor::cmds
     {
         graph_document& m_Doc;
         list_stack_cmd(xundo::system& System, graph_document& Doc) noexcept : query_command_base(System, "ListStack", nullptr), m_Doc(Doc) { RegisterArguments(); }
-        const char* getCommandHelp() const noexcept override { return "Lists the sections in order and each step: guid, name, type, its inputs as chips (Base <- Wetness.Darken) or their values. Usage: ListStack [-Section guid|@Name]"; }
+        const char* getCommandHelp() const noexcept override { return "Lists the sections in order and each step: guid, name, type, its inputs as chips (Base <- Wetness.Darken) or their values, and where it was put by hand ([placed: column c, y top]). Usage: ListStack [-Section guid|@Name]"; }
         void RegisterArguments() noexcept override { m_hSection = m_Parser.addOption("Section", "Only this section", false, 1); }
         std::string Query() noexcept override
         {
@@ -507,6 +550,7 @@ namespace xmaterial_editor::cmds
                         Out += std::format("{} {} {}", bFirst ? "  " : ",", Pin.m_Name, What);
                         bFirst = false;
                     }
+                    for (auto& P : G.m_Stack.m_Places) if (P.m_Step == Step) Out += std::format("  [placed: column {}, y {:.0f}]", P.m_Column, P.m_Y);
                     Out += '\n';
                 }
             }

@@ -10,6 +10,7 @@
 // Pure: ordered sections of step sizes and the edges in, columns, items and y out. No ImGui, no graph, no editor state; the caller measures
 // text. X needs the router's gutter widths (xmaterial_stack_routes.h calls PlaceX).
 // Sections are reading order only here: they decide ties, never columns.
+// A step the person placed (step_in::m_PinColumn) keeps its column (clamped into its free ones) and its top; the layout works around it.
 
 #include <vector>
 #include <map>
@@ -48,7 +49,8 @@ namespace xmaterial_editor::stack_layout
     // A connection: global step indices (order invariant: From before To), the rows of its two ports, the source output it leaves from (a
     // pin id; a sub-element is its own output, so its own trunk). m_Id is the caller's (the connection guid).
     struct edge         { int m_From = 0, m_FromRow = 0, m_To = 0, m_ToRow = 0; std::uint64_t m_Source = 0, m_Id = 0; };
-    struct step_in      { std::uint64_t m_Id = 0; float m_W = geo::MIN_STEP_W; int m_nRows = 1; float m_LitW = 0; };     // LitW: literal fields left of the step
+    struct step_in      { std::uint64_t m_Id = 0; float m_W = geo::MIN_STEP_W; int m_nRows = 1; float m_LitW = 0;       // LitW: literal fields left of the step
+                          int m_PinColumn = -1; float m_PinY = 0; };                                                    // placed by the person: column (>= 0) and top
     struct section_in   { std::uint64_t m_Id = 0; std::vector<step_in> m_Steps; bool m_bOutput = false; };
     using  input        = std::vector<section_in>;      // in order, OUTPUT last; a step's global index is its position in the concatenation
 
@@ -126,7 +128,24 @@ namespace xmaterial_editor::stack_layout
             for (int i : Outs[v]) R.m_Column[E[i].m_To] = std::max(R.m_Column[E[i].m_To], R.m_Column[v] + 1);
         }
         for (int v = 0; v < N; ++v) if (bOut[v]) R.m_Column[v] = Last;
-        R.m_K = N == 0 ? 0 : *std::max_element(R.m_Column.begin(), R.m_Column.end()) + 1;
+
+        // A step's free columns: after everything it reads, before everything reading it (the last before the output column when nothing does)
+        std::vector<std::vector<int>> Ins(N);
+        for (int i = 0; i < nE; ++i) if (Valid[i]) Ins[E[i].m_To].push_back(i);
+        auto Lo = [&](int v) { int c = 0; for (int i : Ins[v]) c = std::max(c, R.m_Column[E[i].m_From] + 1); return c; };
+        auto Hi = [&](int v) { int c = std::max(0, Last - 1); for (int i : Outs[v]) c = std::min(c, R.m_Column[E[i].m_To] - 1); return std::max(c, Lo(v)); };
+        // The person's columns first (clamped into the free ones), then a step that reads nothing goes right before its first consumer: its
+        // wires stay short instead of crossing columns (a Vec2 between the two Textures it feeds, not left of them)
+        std::vector<float> PinY(N, 0);
+        std::vector<char>  bPin(N, 0);
+        {
+            int v = 0;
+            for (auto& S : In) for (auto& s : S.m_Steps) { if (s.m_PinColumn >= 0) { bPin[v] = 1; PinY[v] = s.m_PinY; } ++v; }
+            v = 0;
+            for (auto& S : In) for (auto& s : S.m_Steps) { if (bPin[v] && !bOut[v]) R.m_Column[v] = std::clamp(s.m_PinColumn, Lo(v), Hi(v)); ++v; }
+        }
+        for (int v = 0; v < N; ++v) if (!bPin[v] && !bOut[v] && Ins[v].empty() && !Outs[v].empty()) R.m_Column[v] = Hi(v);
+        R.m_K =N == 0 ? 0 : *std::max_element(R.m_Column.begin(), R.m_Column.end()) + 1;
 
         // Items: every step, and one dummy per (source, column crossed): all wires of one output share it. Links between neighbours.
         for (int v = 0; v < N; ++v) R.m_Items.push_back({ v, -1, R.m_Column[v] });
@@ -302,6 +321,33 @@ namespace xmaterial_editor::stack_layout
         for (int it = 0; it < nI; ++it) if (Wired[it]) Min = std::min(Min, R.m_Items[it].m_Y);
         if (Min == 1e30f) Min = 0;
         for (auto& I : R.m_Items) I.m_Y += geo::TOP - Min;
+
+        // The person's places: a placed step sits exactly where it was put (overlapping, if put there); the rest of its column keeps its
+        // order and moves down out of its way. The other columns do not follow it: moving one step moves nothing else that it does not hit.
+        for (int c = 0; c < R.m_K; ++c)
+        {
+            auto& O = R.m_Order[c];
+            std::vector<int> Pins;
+            for (int it : O) if (const int s = R.m_Items[it].m_Step; s >= 0 && bPin[s]) { R.m_Items[it].m_Y = PinY[s]; Pins.push_back(it); }
+            if (Pins.empty()) continue;
+            int Prev = -1;
+            for (int it : O)
+            {
+                if (std::find(Pins.begin(), Pins.end(), it) != Pins.end()) continue;
+                float y = R.m_Items[it].m_Y;
+                if (Prev >= 0) y = std::max(y, R.m_Items[Prev].m_Y + ItemH(R, Prev, Rows) + Gap(R, Prev, it));
+                for (bool bHit = true; bHit; )
+                {
+                    bHit = false;
+                    for (int p : Pins)
+                        if (const float Top = R.m_Items[p].m_Y; y < Top + ItemH(R, p, Rows) + Gap(R, p, it) && y + ItemH(R, it, Rows) + Gap(R, it, p) > Top)
+                            { y = Top + ItemH(R, p, Rows) + Gap(R, p, it); bHit = true; }
+                }
+                R.m_Items[it].m_Y = y;
+                Prev = it;
+            }
+            std::stable_sort(O.begin(), O.end(), [&](int a, int b) { return R.m_Items[a].m_Y < R.m_Items[b].m_Y; });
+        }
         R.m_Steps.resize(N);
         for (int v = 0; v < N; ++v) R.m_Steps[v] = { 0, R.m_Items[v].m_Y, 0, StepH(Rows[v]) };
         int v = 0;

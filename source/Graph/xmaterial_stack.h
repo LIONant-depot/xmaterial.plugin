@@ -43,11 +43,29 @@ namespace xmaterial_graph
     };
     XPROPERTY_REG(section)
 
+    // Where the person put a step on the canvas (a step's guid, or a collapsed section's): its depth column and its top. The layout never
+    // overrides it (it only clamps the column into the ones the step may sit in); "Clean graph" clears them all.
+    struct place
+    {
+        node_guid       m_Step   = {};      // a collapsed section: its section guid's value
+        int             m_Column = 0;
+        float           m_Y      = 0;
+
+        XPROPERTY_DEF
+        ( "place", place
+        , obj_member<"Step",   &place::m_Step>
+        , obj_member<"Column", &place::m_Column>
+        , obj_member<"Y",      &place::m_Y>
+        )
+    };
+    XPROPERTY_REG(place)
+
     struct stack
     {
         std::vector<section> m_Sections;       // ordered; exactly one OUTPUT section, always last
+        std::vector<place>   m_Places;         // steps the person placed by hand (any order, one per step)
 
-        XPROPERTY_DEF( "stack", stack, obj_member<"Sections", &stack::m_Sections> )
+        XPROPERTY_DEF( "stack", stack, obj_member<"Sections", &stack::m_Sections>, obj_member<"Places", &stack::m_Places> )
 
         // Derived, rebuilt by Reindex() after every change (never saved)
         std::unordered_map<node_guid, std::pair<int,int>>   m_Where;    // node -> (section index, step index)

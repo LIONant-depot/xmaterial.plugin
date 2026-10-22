@@ -22,7 +22,10 @@ source/Editor/xmaterial_graph_widgets.h     param widgets moved out of xmaterial
 
 - One model, several presentations: stack canvas, old canvas (read-only), console, compiler; later a text view.
 - Semantic graph (nodes, connections) is separate from organisation (sections, their ordered step lists). No x,y, spine, column or order field
-  per node. Coordinates are derived every layout.
+  per node. Coordinates are derived every layout, except where the person put a step: **the person is the authority** (owner
+  2026-10-22, "the user should be able to make things worse if he wants"). A step dragged to a column and a height keeps them
+  (`stack::m_Places`, saved with the stack); the layout clamps the column into the ones the step may sit in and moves the rest out of its
+  way. **Clean graph** forgets every place (§7.3).
 - Every connection is stored. Adjacency never implies a connection: "next in the section" means "read next", nothing else.
 - **Order invariant**: global order = sections in order, each section's steps in order. For every connection, producer index < consumer index.
   Every command keeps it; the adapter establishes it.
@@ -268,6 +271,10 @@ its width is the step's `LitW`.
 - A wire that skips columns gets a dummy (a slot of height 0) in each column it crosses, one per (source output, column): all wires of one
   output share it. Dummies are ordered and placed like steps, so a long wire passes between steps, never behind one.
 - An unwired step goes to the bottom of column 0: adding one moves nothing else.
+- A step that reads nothing but feeds something (a constant, a sampler) goes right before its first consumer, not to column 0: its wires stay
+  short (owner 2026-10-22: the Vec2 feeding two multiplies sits between the two Textures, in their column).
+- A placed step (§7.3) takes its saved column, clamped into its free columns: after everything it reads, before everything reading it. Its
+  top is kept exactly after pass D; the other items of its column keep their order and move down out of its way (placed steps may overlap).
 
 ### 4.4 Pass C: order in a column
 
@@ -441,22 +448,19 @@ Contract: nothing is wired until the person picks a source or a type and, when s
 | expand a box (double click, menu Expand) | `SetSectionCollapsed -Collapsed 0` | none |
 | select, hover, trace, go to, back, zoom, pan, preview | none | — |
 
-### 7.3 Moves (task 11, re-thought for depth columns)
+### 7.3 Moves (owner 2026-10-22: the person decides where a step sits)
 
-The v1 move (drag a step onto a slot between section steps, a popup when the drop breaks the order) does not fit v2: columns come from
-dependency depth, so a step can only ever sit in its own column, and the reading order decides only the layout's free choices (§4.4). What a
-person can still change is the vertical order of the steps of a column, which the layout derives from the reading order where it may.
-- **Drag a step's header up or down its column.** The slot under the mouse is a line across the column; the drop is `PlaceSteps -Nodes <step>
-  -Before|-After <neighbour> -Resolve dependents` (one undo step; bindings untouched). Steps of one column never bind each other, so the only
-  order a drop can break is the step moving above one of its producers; `dependents` brings those along (they sit in earlier columns, so
-  nothing visible moves for them). The three-choice popup is therefore never needed on the canvas; `PlaceSteps -Resolve none|nearest` and
-  `ValidatePlacement` stay for the console.
-- **Preview.** While dragging, the canvas lays out the order the drop would make (`FromGraph` with the planned sections, the same pure
-  layout) and draws every step that would move as a flat card with its name where it would go, the routes it would draw faintly, and a label
-  (`Detail2 before Detail`). When nothing would move (the barycentre order wins: fewer crossings) the label says so and the drop issues
-  nothing: no invisible history. Esc cancels the drag.
-- Deterministic and memoryless as before: the picture follows the stored reading order only.
-- Not built: dragging sections (not drawn, §4); dragging across columns (meaningless: the column is the depth).
+The person is the authority, not the layout: a step can be put somewhere "worse" than the layout would put it, and stays there.
+- **Drag a step's header** to the column under the mouse and a height. The column is clamped into the ones the step may sit in (after
+  everything it reads, before everything reading it), so the router keeps working. The drop is `PlaceStep -Node <step> -Column <c> -Y <top>`
+  (one undo step; bindings and the reading order untouched); a drop where the step already is issues nothing. The place is saved
+  (`stack::m_Places`) and the layout keeps it (§4.3); the other steps of the column move down out of its way. Placed steps may overlap.
+- **Preview.** While dragging, the canvas lays out the graph with the planned place (the same pure layout) and draws every step that would
+  move (the dragged one too) as a flat card where it would go, and the routes it would draw faintly. Esc cancels the drag.
+- **Clean graph** (top right of the canvas, and the background menu): `CleanGraph` clears every place in one undo step; the layout places
+  everything again.
+- Reading order changes stay on the console (`PlaceSteps`, `ValidatePlacement`); the canvas no longer drags the reading order.
+- Not built: dragging sections (not drawn, §4); a step right of something it feeds (the router needs every wire to go right).
 
 ### 7.4 Search popup
 
@@ -528,6 +532,8 @@ the new node's guid, like pin guids today.
 | Command | |
 |---|---|
 | `PlaceSteps -Nodes <g,g,...> -Section <s> [-After <node> \| -Before <node> \| -First \| -Last] [-Resolve none\|dependents\|nearest]` | move (presentation only; bindings kept). `none` (default) fails listing the violations |
+| `PlaceStep -Node <n> -Column <c> -Y <top>` | the person's place on the canvas (§7.3): kept by the layout, column clamped into the free ones; a collapsed section by its guid |
+| `CleanGraph` | clears every place (§7.3) |
 | `InsertOnConnection -Connection <c> -Prefab <t> -Node <new> -Input <pin name> -Output <pin name> [-Name]` | create, route the connection through it, place it right before the consumer. Connection guids derived from `-Node` |
 | `DuplicateStep -Node <n> -NewNode <new> [-Name]` | copy params and every input binding; placed after the original |
 | `RenameStep -Node -Name` | unique; must sanitise to a non-empty identifier |
@@ -632,7 +638,7 @@ segments crossing steps = 0, order invariant holds, one undo step per gesture, u
 | 2 | Independent normal and color branches | sections Normal, Surface color with no links between | no route between them; the two roots share column 0 (depth columns, the same at any width) | columns, steps in column 0; cross-section routes = 0 |
 | 3 | Multi-output step | an `Inputs` step (outputs UV, Color) stands in for `Wetness`, each output used twice | chips `Wetness.UV(2)` / `Wetness.Color(4)`; two trunks, never merged | trunks = distinct outputs used (2); `FindUses -Output` correct |
 | 4 | Insert tint into one branch | `Albedo` feeds Base color and Emission; insert `Vec4 Multiply` on Albedo->Base color | only that connection goes through the new step; chooser asked which input; Emission untouched | gestures ≤ 4; undo steps = 1; other connection guid unchanged; other steps' order unchanged |
-| 5 | Reorder in a column (v2) | two independent branches in column 0; drag the second's header above the first | while dragging, the steps that would move drawn where they go; the drop swaps the branches; a drop the layout cannot honour says so and adds no history; Esc adds none | undo steps = 1 (0 for no-change / Esc); bindings unchanged; crossings not raised |
+| 5 | Place a step by hand (owner 2026-10-22) | drag the second Texture's header well below both, in its column; then Clean graph | while dragging, the steps that would move drawn where they go; the step stays where it was dropped (ListStack `[placed: ...]`), reading order and bindings unchanged; a drop in place and Esc add no history; Clean graph forgets the place | undo steps = 1 (0 for no-change / Esc); Clean graph 1 undo step |
 | 6 | Replace a shared mask | `Mask` used by 3 steps; Find all uses -> Replace all -> `Mask2` | 3 chips read `Mask2`; `Mask` still exists, unused | gestures ≤ 5; undo steps = 1 |
 | 7 | Collapse steps (v2) | Ctrl+click steps with external inputs and an output used outside; Collapse | one box `Group  N steps`, a row per external source and per output used outside; boundary routes end at it; expand restores the identical layout | undo steps = 1; `LayoutStats` before collapse = after expand; segments through steps = 0 |
 | 8 | Change an instance value | edit a Float widget on an unconnected input | value changes, nothing moves | step rects diff = 0; lane diff = 0; undo steps = 1 |
