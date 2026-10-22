@@ -290,12 +290,13 @@ namespace xmaterial_editor
             if (!tOut || !tIn) return "nothing to preview";
             if (Color.m_ConnectionGUID.m_Value) Copy.RemoveConnection(Color.m_ConnectionGUID);
             std::uint64_t Feed = Pin;
-            if (tOut->m_GUID != tIn->m_GUID && tOut->m_CodeString != "float")
+            if (tOut->m_CodeString != tIn->m_CodeString && tOut->m_CodeString != "float")     // by GLSL type: a Color is a vec4 as a Vector4 is
             {
                 const node* pConv = nullptr;                                        // e.g. Vec4 To Vec3
+                auto SameGlsl = [&](xmaterial_graph::type_guid a, xmaterial_graph::type_guid b) { auto *ta = Copy.findType(a), *tb = Copy.findType(b); return ta && tb && ta->m_CodeString == tb->m_CodeString; };
                 for (auto& [Id, pT] : Copy.m_PrefabNodes)
                     if (!pT->isInputNode() && !pT->isOutputNode() && pT->m_InputPins.size() == 1 && !pT->m_OutputPins.empty()
-                        && pT->m_InputPins[0].m_TypeGUID == pOut->m_TypeGUID && pT->m_OutputPins[0].m_TypeGUID == Color.m_TypeGUID) { pConv = pT.get(); break; }
+                        && SameGlsl(pT->m_InputPins[0].m_TypeGUID, pOut->m_TypeGUID) && SameGlsl(pT->m_OutputPins[0].m_TypeGUID, Color.m_TypeGUID)) { pConv = pT.get(); break; }
                 if (!pConv) return std::format("a {} cannot show on the mesh", tOut->m_Name);
                 auto& Conv = Copy.CreateNode(pConv->m_Guid);
                 cmds::MakeLink(Copy, xresource::guid_generator::Type64(), pin_guid{ Pin }, Conv.m_InputPins[0].m_PinGUID);

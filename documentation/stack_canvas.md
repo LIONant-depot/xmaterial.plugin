@@ -34,7 +34,7 @@ source/Editor/xmaterial_graph_widgets.h     param widgets moved out of xmaterial
   reusable interface.
 - Move ≠ insert. Moving changes presentation and keeps bindings. Inserting on a connection routes that connection through the new step.
   Moving to another section changes organisation only. Duplicating copies bindings explicitly.
-- Type rule: a connection needs equal types, except that a float (or a sub-element such as `Vec2.x`) may feed a vec2/vec3/vec4 input, compiled as a splat `vecN(x)`; mismatched vector widths, float to int and vector to scalar are refused (`IsPinCompatible`).
+- Type rule: a connection needs equal types, except that a float (or a sub-element such as `Vec2.x`) may feed a vec2/vec3/vec4 input, compiled as a splat `vecN(x)`; types of one GLSL type connect (`Color` and `Vector4`, both `vec4`); mismatched vector widths, float to int and vector to scalar are refused. Colour spaces are guarded: an `SColor` (sRGB-encoded) feeds only `SColor` inputs and a `Color` (linear) never feeds an `SColor` input, refused with "SColor is sRGB-encoded; convert with 'SColor To Color'" / "Color is linear; convert with 'Color To SColor'" (material_contract.md §3). The rule is `AreTypesCompatible` (types alone) under `IsPinCompatible`, its message `TypesDiffer`, all in `xmaterial_graph_editing.h`.
 - No auto-wiring by type. A binding is made only by an explicit pick. If several ports fit, the user chooses.
 - The system owns every route: wires never cross steps, direction picks the side, distance picks the lane, one trunk per source output.
 - Step names are identity for people (chips, console symbols, GLSL variable names). GUIDs stay the identity for storage and undo.
@@ -538,6 +538,18 @@ left of the step) -> slots -> drag ghost / previews -> popups. No section frames
 Look (owner feedback 2026-10-21): the old canvas's flat, quiet style: no shadows or accent bars; header in the kind's colour (function grey, exposed olive, input green,
 output purple), inputs half grey, outputs half black; pins in the type colour, filled when connected, ringed when not; literals as in the
 old canvas (label, widget, a green dot and link to the pin).
+Background (owner feedback 2026-10-22, "hard to see"): the old canvas's colours, the node editor's `Bg` (60,60,70,200) as it lands over the
+window, (59,59,67), and its 32 px `Grid` (120,120,120,40) faded by zoom squared; one grid, no major lines.
+
+In-node previews (2026-10-22): a step can show what it makes under its ports, in rows added at the bottom of its box. The layout reads
+those rows (`stack_view::m_PreviewRows`, passed to `FromGraph`), so the step is taller, its column spaces around it and no route crosses it;
+no port sits in those rows. One hook in the canvas, `PreviewOf(node)`, says the kind:
+- texture: a Sampler 2D shows its texture's thumbnail, a Texture step fed directly by a Sampler 2D shows the same one (4 rows). The picture
+  is the editor's thumbnail cache through `xresource_editor::g_ReferenceHost.m_Thumbnail` (what every resource reference shows), the type's
+  picture until it is ready, "no texture" when none is assigned. Readiness never changes the layout.
+- colour: a Vec3 / Vec4 constant whose inputs are all literals shows a swatch of them (1 row; the literals are linear, clamped to 0-1 and encoded to sRGB for display; alpha ignored).
+- next: a rendered intermediate (below, §13).
+`T` (the panel focused) or the background menu's Show previews in steps toggles them (view state, on by default); off, the steps are as before.
 
 ### 10.3 GLSL names
 
@@ -661,3 +673,9 @@ Sized for one Sonnet session each. "Done" includes: builds, old canvas still wor
 Expression steps, the structured text view, always-live thumbnails and typed on-demand previews, loop/switch regions (E27 owned markers and
 scope depth), semantic zoom, subgraphs with interfaces, pin modifier chains (`[Texture.R] -> OneMinus -> Clamp01`; sketch: modifier nodes
 owned by an input, like E27's owned markers, promotable to steps by clearing the owner), VERTEX stage in the output stack, saved lane hints, section slots on the canvas ("New section here", once sections are drawn again).
+
+Next step for in-node previews: a rendered intermediate in every visible step (a Vec4 Multiply showing its result), as a third kind of
+`PreviewOf`. The P-key step preview (§10.4) already compiles a temporary copy of the graph whose output takes one step's output; the way is
+the same copy rendered small: on demand for the steps on screen, one at a time, into a cached small render target (a 64 px flat quad, not
+the mesh) keyed by step and the graph's revision, dropped when the graph changes, the old picture kept until the new one is ready. It needs
+an offscreen GPU path in the editor (the thumbnail renderers' kind, `xeditor_thumbnail.h`), so it is not done yet.

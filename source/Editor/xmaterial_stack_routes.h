@@ -656,8 +656,9 @@ namespace xmaterial_editor::stack_routes
         return "?";
     }
 
-    template<typename T_MEASURE, typename T_INPUT_W, typename T_LIT_W>
-    graph_input FromGraph(const xmaterial_graph::graph& G, T_MEASURE&& Measure, T_INPUT_W&& InputW, T_LIT_W&& LitW, const std::vector<xmaterial_graph::section>* pSections = nullptr) noexcept
+    // PreviewRows: rows under a step's ports its in-node preview takes (stack_canvas.md 13); no port sits there, so routes never aim at them
+    template<typename T_MEASURE, typename T_INPUT_W, typename T_LIT_W, typename T_PREVIEW_ROWS>
+    graph_input FromGraph(const xmaterial_graph::graph& G, T_MEASURE&& Measure, T_INPUT_W&& InputW, T_LIT_W&& LitW, T_PREVIEW_ROWS&& PreviewRows, const std::vector<xmaterial_graph::section>* pSections = nullptr) noexcept
     {
         graph_input R;
         const auto& Sections = pSections ? *pSections : G.m_Stack.m_Sections;
@@ -707,7 +708,7 @@ namespace xmaterial_editor::stack_routes
                     ++nOut;
                 }
                 const float TextW = std::max(Measure(N.m_StepName.empty() ? N.m_Name : N.m_StepName + "  " + N.m_Name), InW + OutW + (nIn && nOut ? sl::geo::MID_GAP : 0));
-                Sec.m_Steps.push_back({ Guid.m_Value, sl::StepW(TextW), std::max({ 1, nIn, nOut }), Lit });
+                Sec.m_Steps.push_back({ Guid.m_Value, sl::StepW(TextW), std::max({ 1, nIn, nOut }) + PreviewRows(N), Lit });
             }
         }
 
@@ -782,12 +783,13 @@ namespace xmaterial_editor::cmds
             { return 7.0f * static_cast<float>(P.m_Name.size()) + (P.m_ConnectionGUID.m_Value ? stack_routes::CHIP_W : 0.0f); };
         std::function<float(const xmaterial_graph::node&, const xmaterial_graph::input_pin&)> m_LitW = [](const xmaterial_graph::node& N, const xmaterial_graph::input_pin& P)
             { return !P.m_ConnectionGUID.m_Value && P.m_ParamIndex >= 0 && P.m_ParamIndex < static_cast<int>(N.m_Params.size()) ? stack_routes::LIT_W : 0.0f; };
+        std::function<int(const xmaterial_graph::node&)> m_PreviewRows = [](const xmaterial_graph::node&) { return 0; };     // the canvas's in-node previews (none headless)
     };
 
     // The layout the canvas shows
     inline stack_routes::result StackLayoutOf(const graph_document& Doc, const stack_view& View, stack_routes::graph_input& In, double& Ms) noexcept
     {
-        In = stack_routes::FromGraph(Doc.m_Graph, View.m_Measure, View.m_InputW, View.m_LitW);
+        In = stack_routes::FromGraph(Doc.m_Graph, View.m_Measure, View.m_InputW, View.m_LitW, View.m_PreviewRows);
         const auto T0 = std::chrono::steady_clock::now();
         auto R = stack_routes::Build(In.m_In, In.m_Edges);
         Ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count();

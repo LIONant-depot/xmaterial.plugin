@@ -34,9 +34,8 @@ namespace xmaterial_editor
 {
     namespace stack_style       // the old canvas's flat theme (xmaterial_graph_canvas.h): grey inputs half, black outputs half, kind headers
     {
-        constexpr ImU32 Canvas        = IM_COL32( 30,  31,  34, 255);
-        constexpr ImU32 Grid          = IM_COL32( 36,  37,  41, 255);
-        constexpr ImU32 GridMajor     = IM_COL32( 42,  43,  48, 255);
+        constexpr ImU32 Canvas        = IM_COL32( 59,  59,  67, 255);     // the old canvas's: the node editor's Bg (60,60,70,200) over the window
+        constexpr ImU32 Grid          = IM_COL32(120, 120, 120,  40);     // its Grid, faded by zoom squared as the node editor does
         constexpr ImU32 InputsHalf    = IM_COL32( 62,  62,  64, 255);     // the old (96,96,96,128) over its node background
         constexpr ImU32 OutputsHalf   = IM_COL32( 30,  30,  31, 255);     // the old (32,32,32,128)
         constexpr ImU32 HeaderStep    = IM_COL32( 64,  64,  66, 255);     // the old headers at alpha 128: function, exposed, input, output
@@ -69,6 +68,8 @@ namespace xmaterial_editor
         constexpr float PICK = 5.0f;                                                        // a click this close to a route picks it, screen px
         constexpr float PLUS_R = 8.0f;                                                      // the (+) on a selected route, screen px
         constexpr float GHOST = 0.6f;                                                       // a new step's preview alpha
+        constexpr int   THUMB_ROWS = 4, SWATCH_ROWS = 1;                                    // the rows an in-node preview takes under the ports (13)
+        constexpr float THUMB_PAD = 4.0f;
 
         // A flat label centred under TopCentre: the preview's banner (also over the Mesh Preview), what a drag would do
         inline void Banner(ImDrawList* D, ImFont* pFont, float Size, ImVec2 TopCentre, const std::string& S) noexcept
@@ -91,6 +92,7 @@ namespace xmaterial_editor
             m_View.m_Measure = [this](const std::string& s) { return Measure(s); };
             m_View.m_InputW  = [this](const xmaterial_graph::node& N, const xmaterial_graph::input_pin& P) { return InputW(N, P); };
             m_View.m_LitW    = [this](const xmaterial_graph::node& N, const xmaterial_graph::input_pin& P) { return LitW(N, P); };
+            m_View.m_PreviewRows = [this](const xmaterial_graph::node& N) { return PreviewRows(N); };
         }
         stack_canvas(const stack_canvas&) = delete;
 
@@ -190,6 +192,7 @@ namespace xmaterial_editor
                 if (ImGui::IsKeyPressed(ImGuiKey_D, false)) Trace(m_Trace == trace::DOWN ? trace::NONE : trace::DOWN);
                 if (ImGui::IsKeyPressed(ImGuiKey_Home, false)) { m_Zoom = 1; m_Pan = {}; }
                 if (ImGui::IsKeyPressed(ImGuiKey_P, false)) PreviewSelected();
+                if (ImGui::IsKeyPressed(ImGuiKey_T, false)) m_bPreviews = !m_bPreviews;   // in-node previews: the layout follows (rows change)
                 if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))                        // the first of: stop a drag, the preview, the trace, the selection
                 {
                     if (m_DragStep) { m_DragStep = 0; m_bDragCancelled = true; }
@@ -347,7 +350,7 @@ namespace xmaterial_editor
 
         void Relayout() noexcept
         {
-            auto In = stack_routes::FromGraph(m_Doc.m_Graph, m_View.m_Measure, m_View.m_InputW, m_View.m_LitW);
+            auto In = stack_routes::FromGraph(m_Doc.m_Graph, m_View.m_Measure, m_View.m_InputW, m_View.m_LitW, m_View.m_PreviewRows);
             if (m_bLaidOut && Same(In, m_In)) return;
             m_In = std::move(In); m_bLaidOut = true; m_HoverEdge = -1;                 // an edge index of the old layout
             m_R  = stack_routes::Build(m_In.m_In, m_In.m_Edges);
@@ -420,17 +423,18 @@ namespace xmaterial_editor
         {
             namespace st = stack_style;
             D->AddRectFilled(m_Origin, Max, st::Canvas);
-            constexpr float Step = 32.0f;                                               // world units; every 4th line is a major one
+            constexpr float Step = 32.0f;                                               // world units, the node editor's grid
+            const ImU32 Grid = Alpha(st::Grid, std::min(1.0f, m_Zoom * m_Zoom));
             const ImVec2 W0 = ToWorld(m_Origin), W1 = ToWorld(Max);
             for (int i = static_cast<int>(std::floor(W0.x / Step)); i <= static_cast<int>(std::ceil(W1.x / Step)); ++i)
             {
                 const float x = Snap(ToScreen(i * Step, 0).x);
-                D->AddLine({ x, m_Origin.y }, { x, Max.y }, i % 4 ? st::Grid : st::GridMajor);
+                D->AddLine({ x, m_Origin.y }, { x, Max.y }, Grid);
             }
             for (int i = static_cast<int>(std::floor(W0.y / Step)); i <= static_cast<int>(std::ceil(W1.y / Step)); ++i)
             {
                 const float y = Snap(ToScreen(0, i * Step).y);
-                D->AddLine({ m_Origin.x, y }, { Max.x, y }, i % 4 ? st::Grid : st::GridMajor);
+                D->AddLine({ m_Origin.x, y }, { Max.x, y }, Grid);
             }
         }
 
@@ -663,12 +667,98 @@ namespace xmaterial_editor
                 Pin(D, { P1.x, cy }, TypeColor(Op.m_TypeGUID), bUsed);
             }
 
+            DrawPreview(D, N, P0, P1);
+
             // Border last: crisp over everything inside
             const bool  bSource = m_HoverChip && SourceOf(m_HoverChip) == N.m_Guid.m_Value;         // a hovered chip outlines its source
             const ImU32 Border  = N.m_HasErrMsg ? st::Error : bSelected || bSource ? st::Selected : bRelated ? st::Related : st::StepBorder;
             if (bSelected || bSource) D->AddRect({ P0.x - 3, P0.y - 3 }, { P1.x + 3, P1.y + 3 }, Alpha(st::Selected, 0.25f), R + 3, 0, 3.0f);
             D->AddRect(P0, P1, Border, R, 0, bSelected || bSource || N.m_HasErrMsg ? 2.0f : bRelated ? 1.5f : 1.0f);
             if (!m_InTrace.empty() && !m_InTrace[g]) D->AddRectFilled({ P0.x - Len(m_R.m_Layout.m_LitW[g]) - 1, P0.y - 1 }, { P1.x + 3, P1.y + 4 }, Alpha(st::Canvas, 0.6f), R);       // outside the trace
+        }
+
+        //------------------------------------------------------------------------------------------
+        // In-node previews (section 13): what a step makes, at a glance. One hook: PreviewOf says the kind, PreviewRows its height (the layout
+        // reads it, so the step grows and routes go around it), DrawPreview draws it under the ports.
+        //------------------------------------------------------------------------------------------
+        struct preview
+        {
+            enum class kind : std::uint8_t { NONE, TEXTURE, COLOR } m_Kind = kind::NONE;
+            xresource::full_guid m_Texture = {};
+            ImVec4               m_Color   = {};
+        };
+
+        static constexpr std::uint64_t SAMPLER = xresource::type_guid{ "samplerPrefabs" }.m_Value, TEXTURE = xresource::type_guid{ "texturePrefabs" }.m_Value;     // the prefabs' guids (xmaterial_graph.cpp)
+        static constexpr std::uint64_t VEC3 = xresource::type_guid{ "Vec3 Const Node" }.m_Value, VEC4 = xresource::type_guid{ "Vec4 Const Node" }.m_Value;
+        static bool IsPrefab(const node& N, std::uint64_t Prefab) noexcept { return N.m_PrefabGuid.m_Value == Prefab; }
+
+        preview PreviewOf(const node& N) const noexcept
+        {
+            using type = xmaterial_graph::node_param::type;
+            preview P;
+            if (!m_bPreviews) return P;
+            if (IsPrefab(N, SAMPLER))                                                       // the texture it samples
+            {
+                for (auto& Param : N.m_Params) if (Param.m_Type == type::TEXTURE_RESOURCE) { P.m_Kind = preview::kind::TEXTURE; P.m_Texture = Param.m_Value.get<xresource::full_guid>(); break; }
+            }
+            else if (IsPrefab(N, TEXTURE) && !N.m_InputPins.empty())                        // fed by a sampler: what it samples (not where: the UV is not shown)
+            {
+                if (auto* pC = ConnectionOf(N.m_InputPins[0])) if (auto* pS = m_Doc.m_Graph.findNodeByPin(pC->m_OutputPinGuid); pS && IsPrefab(*pS, SAMPLER)) P = PreviewOf(*pS);
+            }
+            else if (IsPrefab(N, VEC3) || IsPrefab(N, VEC4))                                // built from literals only: their colour
+            {
+                float v[4] = { 0, 0, 0, 1 };
+                for (std::size_t i = 0; i < N.m_InputPins.size() && i < 4; ++i)
+                {
+                    const auto& In = N.m_InputPins[i];
+                    if (ConnectionOf(In) || !HasParam(N, In) || N.m_Params[In.m_ParamIndex].m_Type != xmaterial_graph::node_param::type::FLOAT) return P;
+                    v[i] = N.m_Params[In.m_ParamIndex].m_Value.get<float>();
+                }
+                // Literal colours are linear: encoded to sRGB (the exact piecewise curve) to be seen as they will look.
+                // ponytail: alpha ignored; a checker under it when Vec4 alpha matters
+                auto Srgb = [](float c) { c = std::clamp(c, 0.0f, 1.0f); return c <= 0.0031308f ? 12.92f * c : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f; };
+                P.m_Kind  = preview::kind::COLOR;
+                P.m_Color = { Srgb(v[0]), Srgb(v[1]), Srgb(v[2]), 1.0f };
+            }
+            return P;
+        }
+
+        int PreviewRows(const node& N) const noexcept
+        {
+            switch (PreviewOf(N).m_Kind)
+            {
+            case preview::kind::TEXTURE: return stack_style::THUMB_ROWS;
+            case preview::kind::COLOR:   return stack_style::SWATCH_ROWS;
+            default:                     return 0;
+            }
+        }
+
+        // In the rows PreviewRows added at the bottom of the box. A texture is its thumbnail from the editor's thumbnail cache (what every
+        // resource reference shows), its type's picture until that is ready; none assigned says so.
+        void DrawPreview(ImDrawList* D, const node& N, ImVec2 P0, ImVec2 P1) const noexcept
+        {
+            namespace st = stack_style;
+            namespace geo = stack_layout::geo;
+            const auto P = PreviewOf(N);
+            if (P.m_Kind == preview::kind::NONE) return;
+            const float Bottom = P1.y - Len(geo::NODE_PAD_BOTTOM), Top = Bottom - Len(PreviewRows(N) * geo::ROW_H - st::THUMB_PAD);
+            if (P.m_Kind == preview::kind::COLOR)
+            {
+                const ImVec2 a{ P0.x + Len(geo::PORT_PAD), Top }, b{ P1.x - Len(geo::PORT_PAD), Bottom };
+                D->AddRectFilled(a, b, ImGui::ColorConvertFloat4ToU32(P.m_Color), Len(2));
+                D->AddRect(a, b, st::StepBorder, Len(2));
+                return;
+            }
+            const float S = Bottom - Top, x = std::floor((P0.x + P1.x - S) * 0.5f);
+            const ImVec2 a{ x, Top }, b{ x + S, Bottom };
+            xresource_editor::plugin_icon_ref Pic;
+            auto& Host = xresource_editor::g_ReferenceHost;
+            if (!P.m_Texture.empty() && Host.m_Thumbnail) Pic = Host.m_Thumbnail(P.m_Texture);
+            if (!Pic.isValid() && !P.m_Texture.empty()) Pic = xresource_editor::g_LibMgr.m_AssetPluginsDB.getIconRef(P.m_Texture.m_Type, 0);
+            D->AddRectFilled(a, b, st::OutputsHalf, Len(2));
+            if (Pic.isValid()) D->AddImage((ImTextureRef)(void*)Pic.m_pTexture, a, b, { Pic.m_U0, Pic.m_V0 }, { Pic.m_U1, Pic.m_V1 });
+            else               Text(D, { (P0.x + P1.x - TextW("no texture")) * 0.5f, (Top + Bottom - FontPx()) * 0.5f }, st::TextDim, "no texture");
+            D->AddRect(a, b, st::StepBorder, Len(2));
         }
 
         bool IsUsed(const xmaterial_graph::output_pin& Op) const noexcept
@@ -791,7 +881,7 @@ namespace xmaterial_editor
             if (!M.Check(G, S, G.m_Stack.m_Sections).empty()) return;
             auto Sections = G.m_Stack.m_Sections;
             for (std::size_t i = 0; i < S.size(); ++i) { Sections[i].m_Steps.clear(); for (int n : S[i]) Sections[i].m_Steps.push_back(M.m_Ids[n]); }
-            m_Drag.m_In = stack_routes::FromGraph(G, m_View.m_Measure, m_View.m_InputW, m_View.m_LitW, &Sections);
+            m_Drag.m_In = stack_routes::FromGraph(G, m_View.m_Measure, m_View.m_InputW, m_View.m_LitW, m_View.m_PreviewRows, &Sections);
             m_Drag.m_R  = stack_routes::Build(m_Drag.m_In.m_In, m_Drag.m_In.m_Edges);
             for (int h = 0; h < static_cast<int>(m_Drag.m_In.m_Steps.size()); ++h) m_Drag.m_bChanges |= Moved(h);
         }
@@ -965,12 +1055,7 @@ namespace xmaterial_editor
         std::string PinLabel(std::uint64_t Pin) const noexcept { const node* pN; auto* p = PinOf(Pin, &pN); return p ? cmds::StepLabel(*pN) + "." + p->m_Name : "?"; }
 
         // The type rule of IsPinCompatible (xmaterial_graph_editing.h) for types alone: node types' pins are on no node of the graph.
-        bool Fits(xmaterial_graph::type_guid Out, xmaterial_graph::type_guid In) const noexcept
-        {
-            auto* o = m_Doc.m_Graph.findType(Out);
-            auto* i = m_Doc.m_Graph.findType(In);
-            return o && i && (o->m_GUID == i->m_GUID || (o->m_CodeString == "float" && i->m_CodeString.starts_with("vec")));
-        }
+        bool Fits(xmaterial_graph::type_guid Out, xmaterial_graph::type_guid In) const noexcept { return AreTypesCompatible(m_Doc.m_Graph, Out, In); }
 
         // Why Connect would refuse Out -> In, checked before it runs so a refusal leaves no history (7.7); "" = it would connect
         std::string WhyNot(std::uint64_t Out, std::uint64_t In) const noexcept
@@ -1493,6 +1578,7 @@ namespace xmaterial_editor
             if (ImGui::BeginPopup("##CanvasMenu"))
             {
                 if (ImGui::MenuItem("Add step...")) OpenSearch(search::kind::ADD, m_MenuAt, 0);
+                if (ImGui::MenuItem("Show previews in steps", "T", m_bPreviews)) m_bPreviews = !m_bPreviews;
                 ImGui::EndPopup();
             }
 
@@ -1548,6 +1634,7 @@ namespace xmaterial_editor
         move_plan                                   m_Drag;
         std::uint64_t                               m_PreviewPin = 0;   // the output previewed on the mesh (0: the material)
         std::string                                 m_PreviewStatus;
+        bool                                        m_bPreviews = true; // in-node previews shown (T, the background menu)
     };
 
     namespace cmds
