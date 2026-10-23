@@ -17,6 +17,7 @@
 #include "plugins/xmaterial.plugin/source/xmaterial_xgpu_rsc_loader.cpp"        // the resource loader: compiled once, in the host's translation unit
 
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_step_previews.h"
+#include "plugins/xmaterial.plugin/source/Editor/xmaterial_thumbnail.h"
 #include "plugins/xmaterial.plugin/source/Graph/xmaterial_step_names.h"
 #include <algorithm>
 
