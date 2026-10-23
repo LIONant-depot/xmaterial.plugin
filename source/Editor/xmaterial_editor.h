@@ -128,6 +128,7 @@ namespace xmaterial_editor
             m_Document.m_OnRead = [](xmaterial_graph::graph& G) { cmds::RefreshGroupNodes(G); };    // group nodes follow their sub-graphs' interfaces
             cmds::RefreshGroupNodes(m_Document.m_Graph);                                            // (the document was read before this hook existed)
             xresource_editor::g_LibMgr.m_OnCompilationState.Register<&session::OnAnyCompile>(*this); // ...and the moment a sub-graph is compiled again
+            m_Preview.m_Model = e19::mesh_manager::model::SPHERE;       // the mesh it opens on (the Meshes list changes it)
             if (pDevice && bMaterial && m_Preview.Init(*pDevice) && std::filesystem::exists(m_Document.m_ResourcePath)) ReloadPreview();
             if (pDevice && bMaterial && m_StepPreviews.Init(*pDevice))
             {
