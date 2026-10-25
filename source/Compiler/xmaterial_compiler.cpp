@@ -857,6 +857,22 @@ namespace xmaterial_compiler
             MaterialDataFile.m_pDefaultBlock    = DefaultBlock.empty() ? nullptr : DefaultBlock.data();
             MaterialDataFile.m_LayoutHash       = m_Manifest.m_LayoutHash;
 
+            // The parameters with their names (the runtime addresses an entity's overrides by them)
+            std::vector<xmaterial::data_file::param_info> ParamInfo;
+            for (const auto& E : m_Manifest.m_Entries)
+            {
+                auto& P = ParamInfo.emplace_back();
+                P.m_ID          = E.m_ID;
+                P.m_ByteOffset  = E.m_ByteOffset;
+                P.m_Type        = std::uint8_t(E.m_Type);
+                P.m_Slot        = E.m_Type == xmaterial::param_type::TEXTURE && E.m_Sampler ? std::uint8_t(E.m_Sampler - 1) : 0;
+                P.m_EntityField = std::uint8_t(E.m_EntityField);
+                if (const auto D = std::ranges::find(m_Manifest.m_Decls, E.m_ID, &xmaterial::param_decl::m_ID); D != m_Manifest.m_Decls.end())
+                    std::strncpy(P.m_Name, D->m_Name.c_str(), sizeof(P.m_Name) - 1);
+            }
+            MaterialDataFile.m_pParamInfo = ParamInfo.empty() ? nullptr : ParamInfo.data();
+            MaterialDataFile.m_nParamInfo = std::uint16_t(ParamInfo.size());
+
             //
             // Save the layout manifest: the one place that says where each parameter lives (instance compiler, editor and runtime read it)
             //

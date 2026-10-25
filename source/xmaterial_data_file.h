@@ -15,7 +15,21 @@ namespace xmaterial
         // v4: the render settings (xmaterial_render_settings.h) instead of the alpha flag
         // v5: graph materials with textures read them through xLIONRender's texture table (flags::m_bTextureTable): the HDR shader by its set 3,
         //     and its bindless twin (m_pShaderBindless) by the ids after the parameter block
-        inline static constexpr auto xserializer_version_v = 5;
+        // v6: the parameters (m_pParams): where each lives, so the runtime addresses them by id or name (an entity's overrides, game code)
+        inline static constexpr auto xserializer_version_v = 6;
+
+        // One parameter of the manifest (xmaterial_params.h manifest_entry + its name): the block's ones and the textures; a STATIC one has no storage, none here
+        struct param_info
+        {
+            std::uint64_t   m_ID            = 0;
+            std::uint16_t   m_ByteOffset    = 0;        // into the block (not TEXTURE)
+            std::uint8_t    m_Type          = 0;        // xmaterial::param_type
+            std::uint8_t    m_Slot          = 0;        // TEXTURE: its texture slot (the sampler - 1; the renderer's Textures[m_Slot + 1])
+            std::uint8_t    m_EntityField   = 0;        // xmaterial::entity_field
+            std::uint8_t    m_Pad[3]        = {};
+            char            m_Name[48]      = {};       // (cut to 47 characters)
+        };
+        static_assert(sizeof(param_info) == 64);
 
         struct flags
         {
@@ -78,6 +92,9 @@ namespace xmaterial
         float*              m_pDefaultBlock;            // m_BlockBytes/4 floats: every parameter at its default (the material's own instance)
         std::uint64_t       m_LayoutHash;               // xmaterial::Hash of the manifest: a material instance must carry the same
         render_settings     m_Render;                   // its pipeline: blend, culling, depth, shadows (the renderer: xmaterial_xlionrender.h)
+        param_info*         m_pParamInfo;               // m_nParamInfo: the manifest's entries with their names
+        std::uint16_t       m_nParamInfo;
+        inline std::span<const param_info> getParams( void ) const noexcept { return { m_pParamInfo, std::size_t(m_nParamInfo) }; }
     };
 
     //-------------------------------------------------------------------------
@@ -113,9 +130,18 @@ namespace xserializer::io_functions
         || (Err = Stream.Serialize(*(std::array<std::byte, sizeof(xmaterial::render_settings)>*)&Material.m_Render))
         || (Err = Stream.Serialize(Material.m_pShaderBindless, Material.m_ShaderSizeBindless))
         || (Err = Stream.Serialize(Material.m_ShaderSizeBindless))
+        || (Err = Stream.Serialize(Material.m_pParamInfo, Material.m_nParamInfo))
+        || (Err = Stream.Serialize(Material.m_nParamInfo))
         ;
 
         return Err;
+    }
+
+    //-------------------------------------------------------------------------
+    template<> inline
+    xerr SerializeIO<xmaterial::data_file::param_info>(xserializer::stream& Stream, const xmaterial::data_file::param_info& Info) noexcept
+    {
+        return Stream.Serialize(*(std::array<std::byte, sizeof(Info)>*)&Info);
     }
 
     //-------------------------------------------------------------------------
