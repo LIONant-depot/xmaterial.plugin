@@ -33,9 +33,12 @@ xresource::loader< xrsc::material_type_guid_v >::data_type* xresource::loader< x
     { .m_Type   = xgpu::shader::type::bit::FRAGMENT
     , .m_Sharer = xgpu::shader::setup::raw_data{ std::span{reinterpret_cast<const int32_t*>(pMaterial->m_pShader), (std::size_t)pMaterial->m_ShaderSize } }
     };
+    // A texture-table material on a bindless device: its bindless twin (the same API either way: instance::CreateMaterial bTextureTable)
+    const bool bBindless = pMaterial->m_ShaderSizeBindless && UserData.m_Device.isBindless();
     xgpu::shader::setup SetupHDR
     { .m_Type   = xgpu::shader::type::bit::FRAGMENT
-    , .m_Sharer = xgpu::shader::setup::raw_data{ std::span{reinterpret_cast<const int32_t*>(pMaterial->m_pShaderHDR), (std::size_t)pMaterial->m_ShaderSizeHDR } }
+    , .m_Sharer = xgpu::shader::setup::raw_data{ bBindless ? std::span{reinterpret_cast<const int32_t*>(pMaterial->m_pShaderBindless), (std::size_t)pMaterial->m_ShaderSizeBindless }
+                                                           : std::span{reinterpret_cast<const int32_t*>(pMaterial->m_pShaderHDR), (std::size_t)pMaterial->m_ShaderSizeHDR } }
     };
 
     // Must clear the memory before we can recycle it....

@@ -160,7 +160,7 @@ namespace xmaterial_compiler
         xmaterial::manifest                                     m_Manifest;
         bool                                                    m_bManifest = false;
         bool                                                    m_bFailed   = false;
-        bool                                                    m_bSamplers = false;    // a graph texture was emitted: its sampler binding is shifted in the HDR variant (data_file::flags::m_bSamplersFrom1)
+        bool                                                    m_bSamplers = false;    // a graph texture was emitted: the HDR variants read it through the texture table (TextureDecls)
 
         void Fail(const std::string& Message) { m_bFailed = true; LogMessage(xresource_pipeline::msg_type::ERROR, Message); }
 
@@ -297,6 +297,46 @@ namespace xmaterial_compiler
                      "    #define XMAT_ENT(Bit, Field, Swz, Mat) ((g_Ent.E[InInstance].H.x & Bit) != 0u ? g_Ent.E[InInstance].Field.Swz : (Mat))\n";
             S += "#endif\n";
             return S;
+        }
+
+        // The bindless variant's heaps and the texture ids: after the parameter block (its vec4s from m_BlockBytes / 16), two slots a vec4 -
+        // .xy slot 2k (texture_id, sampler_id), .zw slot 2k + 1 - written there by xLIONRender (instance::CreateMaterial, table materials)
+        std::string TextureTop(void) const
+        {
+            if (not m_bSamplers) return {};
+            const auto Base = m_Manifest.m_BlockBytes / 16;
+            // (no parameter block: ParamTop declared neither the block nor MaterialBase)
+            const std::string Block = Base ? std::string{} : "    layout(std430, set = 1, binding = 9) readonly buffer MaterialParamsBuf { vec4 P[]; } g_Mat;\n"
+                                                             "    layout(push_constant) uniform XMatPush { layout(offset = 16) uint MaterialBase; } g_XMatPush;\n"
+                                                             "    #define XMAT_BASE g_XMatPush.MaterialBase\n";
+            return std::format( "#if !defined(XLION_LDR_OUTPUT) && defined(XGPU_BINDLESS)\n{}"
+                                "    layout(set = 3, binding = 0) uniform texture2D xgpu_Textures2D[];\n"
+                                "    layout(set = 3, binding = 2) uniform sampler   xgpu_Samplers[];\n"
+                                "    #define XGPU_TEXTURE(Id) xgpu_Textures2D[Id]\n"
+                                "    #define XGPU_SAMPLER(Id) xgpu_Samplers[Id]\n"
+                                "    #define XMAT_TEXID(i)  floatBitsToUint(g_Mat.P[XMAT_BASE + {}u + (i) / 2u][((i) % 2u) * 2u])\n"
+                                "    #define XMAT_SAMPID(i) floatBitsToUint(g_Mat.P[XMAT_BASE + {}u + (i) / 2u][((i) % 2u) * 2u + 1u])\n"
+                                "#endif\n", Block, Base, Base);
+        }
+
+        // A graph texture's declaration (the Sampler 2D node's) per variant: LDR sampler i; bindless its two heap entries; else binding i of set 3
+        static std::string TextureDecls(const std::string& Code)
+        {
+            static const std::regex Decl(R"(layout\(binding = XMAT_SAMPLER\((\d+)\)\)\s+uniform\s+sampler2D\s+(\w+)\s*;)");
+            std::string Out;
+            auto        From = Code.cbegin();
+            for (std::sregex_iterator It(Code.cbegin(), Code.cend(), Decl), End; It != End; ++It)
+            {
+                const auto& M = *It;
+                Out.append(From, M[0].first);
+                const auto i = M[1].str(), Name = M[2].str();
+                Out += std::format( "\n#if defined(XLION_LDR_OUTPUT)\nlayout(binding = {0}) uniform sampler2D {1};\n"
+                                    "#elif defined(XGPU_BINDLESS)\n#define {1} sampler2D(XGPU_TEXTURE(XMAT_TEXID({0}u)), XGPU_SAMPLER(XMAT_SAMPID({0}u)))\n"
+                                    "#else\nlayout(set = 3, binding = {0}) uniform sampler2D {1};\n#endif\n", i, Name);
+                From = M[0].second;
+            }
+            Out.append(From, Code.cend());
+            return Out;
         }
 
         // Swaps the read placeholders (\x01 ID \x02) for the reads
@@ -595,15 +635,20 @@ namespace xmaterial_compiler
             ResolveReads(topCode);
             ResolveReads(botCode);
 
-            // xLIONRender keeps sampler 0 (the shadow atlas): the HDR variant binds a graph's textures from 1, the editors' LDR one from 0
-            if (m_bSamplers) ss << "#ifdef XLION_LDR_OUTPUT\n    #define XMAT_SAMPLER(i) (i)\n#else\n    #define XMAT_SAMPLER(i) ((i) + 1)\n#endif\n";
+            // The graph's textures: the editors' LDR variant binds them from sampler 0; the HDR ones read xLIONRender's texture table (set 3,
+            // xgpu::texture_table): bindless (XGPU_BINDLESS), the heaps by the ids in the material's block; otherwise binding i of the table's set
+            if (m_bSamplers)
+            {
+                ss << "#if !defined(XLION_LDR_OUTPUT) && defined(XGPU_BINDLESS)\n#extension GL_EXT_nonuniform_qualifier : require\n#endif\n";
+                topCode = TextureDecls(topCode);
+            }
             if (bMasked)            // the output nodes' cut (XMAT_MASKED, a compile option)
             {
                 auto Cutoff = std::format("#define XMAT_ALPHA_CUTOFF (\x01{:016X}\x02)\n", xmaterial::alpha_cutoff_param_id_v);
                 ResolveReads(Cutoff);
                 ss << Cutoff;
             }
-            ss << ParamTop() << topCode << "\n";
+            ss << ParamTop() << TextureTop() << topCode << "\n";
             ss << "void main() \n{\n";
             ss << botCode;
             ss << "}\n";
@@ -674,8 +719,10 @@ namespace xmaterial_compiler
             const auto& shaderString = GenerateGLSL(Graph);
             if (not m_bManifest) BuildManifest(Graph);                  // a shader-file material reads no parameters: its manifest is only the declarations
 
-            if (Graph.m_FinalTextureNodes.m_Textures.size() > 7)
-                Fail(std::format("E_TOO_MANY_TEXTURES: {} material textures, the samplers 1-7 are all there is", Graph.m_FinalTextureNodes.m_Textures.size()));
+            // A shader-file material binds its own samplers 1-7 (xLIONRender's set 0); a graph material's texture table has no limit of its own,
+            // the editors' LDR variant binds them as pipeline samplers (16 at most)
+            if (const auto n = Graph.m_FinalTextureNodes.m_Textures.size(); n > (Graph.findFullShaderNode() ? 7u : 16u))
+                Fail(std::format("E_TOO_MANY_TEXTURES: {} material textures, {} at most", n, Graph.findFullShaderNode() ? 7 : 16));
 
             if (m_bFailed)
                 return xerr::create_f<state, "The material parameters are not valid (see the log for the E_ codes)">();
@@ -692,13 +739,14 @@ namespace xmaterial_compiler
             // Materials that never test XLION_LDR_OUTPUT produce the same code twice.
             shaderc::Compiler compiler;
             std::vector<std::filesystem::path> Includes;
-            const auto CompileVariant = [&](bool bLDR, std::vector<uint32_t>& SPIRV) -> xerr
+            const auto CompileVariant = [&](bool bLDR, std::vector<uint32_t>& SPIRV, bool bBindless = false) -> xerr
             {
                 shaderc::CompileOptions options;
                 options.SetIncluder(std::make_unique<CustomIncluder>(&Includes));
                 options.SetOptimizationLevel(shaderc_optimization_level_performance);
                 options.SetTargetSpirv(shaderc_spirv_version_1_0);
                 if (bLDR) options.AddMacroDefinition("XLION_LDR_OUTPUT");
+                if (bBindless) options.AddMacroDefinition("XGPU_BINDLESS");
                 if (Graph.m_Render.m_BlendMode == xmaterial::render_settings::blend_mode::MASKED) options.AddMacroDefinition("XMAT_MASKED");
                 if (Graph.m_Render.m_BackNormal == xmaterial::render_settings::back_normal::NONE) options.AddMacroDefinition("XMAT_BACK_FACE_AS_FRONT");     // else back faces flip their normal: always compiled in, so an instance can make it double sided
                 auto result = compiler.CompileGlslToSpv( shaderString
@@ -726,9 +774,11 @@ namespace xmaterial_compiler
                 return {};
             };
 
-            std::vector<uint32_t> spirv, spirvHDR;
+            // A graph material with textures: the HDR variant twice, through the texture table's set (any device) and bindless (XGPU_BINDLESS)
+            std::vector<uint32_t> spirv, spirvHDR, spirvBindless;
             if (auto Err = CompileVariant(true,  spirv);    Err) return Err;
             if (auto Err = CompileVariant(false, spirvHDR); Err) return Err;
+            if (m_bSamplers) if (auto Err = CompileVariant(false, spirvBindless, true); Err) return Err;
             displayProgressBar("Compiling Shader", 1.0f);
 
             //
@@ -786,6 +836,9 @@ namespace xmaterial_compiler
             MaterialDataFile.m_ShaderSize       = static_cast<std::uint32_t>(spirv.size());
             MaterialDataFile.m_pShaderHDR       = spirvHDR.data();
             MaterialDataFile.m_ShaderSizeHDR    = static_cast<std::uint32_t>(spirvHDR.size());
+            MaterialDataFile.m_pShaderBindless  = spirvBindless.empty() ? nullptr : spirvBindless.data();
+            MaterialDataFile.m_ShaderSizeBindless = static_cast<std::uint32_t>(spirvBindless.size());
+            MaterialDataFile.m_Flags.m_bTextureTable = m_bSamplers;
             MaterialDataFile.m_Render           = Graph.m_Render;
             MaterialDataFile.m_Flags.m_bSamplersFrom1 = Graph.findFullShaderNode() == nullptr;   // every graph material: also one without textures (Output: PBR samples the shadow atlas, slot 0)
             MaterialDataFile.m_pDefaultTextures = Graph.m_FinalTextureNodes.m_Textures.empty()? nullptr : Textures.get();

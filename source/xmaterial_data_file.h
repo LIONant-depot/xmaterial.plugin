@@ -13,7 +13,9 @@ namespace xmaterial
         // v3: the parameter block: layout hash + byte size + the default block (documentation/material_contract.md section 2). A v2 file (older size and version) is refused by
         //     the serializer and loads as null, exactly like an uncompiled resource; the pipeline recompiles it because the compiler executable is newer.
         // v4: the render settings (xmaterial_render_settings.h) instead of the alpha flag
-        inline static constexpr auto xserializer_version_v = 4;
+        // v5: graph materials with textures read them through xLIONRender's texture table (flags::m_bTextureTable): the HDR shader by its set 3,
+        //     and its bindless twin (m_pShaderBindless) by the ids after the parameter block
+        inline static constexpr auto xserializer_version_v = 5;
 
         struct flags
         {
@@ -23,7 +25,8 @@ namespace xmaterial
 
                 struct
                 {
-                    bool m_bSamplersFrom1:1;    // a graph material: the HDR shader's textures are samplers 1.. (xLIONRender keeps 0), the texture list has no slot-0 entry
+                    bool m_bSamplersFrom1:1;    // a graph material: the texture list has no slot-0 entry (xLIONRender's slot 0: the shadow atlas)
+                    bool m_bTextureTable:1;     // its HDR shaders read the textures through xLIONRender's texture table (instance::CreateMaterial bTextureTable)
                 };
             };
         };
@@ -64,7 +67,11 @@ namespace xmaterial
                 std::uint32_t   m_ShaderSizeHDR;
             };
         };
-        xrsc::texture_ref*  m_pDefaultTextures; 
+        // The HDR variant compiled with XGPU_BINDLESS (a texture-table material: the heaps by id); empty otherwise. The loader creates getShaderHDR()
+        // from it on a bindless device
+        std::uint32_t*      m_pShaderBindless;
+        std::uint32_t       m_ShaderSizeBindless;
+        xrsc::texture_ref*  m_pDefaultTextures;
         flags               m_Flags;
         std::uint8_t        m_nDefaultTextures;
         std::uint16_t       m_BlockBytes;               // the material's parameter block, a multiple of 16 (0: the shader reads no parameters)
@@ -104,6 +111,8 @@ namespace xserializer::io_functions
         || (Err = Stream.Serialize(Material.m_BlockBytes))
         || (Err = Stream.Serialize(Material.m_LayoutHash))
         || (Err = Stream.Serialize(*(std::array<std::byte, sizeof(xmaterial::render_settings)>*)&Material.m_Render))
+        || (Err = Stream.Serialize(Material.m_pShaderBindless, Material.m_ShaderSizeBindless))
+        || (Err = Stream.Serialize(Material.m_ShaderSizeBindless))
         ;
 
         return Err;
