@@ -10,6 +10,7 @@
 #include <cassert>
 #include <cfloat>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -133,6 +134,13 @@ namespace xmaterial
         , obj_member<"Decls",       &manifest::m_Decls>
         )
     };
+
+    // The order the inspectors list a material's parameters in (the Material Instance editor; a Mesh slot's rows, through the compiled
+    // parameter list, which is written in it): the declaration's Order, lower first, ties as declared; a parameter without a declaration last
+    inline std::pair<std::int32_t, std::ptrdiff_t> InspectorOrder( const param_decl* pDecl, std::span<const param_decl> Decls ) noexcept
+    {
+        return pDecl ? std::pair{ pDecl->m_Order, pDecl - Decls.data() } : std::pair{ std::int32_t(INT32_MAX), std::ptrdiff_t(Decls.size()) };
+    }
     XPROPERTY_REG(manifest)
 
     // FNV-1a 64 over (ID, type, offset, entity field) of every entry in manifest order, plus the block size. A TEXTURE hashes its sampler where the offset would go (a

@@ -857,9 +857,13 @@ namespace xmaterial_compiler
             MaterialDataFile.m_pDefaultBlock    = DefaultBlock.empty() ? nullptr : DefaultBlock.data();
             MaterialDataFile.m_LayoutHash       = m_Manifest.m_LayoutHash;
 
-            // The parameters with their names (the runtime addresses an entity's overrides by them)
+            // The parameters with their names (the runtime addresses an entity's overrides by them), in the order the inspectors list them
+            // (xmaterial::InspectorOrder: a Mesh slot's rows are this list)
             std::vector<xmaterial::data_file::param_info> ParamInfo;
-            for (const auto& E : m_Manifest.m_Entries)
+            auto Entries = m_Manifest.m_Entries;
+            const auto DeclOf = [&](std::uint64_t ID) { const auto D = std::ranges::find(m_Manifest.m_Decls, ID, &xmaterial::param_decl::m_ID); return D == m_Manifest.m_Decls.end() ? nullptr : &*D; };
+            std::ranges::stable_sort(Entries, {}, [&](const xmaterial::manifest_entry& E) { return xmaterial::InspectorOrder(DeclOf(E.m_ID), m_Manifest.m_Decls); });
+            for (const auto& E : Entries)
             {
                 auto& P = ParamInfo.emplace_back();
                 P.m_ID          = E.m_ID;
