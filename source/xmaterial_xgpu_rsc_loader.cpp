@@ -41,9 +41,15 @@ xresource::loader< xrsc::material_type_guid_v >::data_type* xresource::loader< x
                                                            : std::span{reinterpret_cast<const int32_t*>(pMaterial->m_pShaderHDR), (std::size_t)pMaterial->m_ShaderSizeHDR } }
     };
 
+    // The G-buffer variant (v7; none for a material that does not light with mb_standard_pbr.frag): its bindless twin on a bindless device
+    const bool bGBufferBindless = bBindless && pMaterial->m_ShaderSizeGBufferBindless;
+    const auto GBufferCode = bGBufferBindless ? std::span{reinterpret_cast<const int32_t*>(pMaterial->m_pShaderGBufferBindless), (std::size_t)pMaterial->m_ShaderSizeGBufferBindless }
+                                              : std::span{reinterpret_cast<const int32_t*>(pMaterial->m_pShaderGBuffer), (std::size_t)pMaterial->m_ShaderSizeGBuffer };
+
     // Must clear the memory before we can recycle it....
     memset(static_cast<void*>(&pMaterial->getShader()),    0, sizeof(pMaterial->getShader()) );
     memset(static_cast<void*>(&pMaterial->getShaderHDR()), 0, sizeof(pMaterial->getShaderHDR()) );
+    memset(static_cast<void*>(&pMaterial->getShaderGBuffer()), 0, sizeof(pMaterial->getShaderGBuffer()) );
 
     // OK time to create the shader officially. A genuine GPU-side failure (not the "missing resource"
     // case above - the file loaded fine, the shader bytecode itself didn't build), but still not
@@ -57,6 +63,8 @@ xresource::loader< xrsc::material_type_guid_v >::data_type* xresource::loader< x
     {
         return nullptr;
     }
+    if (!GBufferCode.empty())       // (its failure leaves the material out of the G-buffer: it shades its tail exactly)
+        (void)UserData.m_Device.Create(pMaterial->getShaderGBuffer(), { .m_Type = xgpu::shader::type::bit::FRAGMENT, .m_Sharer = xgpu::shader::setup::raw_data{ GBufferCode } });
 
     // Link up all other dependencies. A default texture that fails to resolve (missing/uncompiled
     // itself) is the same expected, recoverable case as every other dependency-resolution loop fixed

@@ -20,6 +20,13 @@ namespace xmaterial
             return reinterpret_cast<xgpu::shader&>(m_RawDataHDR);
         }
 
+        // The G-buffer variant, for xLIONRender's thin G-buffer (an empty shader: none - see data_file::m_pShaderGBuffer)
+        xgpu::shader& getShaderGBuffer()
+        {
+            static_assert(sizeof(m_RawDataGBuffer) == sizeof(xgpu::shader));
+            return reinterpret_cast<xgpu::shader&>(m_RawDataGBuffer);
+        }
+
         xgpu::pipeline& getPipeline(int MaterialBasisIndex)
         {
             static_assert(sizeof(material_basis_entry) == sizeof(xgpu::pipeline));

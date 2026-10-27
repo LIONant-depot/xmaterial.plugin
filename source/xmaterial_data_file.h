@@ -16,7 +16,9 @@ namespace xmaterial
         // v5: graph materials with textures read them through xLIONRender's texture table (flags::m_bTextureTable): the HDR shader by its set 3,
         //     and its bindless twin (m_pShaderBindless) by the ids after the parameter block
         // v6: the parameters (m_pParams): where each lives, so the runtime addresses them by id or name (an entity's overrides, game code)
-        inline static constexpr auto xserializer_version_v = 6;
+        // v7: the G-buffer variant (XLION_GBUFFER_OUTPUT: xLIONRender's thin G-buffer - the screen tail, documentation/lighting_p3_design.md)
+        //     and its bindless twin; empty for a material that does not light with mb_standard_pbr.frag
+        inline static constexpr auto xserializer_version_v = 7;
 
         // One parameter of the manifest (xmaterial_params.h manifest_entry + its name): the block's ones and the textures; a STATIC one has no storage, none here
         struct param_info
@@ -95,6 +97,20 @@ namespace xmaterial
         param_info*         m_pParamInfo;               // m_nParamInfo: the manifest's entries with their names
         std::uint16_t       m_nParamInfo;
         inline std::span<const param_info> getParams( void ) const noexcept { return { m_pParamInfo, std::size_t(m_nParamInfo) }; }
+        // The G-buffer variant (v7): the HDR variant compiled with XLION_GBUFFER_OUTPUT - its normal and roughness into xLIONRender's thin
+        // G-buffer (instance::SetMaterialGBuffer); the loader creates getShaderGBuffer() from it (or from its bindless twin on a bindless
+        // device). Empty: the material does not light with mb_standard_pbr.frag (the variant would be its HDR shader)
+        union
+        {
+            std::array<void*,2> m_RawDataGBuffer;
+            struct
+            {
+                std::uint32_t*  m_pShaderGBuffer;
+                std::uint32_t   m_ShaderSizeGBuffer;
+            };
+        };
+        std::uint32_t*      m_pShaderGBufferBindless;
+        std::uint32_t       m_ShaderSizeGBufferBindless;
     };
 
     //-------------------------------------------------------------------------
@@ -132,6 +148,10 @@ namespace xserializer::io_functions
         || (Err = Stream.Serialize(Material.m_ShaderSizeBindless))
         || (Err = Stream.Serialize(Material.m_pParamInfo, Material.m_nParamInfo))
         || (Err = Stream.Serialize(Material.m_nParamInfo))
+        || (Err = Stream.Serialize(Material.m_pShaderGBuffer, Material.m_ShaderSizeGBuffer))
+        || (Err = Stream.Serialize(Material.m_ShaderSizeGBuffer))
+        || (Err = Stream.Serialize(Material.m_pShaderGBufferBindless, Material.m_ShaderSizeGBufferBindless))
+        || (Err = Stream.Serialize(Material.m_ShaderSizeGBufferBindless))
         ;
 
         return Err;

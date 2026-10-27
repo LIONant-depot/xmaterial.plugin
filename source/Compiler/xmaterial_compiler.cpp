@@ -739,7 +739,7 @@ namespace xmaterial_compiler
             // Materials that never test XLION_LDR_OUTPUT produce the same code twice.
             shaderc::Compiler compiler;
             std::vector<std::filesystem::path> Includes;
-            const auto CompileVariant = [&](bool bLDR, std::vector<uint32_t>& SPIRV, bool bBindless = false) -> xerr
+            const auto CompileVariant = [&](bool bLDR, std::vector<uint32_t>& SPIRV, bool bBindless = false, bool bGBuffer = false) -> xerr
             {
                 shaderc::CompileOptions options;
                 options.SetIncluder(std::make_unique<CustomIncluder>(&Includes));
@@ -747,6 +747,7 @@ namespace xmaterial_compiler
                 options.SetTargetSpirv(shaderc_spirv_version_1_0);
                 if (bLDR) options.AddMacroDefinition("XLION_LDR_OUTPUT");
                 if (bBindless) options.AddMacroDefinition("XGPU_BINDLESS");
+                if (bGBuffer)  options.AddMacroDefinition("XLION_GBUFFER_OUTPUT");     // (xLIONRender's thin G-buffer: mb_standard_pbr.frag PBRLighting)
                 if (Graph.m_Render.m_BlendMode == xmaterial::render_settings::blend_mode::MASKED) options.AddMacroDefinition("XMAT_MASKED");
                 if (Graph.m_Render.m_BackNormal == xmaterial::render_settings::back_normal::NONE) options.AddMacroDefinition("XMAT_BACK_FACE_AS_FRONT");     // else back faces flip their normal: always compiled in, so an instance can make it double sided
                 auto result = compiler.CompileGlslToSpv( shaderString
@@ -779,6 +780,12 @@ namespace xmaterial_compiler
             if (auto Err = CompileVariant(true,  spirv);    Err) return Err;
             if (auto Err = CompileVariant(false, spirvHDR); Err) return Err;
             if (m_bSamplers) if (auto Err = CompileVariant(false, spirvBindless, true); Err) return Err;
+            // The G-buffer variant (and its bindless twin): kept only where the define changed the shader - a material lit by
+            // mb_standard_pbr.frag; an unlit one would write its color as the G-buffer's normal
+            std::vector<uint32_t> spirvGBuffer, spirvGBufferBindless;
+            if (auto Err = CompileVariant(false, spirvGBuffer, false, true); Err) return Err;
+            if (spirvGBuffer == spirvHDR) spirvGBuffer.clear();
+            else if (m_bSamplers) if (auto Err = CompileVariant(false, spirvGBufferBindless, true, true); Err) return Err;
             displayProgressBar("Compiling Shader", 1.0f);
 
             //
@@ -838,6 +845,10 @@ namespace xmaterial_compiler
             MaterialDataFile.m_ShaderSizeHDR    = static_cast<std::uint32_t>(spirvHDR.size());
             MaterialDataFile.m_pShaderBindless  = spirvBindless.empty() ? nullptr : spirvBindless.data();
             MaterialDataFile.m_ShaderSizeBindless = static_cast<std::uint32_t>(spirvBindless.size());
+            MaterialDataFile.m_pShaderGBuffer   = spirvGBuffer.empty() ? nullptr : spirvGBuffer.data();
+            MaterialDataFile.m_ShaderSizeGBuffer = static_cast<std::uint32_t>(spirvGBuffer.size());
+            MaterialDataFile.m_pShaderGBufferBindless   = spirvGBufferBindless.empty() ? nullptr : spirvGBufferBindless.data();
+            MaterialDataFile.m_ShaderSizeGBufferBindless = static_cast<std::uint32_t>(spirvGBufferBindless.size());
             MaterialDataFile.m_Flags.m_bTextureTable = m_bSamplers;
             MaterialDataFile.m_Render           = Graph.m_Render;
             MaterialDataFile.m_Flags.m_bSamplersFrom1 = Graph.findFullShaderNode() == nullptr;   // every graph material: also one without textures (Output: PBR samples the shadow atlas, slot 0)
