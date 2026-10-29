@@ -279,6 +279,19 @@ namespace xmaterial_compiler
             return std::format("XMAT_ENT({}u, {}, {}, {})", 1u << (int(E.m_EntityField) - 1), Field[int(E.m_EntityField)], std::string_view("xyzw").substr(0, n), Mat);
         }
 
+        // The HDR variants' push constants (xLIONRender's draws: details::push_static_geom - the cluster, the instance slot, ..., the
+        // material's base at 16): MaterialBase for the parameter block, the cluster and slot for the G-buffer prepass's cutout
+        // (mb_standard_pbr.frag XLION_GPRE_OUT). Every HDR variant declares it, so a material's G-buffer output needs no parameter block
+        static std::string PushTop(void)
+        {
+            return "#ifndef XLION_LDR_OUTPUT\n"
+                   "    layout(push_constant) uniform XMatPush { uint Cluster; uint Instance; layout(offset = 16) uint MaterialBase; } g_XMatPush;\n"
+                   "    #define XMAT_BASE g_XMatPush.MaterialBase\n"
+                   "    #define XMAT_PUSH_CLUSTER  g_XMatPush.Cluster\n"
+                   "    #define XMAT_PUSH_INSTANCE g_XMatPush.Instance\n"
+                   "#endif\n";
+        }
+
         // The [TOP] declarations of a material with a block (section 2). Nothing at all when no parameter is read: those shaders do not change.
         std::string ParamTop(void) const
         {
@@ -289,7 +302,7 @@ namespace xmaterial_compiler
 
             std::string S = "layout(std430, set = 1, binding = 9) readonly buffer MaterialParamsBuf { vec4 P[]; } g_Mat;\n#ifdef XLION_LDR_OUTPUT\n    #define XMAT_BASE 0u\n";
             if (bEntity) S += "    #define XMAT_ENT(Bit, Field, Swz, Mat) (Mat)\n";
-            S += "#else\n    layout(push_constant) uniform XMatPush { layout(offset = 16) uint MaterialBase; } g_XMatPush;\n    #define XMAT_BASE g_XMatPush.MaterialBase\n";
+            S += "#else\n";         // (the push constants and XMAT_BASE: PushTop)
             if (bEntity)
                 S += "    struct XMatEntity { uvec4 H; vec4 Tint; vec4 P0; vec4 P1; };\n"
                      "    layout(std430, set = 1, binding = 10) readonly buffer EntityParamsBuf { XMatEntity E[]; } g_Ent;\n"
@@ -305,10 +318,8 @@ namespace xmaterial_compiler
         {
             if (not m_bSamplers) return {};
             const auto Base = m_Manifest.m_BlockBytes / 16;
-            // (no parameter block: ParamTop declared neither the block nor MaterialBase)
-            const std::string Block = Base ? std::string{} : "    layout(std430, set = 1, binding = 9) readonly buffer MaterialParamsBuf { vec4 P[]; } g_Mat;\n"
-                                                             "    layout(push_constant) uniform XMatPush { layout(offset = 16) uint MaterialBase; } g_XMatPush;\n"
-                                                             "    #define XMAT_BASE g_XMatPush.MaterialBase\n";
+            // (no parameter block: ParamTop declared no block; MaterialBase: PushTop)
+            const std::string Block = Base ? std::string{} : "    layout(std430, set = 1, binding = 9) readonly buffer MaterialParamsBuf { vec4 P[]; } g_Mat;\n";
             return std::format( "#if !defined(XLION_LDR_OUTPUT) && defined(XGPU_BINDLESS)\n{}"
                                 "    layout(set = 3, binding = 0) uniform texture2D xgpu_Textures2D[];\n"
                                 "    layout(set = 3, binding = 2) uniform sampler   xgpu_Samplers[];\n"
@@ -648,7 +659,7 @@ namespace xmaterial_compiler
                 ResolveReads(Cutoff);
                 ss << Cutoff;
             }
-            ss << ParamTop() << TextureTop() << topCode << "\n";
+            ss << PushTop() << ParamTop() << TextureTop() << topCode << "\n";
             ss << "void main() \n{\n";
             ss << botCode;
             ss << "}\n";

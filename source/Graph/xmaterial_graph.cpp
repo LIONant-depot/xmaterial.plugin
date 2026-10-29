@@ -1050,9 +1050,9 @@ namespace xmaterial_graph
                          "#include \"Cache/dependencies/xLIONRender/src/shaders/mb_tone_mapper_lion.frag\"\n"
                          "#include \"Cache/dependencies/xLIONRender/src/shaders/mb_lineartogamma.frag\"\n"
                          "layout (location = 0) out vec4 outFragColor;\n!> "
-                         // Masked (render settings): cut below the cutoff; in xLIONRender's shadow pass (LightParams.w) the cut is all it does
+                         // Masked (render settings): cut below the cutoff; in xLIONRender's shadow pass (LightParams.w) the cut is all it does (and the G-buffer prepass's normal and submesh instance: XLION_GPRE_OUT)
                          "[BOT]<!#ifdef XMAT_MASKED\nif ($input[6]_prop[3] < XMAT_ALPHA_CUTOFF) discard;\n"
-                         "#ifndef XLION_LDR_OUTPUT\nif (UBOLight.LightParams.w > 0.5) { outFragColor = vec4(0.0); return; }\n#endif\n#endif\n"
+                         "#ifndef XLION_LDR_OUTPUT\nif (UBOLight.LightParams.w > 0.5) { outFragColor = vec4(0.0); XLION_GPRE_OUT(); return; }\n#endif\n#endif\n"
                          "vec3 $var = PBRLighting($input[3], $input[0], $input[4]_prop[2], 0.04, $input[1]_prop[0], $input[2]_prop[1], $input[5]);\n"
                          "#ifdef XLION_LDR_OUTPUT\n$var = linearToSrgb(ToneMapper_lion($var));\n#endif\n"
                          "#ifdef XMAT_MASKED\noutFragColor = vec4($var, 1.0);\n#else\n"         // masked: solid where it is kept (the alpha is the coverage), as opaque
