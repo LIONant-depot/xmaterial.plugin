@@ -45,6 +45,7 @@ namespace xmaterial_editor
                 if (m_BusyGuid != Guid) return false;              // busy with someone else - try again later
                 if (!m_bReadbackDone) return false;                // still waiting for the GPU
                 m_bBusy = false;
+                Forget(Guid);           // (read back: the GPU is done with it - held longer, its references kept replaced data alive)
                 if (m_ReadbackWidth != s_CellPixels || m_ReadbackHeight != s_CellPixels) return false;
                 OutBitmap.CreateBitmap(s_CellPixels, s_CellPixels);
                 auto Dst = OutBitmap.getMip<xcolori>(0);
@@ -77,6 +78,15 @@ namespace xmaterial_editor
         }
 
     private:
+        // Lets go of what a thumbnail was drawn from once it is read back. Held until the cache's eviction instead, a reference kept
+        // data a replacement left behind alive for good (a texture moving to fewer mips, a recompile): nothing asked for it again to move
+        // the reference - the Bistro's thumbnail kept every one of its old texture images (2026-11-01)
+        void Forget(const xresource::full_guid& Guid) noexcept
+        {
+            if (auto It = m_Refs.find(Guid); It != m_Refs.end()) { xresource::g_Mgr.ReleaseRef(It->second); m_Refs.erase(It); }
+            m_Order.remove(Guid);
+        }
+
         static bool Ok(xgpu::device::error* pErr) noexcept
         {
             if (!pErr) return true;
