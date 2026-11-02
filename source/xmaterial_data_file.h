@@ -18,7 +18,8 @@ namespace xmaterial
         // v6: the parameters (m_pParams): where each lives, so the runtime addresses them by id or name (an entity's overrides, game code)
         // v7: the G-buffer variant (XLION_GBUFFER_OUTPUT: xLIONRender's thin G-buffer - the screen tail, documentation/lighting_p3_design.md)
         //     and its bindless twin; empty for a material that does not light with mb_standard_pbr.frag
-        inline static constexpr auto xserializer_version_v = 7;
+        // v8: the tile variant (XLION_TILE_PIXEL: xLIONRender's material tile pass)
+        inline static constexpr auto xserializer_version_v = 8;
 
         // One parameter of the manifest (xmaterial_params.h manifest_entry + its name): the block's ones and the textures; a STATIC one has no storage, none here
         struct param_info
@@ -111,6 +112,16 @@ namespace xmaterial
         };
         std::uint32_t*      m_pShaderGBufferBindless;
         std::uint32_t       m_ShaderSizeGBufferBindless;
+        // The tile variant (v8; bindless only): instance::SetMaterialTile; the loader creates getShaderTile() from it. Empty: the raster path
+        union
+        {
+            std::array<void*,2> m_RawDataTile;
+            struct
+            {
+                std::uint32_t*  m_pShaderTile;
+                std::uint32_t   m_ShaderSizeTile;
+            };
+        };
     };
 
     //-------------------------------------------------------------------------
@@ -152,6 +163,8 @@ namespace xserializer::io_functions
         || (Err = Stream.Serialize(Material.m_ShaderSizeGBuffer))
         || (Err = Stream.Serialize(Material.m_pShaderGBufferBindless, Material.m_ShaderSizeGBufferBindless))
         || (Err = Stream.Serialize(Material.m_ShaderSizeGBufferBindless))
+        || (Err = Stream.Serialize(Material.m_pShaderTile, Material.m_ShaderSizeTile))
+        || (Err = Stream.Serialize(Material.m_ShaderSizeTile))
         ;
 
         return Err;

@@ -46,10 +46,14 @@ xresource::loader< xrsc::material_type_guid_v >::data_type* xresource::loader< x
     const auto GBufferCode = bGBufferBindless ? std::span{reinterpret_cast<const int32_t*>(pMaterial->m_pShaderGBufferBindless), (std::size_t)pMaterial->m_ShaderSizeGBufferBindless }
                                               : std::span{reinterpret_cast<const int32_t*>(pMaterial->m_pShaderGBuffer), (std::size_t)pMaterial->m_ShaderSizeGBuffer };
 
+    // The tile variant (v8): a bindless device only
+    const auto TileCode = bBindless ? std::span{reinterpret_cast<const int32_t*>(pMaterial->m_pShaderTile), (std::size_t)pMaterial->m_ShaderSizeTile } : std::span<const int32_t>{};
+
     // Must clear the memory before we can recycle it....
     memset(static_cast<void*>(&pMaterial->getShader()),    0, sizeof(pMaterial->getShader()) );
     memset(static_cast<void*>(&pMaterial->getShaderHDR()), 0, sizeof(pMaterial->getShaderHDR()) );
     memset(static_cast<void*>(&pMaterial->getShaderGBuffer()), 0, sizeof(pMaterial->getShaderGBuffer()) );
+    memset(static_cast<void*>(&pMaterial->getShaderTile()), 0, sizeof(pMaterial->getShaderTile()) );
 
     // OK time to create the shader officially. A genuine GPU-side failure (not the "missing resource"
     // case above - the file loaded fine, the shader bytecode itself didn't build), but still not
@@ -63,6 +67,8 @@ xresource::loader< xrsc::material_type_guid_v >::data_type* xresource::loader< x
     {
         return nullptr;
     }
+    if (!TileCode.empty())          // (its failure: the raster path)
+        (void)UserData.m_Device.Create(pMaterial->getShaderTile(), { .m_Type = xgpu::shader::type::bit::FRAGMENT, .m_Sharer = xgpu::shader::setup::raw_data{ TileCode } });
     if (!GBufferCode.empty())       // (its failure leaves the material out of the G-buffer: it shades its tail exactly)
         (void)UserData.m_Device.Create(pMaterial->getShaderGBuffer(), { .m_Type = xgpu::shader::type::bit::FRAGMENT, .m_Sharer = xgpu::shader::setup::raw_data{ GBufferCode } });
 

@@ -27,6 +27,13 @@ namespace xmaterial
             return reinterpret_cast<xgpu::shader&>(m_RawDataGBuffer);
         }
 
+        // The tile variant (an empty shader: none - see data_file::m_pShaderTile)
+        xgpu::shader& getShaderTile()
+        {
+            static_assert(sizeof(m_RawDataTile) == sizeof(xgpu::shader));
+            return reinterpret_cast<xgpu::shader&>(m_RawDataTile);
+        }
+
         xgpu::pipeline& getPipeline(int MaterialBasisIndex)
         {
             static_assert(sizeof(material_basis_entry) == sizeof(xgpu::pipeline));

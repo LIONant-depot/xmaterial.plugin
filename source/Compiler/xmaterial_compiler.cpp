@@ -160,6 +160,7 @@ namespace xmaterial_compiler
         xmaterial::manifest                                     m_Manifest;
         bool                                                    m_bManifest = false;
         bool                                                    m_bFailed   = false;
+        int                                                     m_nTextureDecls = 0;    // the graph's textures (TextureTop)
         bool                                                    m_bSamplers = false;    // a graph texture was emitted: the HDR variants read it through the texture table (TextureDecls)
 
         void Fail(const std::string& Message) { m_bFailed = true; LogMessage(xresource_pipeline::msg_type::ERROR, Message); }
@@ -284,7 +285,11 @@ namespace xmaterial_compiler
         // (mb_standard_pbr.frag XLION_GPRE_OUT). Every HDR variant declares it, so a material's G-buffer output needs no parameter block
         static std::string PushTop(void)
         {
-            return "#ifndef XLION_LDR_OUTPUT\n"
+            return "#if defined(XLION_TILE_PIXEL)\n"      // (the tile variant: xlionrender_tile_pixel.glsl: its pixel says its material)
+                   "    uint g_TileBase = 0u;\n    uint InInstance = 0u;\n    bool g_TileFront = true;\n"
+                   "    #define XLION_FRONT g_TileFront\n    #define XMAT_BASE g_TileBase\n    #define XMAT_PUSH_CLUSTER 0u\n    #define XMAT_PUSH_INSTANCE 0u\n"
+                   "    layout(push_constant) uniform TilePush { mat4 m_C2W; uint m_Graph; } g_Tile;\n"
+                   "#elif !defined(XLION_LDR_OUTPUT)\n"
                    "    layout(push_constant) uniform XMatPush { uint Cluster; uint Instance; layout(offset = 16) uint MaterialBase; } g_XMatPush;\n"
                    "    #define XMAT_BASE g_XMatPush.MaterialBase\n"
                    "    #define XMAT_PUSH_CLUSTER  g_XMatPush.Cluster\n"
@@ -306,7 +311,7 @@ namespace xmaterial_compiler
             if (bEntity)
                 S += "    struct XMatEntity { uvec4 H; vec4 Tint; vec4 P0; vec4 P1; };\n"
                      "    layout(std430, set = 1, binding = 10) readonly buffer EntityParamsBuf { XMatEntity E[]; } g_Ent;\n"
-                     "    layout(location = 8) flat in uint InInstance;\n"
+                     "    #ifndef XLION_TILE_PIXEL\n    layout(location = 8) flat in uint InInstance;\n    #endif\n"
                      "    #define XMAT_ENT(Bit, Field, Swz, Mat) ((g_Ent.E[InInstance].H.x & Bit) != 0u ? g_Ent.E[InInstance].Field.Swz : (Mat))\n";
             S += "#endif\n";
             return S;
@@ -323,11 +328,20 @@ namespace xmaterial_compiler
             return std::format( "#if !defined(XLION_LDR_OUTPUT) && defined(XGPU_BINDLESS)\n{}"
                                 "    layout(set = 3, binding = 0) uniform texture2D xgpu_Textures2D[];\n"
                                 "    layout(set = 3, binding = 2) uniform sampler   xgpu_Samplers[];\n"
+                                "    #ifdef XLION_TILE_PIXEL\n"           // (a material a pixel)
+                                "    #define XGPU_TEXTURE(Id) xgpu_Textures2D[nonuniformEXT(Id)]\n"
+                                "    #define XGPU_SAMPLER(Id) xgpu_Samplers[nonuniformEXT(Id)]\n"
+                                "    #else\n"
                                 "    #define XGPU_TEXTURE(Id) xgpu_Textures2D[Id]\n"
                                 "    #define XGPU_SAMPLER(Id) xgpu_Samplers[Id]\n"
-                                "    #define XMAT_TEXID(i)  floatBitsToUint(g_Mat.P[XMAT_BASE + {}u + (i) / 2u][((i) % 2u) * 2u])\n"
-                                "    #define XMAT_SAMPID(i) floatBitsToUint(g_Mat.P[XMAT_BASE + {}u + (i) / 2u][((i) % 2u) * 2u + 1u])\n"
-                                "#endif\n", Block, Base, Base);
+                                "    #endif\n"
+                                "    #define XMAT_TEXID_RAW(i)  floatBitsToUint(g_Mat.P[XMAT_BASE + {}u + (i) / 2u][((i) % 2u) * 2u])\n"
+                                "    #define XMAT_SAMPID_RAW(i) floatBitsToUint(g_Mat.P[XMAT_BASE + {}u + (i) / 2u][((i) % 2u) * 2u + 1u])\n"
+                                "    #ifdef XLION_TILE_PIXEL\n"       // (read once, checked: xlionrender_tile_pixel.glsl)
+                                "    #define XMAT_NTEX {}u\n    uint g_TileTex[16], g_TileSamp[16];\n"
+                                "    #define XMAT_TEXID(i)  g_TileTex[i]\n    #define XMAT_SAMPID(i) g_TileSamp[i]\n"
+                                "    #else\n    #define XMAT_TEXID(i)  XMAT_TEXID_RAW(i)\n    #define XMAT_SAMPID(i) XMAT_SAMPID_RAW(i)\n    #endif\n"
+                                "#endif\n", Block, Base, Base, m_nTextureDecls);
         }
 
         // A graph texture's declaration (the Sampler 2D node's) per variant: LDR sampler i; bindless its two heap entries; else binding i of set 3
@@ -651,6 +665,7 @@ namespace xmaterial_compiler
             if (m_bSamplers)
             {
                 ss << "#if !defined(XLION_LDR_OUTPUT) && defined(XGPU_BINDLESS)\n#extension GL_EXT_nonuniform_qualifier : require\n#endif\n";
+                for (std::size_t At = 0; (At = topCode.find("XMAT_SAMPLER(", At)) != std::string::npos; ++At) ++m_nTextureDecls;
                 topCode = TextureDecls(topCode);
             }
             if (bMasked)            // the output nodes' cut (XMAT_MASKED, a compile option)
@@ -660,7 +675,9 @@ namespace xmaterial_compiler
                 ss << Cutoff;
             }
             ss << PushTop() << ParamTop() << TextureTop() << topCode << "\n";
+            ss << "#ifdef XLION_TILE_PIXEL\n#include \"Cache/dependencies/xLIONRender/src/shaders/xlionrender_tile_pixel.glsl\"\n#endif\n";
             ss << "void main() \n{\n";
+            ss << "#ifdef XLION_TILE_PIXEL\nTilePixelSetup();\n#endif\n";
             ss << botCode;
             ss << "}\n";
 
@@ -750,7 +767,7 @@ namespace xmaterial_compiler
             // Materials that never test XLION_LDR_OUTPUT produce the same code twice.
             shaderc::Compiler compiler;
             std::vector<std::filesystem::path> Includes;
-            const auto CompileVariant = [&](bool bLDR, std::vector<uint32_t>& SPIRV, bool bBindless = false, bool bGBuffer = false) -> xerr
+            const auto CompileVariant = [&](bool bLDR, std::vector<uint32_t>& SPIRV, bool bBindless = false, bool bGBuffer = false, bool bTile = false) -> xerr
             {
                 shaderc::CompileOptions options;
                 options.SetIncluder(std::make_unique<CustomIncluder>(&Includes));
@@ -759,7 +776,8 @@ namespace xmaterial_compiler
                 if (bLDR) options.AddMacroDefinition("XLION_LDR_OUTPUT");
                 if (bBindless) options.AddMacroDefinition("XGPU_BINDLESS");
                 if (bGBuffer)  options.AddMacroDefinition("XLION_GBUFFER_OUTPUT");     // (xLIONRender's thin G-buffer: mb_standard_pbr.frag PBRLighting)
-                if (Graph.m_Render.m_BlendMode == xmaterial::render_settings::blend_mode::MASKED) options.AddMacroDefinition("XMAT_MASKED");
+                if (bTile) options.AddMacroDefinition("XLION_TILE_PIXEL");     // (xLIONRender's material tile pass; the prepass already cut)
+                if (!bTile && Graph.m_Render.m_BlendMode == xmaterial::render_settings::blend_mode::MASKED) options.AddMacroDefinition("XMAT_MASKED");
                 if (Graph.m_Render.m_BackNormal == xmaterial::render_settings::back_normal::NONE) options.AddMacroDefinition("XMAT_BACK_FACE_AS_FRONT");     // else back faces flip their normal: always compiled in, so an instance can make it double sided
                 auto result = compiler.CompileGlslToSpv( shaderString
                                                        , shaderc_glsl_default_fragment_shader
@@ -797,6 +815,9 @@ namespace xmaterial_compiler
             if (auto Err = CompileVariant(false, spirvGBuffer, false, true); Err) return Err;
             if (spirvGBuffer == spirvHDR) spirvGBuffer.clear();
             else if (m_bSamplers) if (auto Err = CompileVariant(false, spirvGBufferBindless, true, true); Err) return Err;
+            // The tile variant (v8): a lit, textured material shaded from the G-buffer prepass; bindless only: a material a pixel
+            std::vector<uint32_t> spirvTile;
+            if (!spirvGBufferBindless.empty()) if (auto Err = CompileVariant(false, spirvTile, true, false, true); Err) return Err;
             displayProgressBar("Compiling Shader", 1.0f);
 
             //
@@ -860,6 +881,8 @@ namespace xmaterial_compiler
             MaterialDataFile.m_ShaderSizeGBuffer = static_cast<std::uint32_t>(spirvGBuffer.size());
             MaterialDataFile.m_pShaderGBufferBindless   = spirvGBufferBindless.empty() ? nullptr : spirvGBufferBindless.data();
             MaterialDataFile.m_ShaderSizeGBufferBindless = static_cast<std::uint32_t>(spirvGBufferBindless.size());
+            MaterialDataFile.m_pShaderTile      = spirvTile.empty() ? nullptr : spirvTile.data();
+            MaterialDataFile.m_ShaderSizeTile   = static_cast<std::uint32_t>(spirvTile.size());
             MaterialDataFile.m_Flags.m_bTextureTable = m_bSamplers;
             MaterialDataFile.m_Render           = Graph.m_Render;
             MaterialDataFile.m_Flags.m_bSamplersFrom1 = Graph.findFullShaderNode() == nullptr;   // every graph material: also one without textures (Output: PBR samples the shadow atlas, slot 0)
