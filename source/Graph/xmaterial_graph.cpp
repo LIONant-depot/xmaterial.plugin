@@ -1055,7 +1055,7 @@ namespace xmaterial_graph
                          "#ifndef XLION_LDR_OUTPUT\nif (UBOLight.LightParams.w > 0.5) { outFragColor = vec4(0.0); XLION_GPRE_OUT(); return; }\n#endif\n#endif\n"
                          "vec3 $var = PBRLighting($input[3], $input[0], $input[4]_prop[2], 0.04, $input[1]_prop[0], $input[2]_prop[1], $input[5]);\n"
                          "#ifdef XLION_LDR_OUTPUT\n$var = linearToSrgb(ToneMapper_lion($var));\n#endif\n"
-                         "#ifdef XMAT_MASKED\noutFragColor = vec4($var, 1.0);\n#else\n"         // masked: solid where it is kept (the alpha is the coverage), as opaque
+                         "#if defined(XMAT_MASKED) || defined(XLION_TILE_PIXEL)\noutFragColor = vec4($var, 1.0);\n#else\n"         // masked: solid where it is kept (the alpha is the coverage), as opaque
                          "outFragColor = vec4($var, $input[6]_prop[3]);\n#endif\n!>";
 
             PBR.m_InputPins.resize(7);
