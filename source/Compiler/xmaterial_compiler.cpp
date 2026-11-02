@@ -160,6 +160,7 @@ namespace xmaterial_compiler
         xmaterial::manifest                                     m_Manifest;
         bool                                                    m_bManifest = false;
         bool                                                    m_bFailed   = false;
+        bool                                                    m_bReadsUV1 = false;    // (no tile variant: the tile pass keeps one UV)
         int                                                     m_nTextureDecls = 0;    // the graph's textures (TextureTop)
         bool                                                    m_bSamplers = false;    // a graph texture was emitted: the HDR variants read it through the texture table (TextureDecls)
 
@@ -680,6 +681,7 @@ namespace xmaterial_compiler
             ss << "#ifdef XLION_TILE_PIXEL\nTilePixelSetup();\n#endif\n";
             ss << botCode;
             ss << "}\n";
+            m_bReadsUV1 = botCode.find("InUV1") != std::string::npos;
 
             return ss.str();
         }
@@ -817,7 +819,7 @@ namespace xmaterial_compiler
             else if (m_bSamplers) if (auto Err = CompileVariant(false, spirvGBufferBindless, true, true); Err) return Err;
             // The tile variant (v8): a lit, textured material shaded from the G-buffer prepass; bindless only: a material a pixel
             std::vector<uint32_t> spirvTile;
-            if (!spirvGBufferBindless.empty()) if (auto Err = CompileVariant(false, spirvTile, true, false, true); Err) return Err;
+            if (!spirvGBufferBindless.empty() && !m_bReadsUV1 && Graph.findFullShaderNode() == nullptr) if (auto Err = CompileVariant(false, spirvTile, true, false, true); Err) return Err;
             displayProgressBar("Compiling Shader", 1.0f);
 
             //
