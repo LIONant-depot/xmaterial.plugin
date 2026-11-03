@@ -287,7 +287,7 @@ namespace xmaterial_compiler
         static std::string PushTop(void)
         {
             return "#if defined(XLION_TILE_PIXEL)\n"      // (the tile variant: xlionrender_tile_pixel.glsl: its pixel says its material)
-                   "    uint g_TileBase = 0u;\n    uint InInstance = 0u;\n    bool g_TileFront = true;\n"
+                   "    uint g_TileBase = 0u;\n    uint InInstance = 0u;\n    bool g_TileFront = true;\n    float g_TileDist = 1.0;\n    #define XLION_FRAG_DIST g_TileDist\n"
                    "    #define XLION_FRONT g_TileFront\n    #define XMAT_BASE g_TileBase\n    #define XMAT_PUSH_CLUSTER 0u\n    #define XMAT_PUSH_INSTANCE 0u\n"
                    "    layout(push_constant) uniform TilePush { mat4 m_C2W; uint m_Graph; } g_Tile;\n"
                    "#elif !defined(XLION_LDR_OUTPUT)\n"
