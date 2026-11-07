@@ -775,6 +775,7 @@ namespace xmaterial_compiler
                 options.SetIncluder(std::make_unique<CustomIncluder>(&Includes));
                 options.SetOptimizationLevel(shaderc_optimization_level_performance);
                 options.SetTargetSpirv(shaderc_spirv_version_1_0);
+                if (std::getenv("XMATERIAL_SHADER_DEBUG")) options.SetGenerateDebugInfo();      // (profiling: Nsight's GLSL lines - the editor's environment reaches the compiler)
                 if (bLDR) options.AddMacroDefinition("XLION_LDR_OUTPUT");
                 if (bBindless) options.AddMacroDefinition("XGPU_BINDLESS");
                 if (bGBuffer)  options.AddMacroDefinition("XLION_GBUFFER_OUTPUT");     // (xLIONRender's thin G-buffer: mb_standard_pbr.frag PBRLighting)
