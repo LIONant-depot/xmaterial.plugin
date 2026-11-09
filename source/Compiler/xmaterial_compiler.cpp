@@ -160,6 +160,7 @@ namespace xmaterial_compiler
         xmaterial::manifest                                     m_Manifest;
         bool                                                    m_bManifest = false;
         bool                                                    m_bFailed   = false;
+        std::string                                             m_PassStory;            // the passes it is compiled for and why one is left out (the log, Shader.txt)
         bool                                                    m_bReadsUV1 = false;    // (no tile variant: the tile pass keeps one UV)
         int                                                     m_nTextureDecls = 0;    // the graph's textures (TextureTop)
         bool                                                    m_bSamplers = false;    // a graph texture was emitted: the HDR variants read it through the texture table (TextureDecls)
@@ -823,6 +824,21 @@ namespace xmaterial_compiler
             if (!spirvGBufferBindless.empty() && !m_bReadsUV1 && Graph.findFullShaderNode() == nullptr) if (auto Err = CompileVariant(false, spirvTile, true, false, true); Err) return Err;
             displayProgressBar("Compiling Shader", 1.0f);
 
+            // The story of the variants: the renderer's passes this material is drawn by, and why one is left out - the log's "Drawn by:" lines and
+            // the top of the Shader panel (Shader.txt), so a person or an agent sees where the material works without reading the defines
+            // (the bindless twins and the editor's preview variant are how, not where: not in the story)
+            {
+                std::string In = "the forward pass", Out;
+                const auto Left = [&](const char* pPass, const char* pWhy) { Out += std::format("{}{} ({})", Out.empty() ? "" : "; ", pPass, pWhy); };
+                if (!spirvGBuffer.empty()) In += ", the G-buffer prepass"; else Left("the G-buffer prepass", "unlit: the forward pass draws it");
+                if (!spirvTile.empty()) In += ", the tile pass";
+                else if (Graph.findFullShaderNode()) Left("the tile pass", "a shader-file material");
+                else if (spirvGBufferBindless.empty()) Left("the tile pass", "it needs a lit material with textures");
+                else Left("the tile pass", "it reads UV1; the tile pass has one UV");
+                m_PassStory = "Drawn by: " + In + (Out.empty() ? "" : "\nNot drawn by: " + Out);
+                LogMessage(xresource_pipeline::msg_type::INFO, m_PassStory);
+            }
+
             //
             // Print the generated shader
             //
@@ -1035,7 +1051,9 @@ namespace xmaterial_compiler
                 if (!out) { std::cerr << "Failed to open file for writing.\n";}
                 else
                 {
-                    out << shaderString << "\n";
+                    std::string Story = m_PassStory;     // (as comments over the shader: the first thing the Shader panel shows)
+                    for (std::size_t At = 0; (At = Story.find('\n', At)) != std::string::npos; At += 4) Story.replace(At, 1, "\n// ");
+                    out << "// " << Story << "\n\n" << shaderString << "\n";
                     out.close();
                 }
             }
