@@ -731,7 +731,7 @@ namespace xmaterial_editor::stack_routes
     // pOpen: the outputs the person opened (ShowsComponents).
     template<typename T_MEASURE, typename T_INPUT_W, typename T_LIT_W, typename T_PREVIEW_ROWS>
     graph_input FromGraph(const xmaterial_graph::graph& G, T_MEASURE&& Measure, T_INPUT_W&& InputW, T_LIT_W&& LitW, T_PREVIEW_ROWS&& PreviewRows, const std::vector<xmaterial_graph::section>* pSections = nullptr
-                         , const std::unordered_set<std::uint64_t>* pOpen = nullptr) noexcept
+                         , const std::unordered_set<std::uint64_t>* pOpen = nullptr, const std::function<float(const xmaterial_graph::node&)>* pNoteW = nullptr) noexcept      // pNoteW: a step's note row (the output's passes): wide enough for it
     {
         graph_input R;
         const auto& Sections = pSections ? *pSections : G.m_Stack.m_Sections;
@@ -775,7 +775,7 @@ namespace xmaterial_editor::stack_routes
                     for (auto& S : P.m_SubElements) OutRow[S.m_PinGUID.m_Value] = { g, Row };       // a component's route leaves from its output's row unless it has its own (below)
                     OutW = std::max(OutW, (P.m_SubElements.empty() ? 0.0f : ARROW_W) + Measure(P.m_Name));
                 });
-                const float TextW = std::max(Measure(N.m_StepName.empty() ? N.m_Name : N.m_StepName + "  " + N.m_Name), InW + OutW + (nIn && nOut ? sl::geo::MID_GAP : 0));
+                const float TextW = std::max({ Measure(N.m_StepName.empty() ? N.m_Name : N.m_StepName + "  " + N.m_Name), InW + OutW + (nIn && nOut ? sl::geo::MID_GAP : 0), pNoteW && *pNoteW ? (*pNoteW)(N) : 0.0f });
                 Sec.m_Steps.push_back({ Guid.m_Value, sl::StepW(TextW), std::max({ 1, nIn, nOut }) + PreviewRows(N), Lit });
             }
         }
@@ -857,13 +857,14 @@ namespace xmaterial_editor::cmds
         std::function<float(const xmaterial_graph::node&, const xmaterial_graph::input_pin&)> m_LitW = [](const xmaterial_graph::node& N, const xmaterial_graph::input_pin& P)
             { return !P.m_ConnectionGUID.m_Value && P.m_ParamIndex >= 0 && P.m_ParamIndex < static_cast<int>(N.m_Params.size()) ? stack_routes::LIT_W : 0.0f; };
         std::function<int(const xmaterial_graph::node&)> m_PreviewRows = [](const xmaterial_graph::node&) { return 0; };     // the canvas's in-node previews (none headless)
+        std::function<float(const xmaterial_graph::node&)> m_NoteW;                                                          // a step's note row's width (the output's passes)
         std::unordered_set<std::uint64_t>                m_Open;            // the vector outputs the person opened on the canvas: their components show (ShowsComponents)
     };
 
     // The layout the canvas shows
     inline stack_routes::result StackLayoutOf(const graph_document& Doc, const stack_view& View, stack_routes::graph_input& In, double& Ms) noexcept
     {
-        In = stack_routes::FromGraph(Doc.m_Graph, View.m_Measure, View.m_InputW, View.m_LitW, View.m_PreviewRows, nullptr, &View.m_Open);
+        In = stack_routes::FromGraph(Doc.m_Graph, View.m_Measure, View.m_InputW, View.m_LitW, View.m_PreviewRows, nullptr, &View.m_Open, &View.m_NoteW);
         const auto T0 = std::chrono::steady_clock::now();
         auto R = stack_routes::Build(In.m_In, In.m_Edges);
         Ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - T0).count();

@@ -327,17 +327,18 @@ namespace xmaterial_editor
             std::stringstream Text; Text << In.rdbuf();
             m_Shader.SetText(Text.str());
 
-            // The compiler's story at the top of its shader (Shader.txt): "// Drawn by: ..." and "// Not drawn by: ..." - the toolbar's line after
-            // Compile, and on hover what is left out and why
-            m_ToolbarStatus.clear(); m_ToolbarStatusHint.clear();
+            // The compiler's story at the top of its shader (Shader.txt): "// Drawn by: ..." and "// Not drawn by: ..." - a line in the output
+            // step's box (Tomas 2026-11-09: on the step, not in the toolbar), and on hover what is left out and why
+            std::string Drawn, NotDrawn;
             Text.clear(); Text.seekg(0);
             for (std::string Line; std::getline(Text, Line) && Line.starts_with("// "); )
             {
-                if (Line.starts_with("// Drawn by: "))          m_ToolbarStatus     = Line.substr(3);
-                else if (Line.starts_with("// Not drawn by: ")) m_ToolbarStatusHint = Line.substr(3);
+                if (Line.starts_with("// Drawn by: "))          Drawn    = Line.substr(3);
+                else if (Line.starts_with("// Not drawn by: ")) NotDrawn = Line.substr(3);
             }
-            if (!m_ToolbarStatus.empty())
-                m_ToolbarStatusHint = (m_ToolbarStatusHint.empty() ? std::string("Every pass of the renderer that draws materials draws this one.") : m_ToolbarStatusHint)
+            m_StackCanvas.m_OutputNote = Drawn;
+            if (!Drawn.empty())
+                m_StackCanvas.m_OutputNoteHint = Drawn + "\n" + (NotDrawn.empty() ? std::string("Every pass of the renderer that draws materials draws this one.") : NotDrawn)
                                     + "\n\nThe renderer's passes that draw materials: the forward pass (every material), the G-buffer prepass (lit materials: the"
                                       " screen-space effects read it), the tile pass (lit materials with textures: shaded from the prepass's G-buffer).";
         }

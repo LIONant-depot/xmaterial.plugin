@@ -100,6 +100,7 @@ namespace xmaterial_editor
             m_View.m_InputW  = [this](const xmaterial_graph::node& N, const xmaterial_graph::input_pin& P) { return InputW(N, P); };
             m_View.m_LitW    = [this](const xmaterial_graph::node& N, const xmaterial_graph::input_pin& P) { return LitW(N, P); };
             m_View.m_PreviewRows = [this](const xmaterial_graph::node& N) { return PreviewRows(N); };
+            m_View.m_NoteW       = [this](const xmaterial_graph::node& N) { const auto S = OutputNoteText(N); return S.empty() ? 0.0f : Measure(S); };
         }
         stack_canvas(const stack_canvas&) = delete;
 
@@ -415,7 +416,7 @@ namespace xmaterial_editor
 
         void Relayout() noexcept
         {
-            auto In = stack_routes::FromGraph(m_Doc.m_Graph, m_View.m_Measure, m_View.m_InputW, m_View.m_LitW, m_View.m_PreviewRows, nullptr, &m_View.m_Open);
+            auto In = stack_routes::FromGraph(m_Doc.m_Graph, m_View.m_Measure, m_View.m_InputW, m_View.m_LitW, m_View.m_PreviewRows, nullptr, &m_View.m_Open, &m_View.m_NoteW);
             if (m_bLaidOut && Same(In, m_In)) return;
             m_In = std::move(In); m_bLaidOut = true; m_HoverEdge = -1;                 // an edge index of the old layout
             m_R  = stack_routes::Build(m_In.m_In, m_In.m_Edges);
@@ -788,6 +789,7 @@ namespace xmaterial_editor
             ImGui::PopID();
 
             DrawPreview(D, N, P0, P1);
+            DrawOutputNote(D, N, P0, P1);
 
             // Border last: crisp over everything inside
             const bool  bSource = m_HoverChip && SourceOf(m_HoverChip) == N.m_Guid.m_Value;         // a hovered chip outlines its source
@@ -853,12 +855,34 @@ namespace xmaterial_editor
 
         int PreviewRows(const node& N) const noexcept
         {
+            const int Note = N.isOutputNode() && !N.isGroupOutputNode() && !m_OutputNote.empty() ? 1 : 0;     // (the passes that draw the material)
             switch (PreviewOf(N).m_Kind)
             {
-            case preview::kind::TEXTURE: case preview::kind::RENDER: return stack_style::THUMB_ROWS;
-            case preview::kind::COLOR:   return stack_style::SWATCH_ROWS;
-            default:                     return 0;
+            case preview::kind::TEXTURE: case preview::kind::RENDER: return stack_style::THUMB_ROWS + Note;
+            case preview::kind::COLOR:   return stack_style::SWATCH_ROWS + Note;
+            default:                     return Note;
             }
+        }
+
+        // "Drawn by: forward, G-buffer, tile" - the output step's last row, short (the layout makes the box wide enough; the whole story on hover)
+        std::string OutputNoteText(const node& N) const noexcept
+        {
+            if (!N.isOutputNode() || N.isGroupOutputNode() || m_OutputNote.empty()) return {};
+            std::string S = m_OutputNote;
+            for (const char* p : { "the ", " prepass", " pass" }) for (std::size_t At; (At = S.find(p)) != std::string::npos; ) S.erase(At, std::strlen(p));
+            return S;
+        }
+        void DrawOutputNote(ImDrawList* D, const node& N, ImVec2 P0, ImVec2 P1) const noexcept
+        {
+            namespace st = stack_style;
+            namespace geo = stack_layout::geo;
+            std::string S = OutputNoteText(N);
+            if (S.empty()) return;
+            const float Left = P0.x + Len(geo::PORT_PAD), Right = P1.x - Len(geo::PORT_PAD);
+            while (S.size() > 4 && Left + TextW(S) > Right) S = S.substr(0, S.size() - 4) + "...";
+            const float y = P1.y - Len(geo::NODE_PAD_BOTTOM) - Len(geo::ROW_H) * 0.5f - FontPx() * 0.5f;
+            Text(D, { Left, y }, st::TextDim, S);
+            if (!m_OutputNoteHint.empty() && ImGui::IsMouseHoveringRect({ Left, y }, { Right, y + FontPx() })) xeditor::hint::Text("%s", m_OutputNoteHint.c_str());
         }
 
         // In the rows PreviewRows added at the bottom of the box. A texture is its thumbnail from the editor's thumbnail cache (what every
@@ -2015,6 +2039,8 @@ namespace xmaterial_editor
     public:
         struct rendered { const void* m_pTexture = nullptr; ImVec2 m_UV0, m_UV1; std::string m_Why; };
         std::function<bool(const node&)>            m_Renders;          // the session's rendered previews (none headless): whether a step shows one
+        std::string                                 m_OutputNote;       // the output step's last row: the passes that draw the material (the session, from
+        std::string                                 m_OutputNoteHint;   //   the compiler's Shader.txt), and on hover what is left out and why
         std::function<rendered(const node&)>        m_Rendered;         //   and its picture (none yet) or why it has none
     private:
         std::unordered_map<std::uint64_t, ImVec2>   m_SuffixAt;         // connection guid -> its chip's component suffix centre on screen, last frame
