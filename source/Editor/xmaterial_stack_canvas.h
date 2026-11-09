@@ -881,7 +881,9 @@ namespace xmaterial_editor
             const float Left = P0.x + Len(geo::PORT_PAD), Right = P1.x - Len(geo::PORT_PAD);
             while (S.size() > 4 && Left + TextW(S) > Right) S = S.substr(0, S.size() - 4) + "...";
             const float y = P1.y - Len(geo::NODE_PAD_BOTTOM) - Len(geo::ROW_H) * 0.5f - FontPx() * 0.5f;
-            Text(D, { Left, y }, st::TextDim, S);
+            const float LineY = y - (Len(geo::ROW_H) - FontPx()) * 0.5f;      // a footnote, not an input: a thin line over it, darker text
+            D->AddLine({ Left, LineY }, { Right, LineY }, Alpha(st::TextDim, 0.25f), 1.0f);
+            Text(D, { Left, y }, Alpha(st::TextDim, 0.6f), S);
             if (!m_OutputNoteHint.empty() && ImGui::IsMouseHoveringRect({ Left, y }, { Right, y + FontPx() })) xeditor::hint::Text("%s", m_OutputNoteHint.c_str());
         }
 
