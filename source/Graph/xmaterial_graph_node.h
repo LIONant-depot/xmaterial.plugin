@@ -334,12 +334,6 @@ namespace xmaterial_graph
             }
         }
 
-#ifdef EDITOR
-        using custom_input_callback = void(node&, xproperty::any& Value, xresource_editor::library_mgr& LibraryMgr, xproperty::settings::context& Context);
-#else
-        using custom_input_callback = void(void);
-#endif
-        custom_input_callback* m_pCustomInput = nullptr;
 
         XPROPERTY_DEF//primitive type
         ( "node", node

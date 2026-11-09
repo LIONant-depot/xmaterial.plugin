@@ -8,19 +8,6 @@
 #include <chrono>
 #include <dependencies/xstrtool/source/xstrtool.h>
 
-#ifdef EDITOR
-    //#include "dependencies/imgui/imgui.h"
-    #include "dependencies/imgui-node-editor/imgui_node_editor.h"
-    #include "dependencies/xeditor/include/xeditor/hint.h"                // editor-only (needs imgui); the compiler builds without EDITOR
-    #include "dependencies/xresource_pipeline_v2/source/editor/xresource_editor_asset_mgr.h"
-    
-    #include <commdlg.h>
-
-    // Function found in E19
-    void RemapGUIDToString(std::string& Name, const xresource::full_guid& PreFullGuid);
-    void ResourceBrowserPopup(const void* pUID, bool& Open, xresource::full_guid& Output, std::span<const xresource::type_guid > Filter);
-
-#endif
 
 #include "xmaterial_graph.h"   
 #include "xmaterial_stack_adapter.h"
@@ -734,125 +721,6 @@ namespace xmaterial_graph
     // 
     //
 
-#ifdef EDITOR
-    static void HandleResources(node& Node, xproperty::any& Value, xresource_editor::library_mgr& LibraryMgr, xproperty::settings::context& Context)
-    {
-        auto& prop = Node.m_Params[0];
-
-        ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(32, 32, 32, 200));
-
-        xresource::full_guid& FullGuid = Value.get<xresource::full_guid>();
-
-        bool bOpen = false;
-        xresource::full_guid NewFullGuid = {};
-
-        std::string texname;
-        RemapGUIDToString(texname, FullGuid);
-        if (ImGui::Button(std::format("{}##{}", (texname.empty() || texname == "None") ? "textures" : texname, (void*) & Value).c_str(), ImVec2(100, 14)))
-        {
-            //ImVec2 button_pos  = ax::NodeEditor::CanvasToScreen(ImGui::GetItemRectMin());
-            //ImVec2 button_size = ax::NodeEditor::CanvasToScreen(ImGui::GetItemRectSize());
-            //ImGui::SetNextWindowPos(ImVec2(button_pos.x, button_pos.y + 3.f));
-            bOpen = true;
-        }
-        static constexpr auto filters = std::array{ xrsc::texture_type_guid_v };
-        ResourceBrowserPopup(&FullGuid, bOpen, NewFullGuid, filters);
-        ax::NodeEditor::Suspend();
-        if (ImGui::IsItemHovered())
-            xeditor::hint::Text("%s", texname.c_str());
-
-        std::string popupId = "textures selection##" + std::to_string(Node.m_Guid.m_Value);
-
-
-        if (NewFullGuid.empty() == false && NewFullGuid.m_Type == xrsc::texture_type_guid_v)
-        {
-            FullGuid = NewFullGuid;
-        }
-
-        ax::NodeEditor::Resume();
-        ImGui::PopStyleColor();
-    };
-
-    //--------------------------------------------------------------------------------------------------
-
-    void HandleFilesAndResource(node& Node, xproperty::any& Value, xresource_editor::library_mgr& LibraryMgr, xproperty::settings::context& Context)
-        {
-            if (Value.m_pType->m_GUID != xproperty::settings::var_type<std::wstring>::guid_v)
-            {
-                HandleResources(Node, Value, LibraryMgr, Context);
-                return;
-            }
-
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() - 60.f);
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 3.f);
-            ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(32, 32, 32, 200));
-
-            std::wstring FileName = Value.get<std::wstring>();
-
-            std::string texname;
-
-            auto ButtonName = std::format("{}##{}", xstrtool::To(xstrtool::PathFileName(FileName)), (void*) & Value);
-
-            if (ImGui::Button(ButtonName.c_str(), ImVec2(102, 14)))
-            {
-                wchar_t fileBuffer[MAX_PATH] = { 0 };
-                OPENFILENAMEW ofn = { 0 };
-                ofn.lStructSize = sizeof(ofn);
-                ofn.hwndOwner = nullptr; // or a valid HWND
-                ofn.lpstrFilter = node_param::file_filter_v;
-                ofn.lpstrFile = fileBuffer;
-                ofn.nMaxFile = MAX_PATH;
-                ofn.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
-                ofn.lpstrDefExt = L"txt";
-                ofn.lpstrInitialDir = xproperty::member_ui<std::wstring>::g_CurrentPath.c_str();
-
-                if (GetOpenFileNameW(&ofn))
-                {
-                    //
-                    // Set the name
-                    //
-                    {
-                        std::size_t pos = xstrtool::findI(fileBuffer, L".lionprj");
-                        std::size_t sz = sizeof(".lionprj");
-                        if (pos == std::wstring::npos)
-                        {
-                            pos = xstrtool::findI(fileBuffer, L".lionlib");
-                            sz = sizeof(".lionlib");
-                        }
-
-                        if (pos != std::wstring::npos)
-                        {
-                            Value.get<std::wstring>() = std::wstring(fileBuffer).substr(pos + sz);
-                            int a = 3;
-                        }
-                    }
-
-                    //
-                    // Add new inputs
-                    //
-                    {
-                        std::string Shader;
-                        if (auto Err = RefreshShaderOnlyNode(fileBuffer, Node, Shader); Err)
-                        {
-                            std::cerr << "Error: " << Err.getMessage() << "\n";
-                        }
-                    }
-                }
-            }
-            ax::NodeEditor::Suspend();
-
-            if (ImGui::IsItemHovered())
-                xeditor::hint::Text("%s", xstrtool::To(FileName).c_str());
-
-            std::string popupId = "textures selection##" + std::to_string(Node.m_Guid.m_Value);
-
-
-            ax::NodeEditor::Resume();
-            ImGui::PopStyleColor();
-        };
-
-
-#endif
 
 
     void graph::CreateGraph(graph& g)
@@ -1124,10 +992,6 @@ namespace xmaterial_graph
             finaloutputprefabs.m_InputPins[0].m_TypeGUID    = typeVec3.m_GUID;
             finaloutputprefabs.m_InputPins[0].m_ParamIndex  = static_cast<int>(finaloutputprefabs.m_Params.size());
             finaloutputprefabs.m_Params.emplace_back("Shader File", std::wstring(L"") );
-            finaloutputprefabs.m_pCustomInput = nullptr;
-#ifdef EDITOR
-            finaloutputprefabs.m_pCustomInput = HandleFilesAndResource;
-#endif
             g.CompletePrefab(finaloutputprefabs);
         }
 
@@ -1295,11 +1159,6 @@ namespace xmaterial_graph
             sampler.m_InputPins[0].m_TypeGUID       = typeTexture.m_GUID;
             sampler.m_InputPins[0].m_ParamIndex     = static_cast<int>(sampler.m_Params.size());
             sampler.m_Params.emplace_back( "Default Texture", xmaterial_graph::node_param::type::TEXTURE_RESOURCE, xresource::full_guid(), true );
-            sampler.m_pCustomInput = nullptr;
-
-#ifdef EDITOR
-            sampler.m_pCustomInput = &HandleResources;
-#endif
 
             g.CompletePrefab(sampler);
         }
