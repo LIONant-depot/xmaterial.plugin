@@ -17,6 +17,6 @@
   "Normal"  "Vector3"    -1          ""     
 
 [ Params : 1 ]
-{ Name:s      Type:s   Value:s  CanExpose:c }
-//----------  -------  -------  -----------
-  "strength"  "float"    "1"         0     
+{ Name:s      Type:s   Value:s  CanExpose:c  Min:f  Max:f }
+//----------  -------  -------  -----------  -----  -----
+  "strength"  "float"    "1"         0  0  4

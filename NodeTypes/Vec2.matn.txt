@@ -17,7 +17,7 @@
   "Vec2"  "Vector2"    -1          ""     
 
 [ Params : 2 ]
-{ Name:s  Type:s   Value:s  CanExpose:c }
-//------  -------  -------  -----------
-   "x"    "float"    "0"         0     
-   "y"    "float"    "0"         0     
+{ Name:s  Type:s   Value:s  CanExpose:c  Min:f  Max:f }
+//------  -------  -------  -----------  -----  -----
+   "x"    "float"    "0"         0  0  0
+   "y"    "float"    "0"         0  0  0

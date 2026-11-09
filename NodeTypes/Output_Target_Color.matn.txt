@@ -14,6 +14,6 @@
 [ Outputs : 0 ]
 
 [ Params : 1 ]
-{ Name:s  Type:s   Value:s  CanExpose:c }
-//------  -------  -------  -----------
-   "a"    "float"    "1"         0     
+{ Name:s  Type:s   Value:s  CanExpose:c  Min:f  Max:f }
+//------  -------  -------  -----------  -----  -----
+   "a"    "float"    "1"         0  0  1

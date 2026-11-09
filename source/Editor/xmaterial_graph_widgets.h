@@ -29,7 +29,9 @@ namespace xmaterial_editor::graph_widgets
         {
             float& Value = Param.m_Value.get<float>();
             const float Pre = Value;
-            ImGui::DragFloat(Id.c_str(), &Value, 0.01f);
+            if (Param.m_Max > Param.m_Min) ImGui::DragFloat(Id.c_str(), &Value, (Param.m_Max - Param.m_Min) / 200.0f, Param.m_Min, Param.m_Max, "%.3f", ImGuiSliderFlags_AlwaysClamp);      // (the node type's range)
+            else                           ImGui::DragFloat(Id.c_str(), &Value, 0.01f);
+            if (Param.m_Max > Param.m_Min && ImGui::IsItemHovered()) xeditor::hint::Text("%s\nFrom %g to %g", Param.m_Name.c_str(), Param.m_Min, Param.m_Max);
             if (ImGui::IsItemActivated()) Before = std::format("{:.9g}", Pre);
             if (ImGui::IsItemDeactivatedAfterEdit()) CommitProperty(Undo, N, ParamPath(iParam, "Float"), std::format("{:.9g}", Value), Before);
         }
@@ -37,7 +39,8 @@ namespace xmaterial_editor::graph_widgets
         {
             int& Value = Param.m_Value.get<int>();
             const int Pre = Value;
-            ImGui::DragInt(Id.c_str(), &Value, 0.01f);
+            if (Param.m_Max > Param.m_Min) ImGui::DragInt(Id.c_str(), &Value, 0.05f, static_cast<int>(Param.m_Min), static_cast<int>(Param.m_Max), "%d", ImGuiSliderFlags_AlwaysClamp);
+            else                           ImGui::DragInt(Id.c_str(), &Value, 0.01f);
             if (ImGui::IsItemActivated()) Before = std::to_string(Pre);
             if (ImGui::IsItemDeactivatedAfterEdit()) CommitProperty(Undo, N, ParamPath(iParam, "Int"), std::to_string(Value), Before);
         }

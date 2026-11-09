@@ -19,9 +19,9 @@
 [ Outputs : 0 ]
 
 [ Params : 4 ]
-{ Name:s       Type:s   Value:s  CanExpose:c }
-//-----------  -------  -------  -----------
-  "roughness"  "float"   "0.5"        0     
-  "metallic"   "float"   "0"          0     
-  "ao"         "float"   "1"          0     
-  "a"          "float"   "1"          0     
+{ Name:s       Type:s   Value:s  CanExpose:c  Min:f  Max:f }
+//-----------  -------  -------  -----------  -----  -----
+  "roughness"  "float"   "0.5"        0  0  1
+  "metallic"   "float"   "0"          0  0  1
+  "ao"         "float"   "1"          0  0  1
+  "a"          "float"   "1"          0  0  1

@@ -13,6 +13,6 @@
 [ Outputs : 0 ]
 
 [ Params : 1 ]
-{ Name:s         Type:s  Value:s  CanExpose:c }
-//-------------  ------  -------  -----------
-  "Shader File"  "file"    ""          0     
+{ Name:s         Type:s  Value:s  CanExpose:c  Min:f  Max:f }
+//-------------  ------  -------  -----------  -----  -----
+  "Shader File"  "file"    ""          0  0  0

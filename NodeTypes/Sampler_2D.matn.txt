@@ -16,6 +16,6 @@
   "Texture(2D)"  "Sampler2D"    -1          ""     
 
 [ Params : 1 ]
-{ Name:s             Type:s     Value:s  CanExpose:c }
-//-----------------  ---------  -------  -----------
-  "Default Texture"  "texture"    ""          1     
+{ Name:s             Type:s     Value:s  CanExpose:c  Min:f  Max:f }
+//-----------------  ---------  -------  -----------  -----  -----
+  "Default Texture"  "texture"    ""          1  0  0

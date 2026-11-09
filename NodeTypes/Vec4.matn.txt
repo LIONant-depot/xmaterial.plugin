@@ -19,9 +19,9 @@
   "Vec4"  "Vector4"    -1          ""     
 
 [ Params : 4 ]
-{ Name:s  Type:s   Value:s  CanExpose:c }
-//------  -------  -------  -----------
-   "x"    "float"    "0"         0     
-   "y"    "float"    "0"         0     
-   "z"    "float"    "0"         0     
-   "w"    "float"    "0"         0     
+{ Name:s  Type:s   Value:s  CanExpose:c  Min:f  Max:f }
+//------  -------  -------  -----------  -----  -----
+   "x"    "float"    "0"         0  0  0
+   "y"    "float"    "0"         0  0  0
+   "z"    "float"    "0"         0  0  0
+   "w"    "float"    "0"         0  0  0

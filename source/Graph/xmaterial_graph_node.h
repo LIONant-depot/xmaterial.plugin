@@ -51,6 +51,7 @@ namespace xmaterial_graph
         xproperty::any  m_Value;
         type            m_Type;
         bool            m_bCanExpose = false;
+        float           m_Min = 0, m_Max = 0;               // the value's range from the node type (Min == Max: none) - the literal is a clamped slider; never saved
         bool            m_bExpose    = false;
         std::string     m_ExposeName = {};
         xmaterial::param_id m_ParamID = 0;      // the declared parameter this input reads instead of its literal (0 = none)

@@ -44,7 +44,7 @@ namespace xmaterial_graph::node_types
     struct file
     {
         struct pin_row   { std::string m_Name, m_Type, m_Expression; int m_Param = -1; };
-        struct param_row { std::string m_Name, m_Type, m_Value; bool m_bCanExpose = false; };
+        struct param_row { std::string m_Name, m_Type, m_Value; bool m_bCanExpose = false; float m_Min = 0, m_Max = 0; };      // (Min == Max: no range)
         std::uint64_t           m_Id = 0;                                                // the node type's guid (materials refer to it)
         std::string             m_Name, m_Category, m_Code, m_Description;
         std::vector<pin_row>    m_Inputs, m_Outputs;
@@ -64,7 +64,7 @@ namespace xmaterial_graph::node_types
                 , [&](std::size_t i, xerr& E) { PinRow(m_Outputs, i, E); }))) return Err;
             if ((Err = F.Record("Params"
                 , [&](std::size_t& Count, xerr&) { if (F.isReading()) m_Params.resize(Count); else Count = m_Params.size(); }
-                , [&](std::size_t i, xerr& E) { false || (E = F.Field("Name", m_Params[i].m_Name)) || (E = F.Field("Type", m_Params[i].m_Type)) || (E = F.Field("Value", m_Params[i].m_Value)) || (E = F.Field("CanExpose", m_Params[i].m_bCanExpose)); }))) return Err;
+                , [&](std::size_t i, xerr& E) { false || (E = F.Field("Name", m_Params[i].m_Name)) || (E = F.Field("Type", m_Params[i].m_Type)) || (E = F.Field("Value", m_Params[i].m_Value)) || (E = F.Field("CanExpose", m_Params[i].m_bCanExpose)) || (E = F.Field("Min", m_Params[i].m_Min)) || (E = F.Field("Max", m_Params[i].m_Max)); }))) return Err;
             return {};
         }
     };
@@ -168,7 +168,7 @@ namespace xmaterial_graph::node_types
                 case node_param::type::FILE:   N.m_Params.emplace_back(R.m_Name, xstrtool::To(R.m_Value)); break;
                 default:                       N.m_Params.emplace_back(R.m_Name, T2, xresource::full_guid{}); break;
                 }
-                N.m_Params.back().m_bCanExpose = R.m_bCanExpose;
+                N.m_Params.back().m_bCanExpose = R.m_bCanExpose; N.m_Params.back().m_Min = R.m_Min; N.m_Params.back().m_Max = R.m_Max;
             }
             for (auto& I : N.m_InputPins) if (I.m_ParamIndex >= static_cast<int>(N.m_Params.size())) Why = std::format("input '{}' reads param {} of {}", I.m_Name, I.m_ParamIndex, N.m_Params.size());
             if (!Why.empty()) { Problem(P, Why); continue; }
