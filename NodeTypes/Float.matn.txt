@@ -1,8 +1,10 @@
 
+// A material node type: what the material editor shows (Name, Category, Description, the pins and params below) and its GLSL
+// template (Code: a file beside this one). Id: never change it - materials refer to the node by it (its hash is the type's id).
 [ NodeType ]
-{ Key:s                    Name:s   Category:s  Description:s }
-//-----------------------  -------  ----------  -------------
-  "FloatConstructPrefabs"  "Float"  "Constants"  "A number you type in (it can be exposed as a material parameter)."
+{ Id:s  Name:s  Category:s  Code:s  Description:s }
+//----  ------  ----------  ------  -------------
+  "FloatConstructPrefabs"  "Float"  "Constants"  "Float.glsl"  "A number you type in (it can be exposed as a material parameter)."
 [ Inputs : 1 ]
 { Name:s  Type:s   Param:d  Expression:s }
 //------  -------  -------  ------------

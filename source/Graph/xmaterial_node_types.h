@@ -4,7 +4,7 @@
 
 // The material graph's pin types and node types as data (xLION_Docs material_pipeline_for_render_graph section 9, Tomas 2026-11-09):
 // <plugin>/NodeTypes/Types.txt (the pin types) and one <Name>.matn.txt per node type (Tomas: the double extension says it is a material node) (its name, category, description, pins, params) with its
-// GLSL template beside it in <Name>.glsl (the template exactly: $var, $input[n], [TOP]<!..!> ...). A key names each (the id is the hash of
+// GLSL template in the file its Code column names (beside it) (the template exactly: $var, $input[n], [TOP]<!..!> ...). A key names each (the id is the hash of
 // the key, as xresource::type_guid{"key"} - so existing materials keep their ids). The structural nodes (Group Input/Output, Group,
 // Comment) stay in C++ (graph::CreateGraph). A file that does not load is said (its path and why) and skipped; the others load.
 #include "xmaterial_graph.h"
@@ -56,7 +56,7 @@ namespace xmaterial_graph::node_types
     {
         struct pin_row   { std::string m_Name, m_Type, m_Expression; int m_Param = -1; };
         struct param_row { std::string m_Name, m_Type, m_Value; bool m_bCanExpose = false; };
-        std::string             m_Key, m_Name, m_Category, m_Description;
+        std::string             m_Key, m_Name, m_Category, m_Code, m_Description;      // (m_Key: the file's Id)
         std::vector<pin_row>    m_Inputs, m_Outputs;
         std::vector<param_row>  m_Params;
 
@@ -64,7 +64,7 @@ namespace xmaterial_graph::node_types
         {
             xerr Err;
             if ((Err = F.Record("NodeType", [&](xerr& E)
-                { false || (E = F.Field("Key", m_Key)) || (E = F.Field("Name", m_Name)) || (E = F.Field("Category", m_Category)) || (E = F.Field("Description", m_Description)); }))) return Err;
+                { false || (E = F.Field("Id", m_Key)) || (E = F.Field("Name", m_Name)) || (E = F.Field("Category", m_Category)) || (E = F.Field("Code", m_Code)) || (E = F.Field("Description", m_Description)); }))) return Err;
             const auto PinRow = [&](std::vector<pin_row>& Rows, std::size_t i, xerr& E) { false || (E = F.Field("Name", Rows[i].m_Name)) || (E = F.Field("Type", Rows[i].m_Type)) || (E = F.Field("Param", Rows[i].m_Param)) || (E = F.Field("Expression", Rows[i].m_Expression)); };
             if ((Err = F.Record("Inputs"
                 , [&](std::size_t& Count, xerr&) { if (F.isReading()) m_Inputs.resize(Count); else Count = m_Inputs.size(); }
@@ -91,7 +91,7 @@ namespace xmaterial_graph::node_types
                 , [&](std::size_t i, xerr& E)
                 {
                     auto& R = m_Rows[i];
-                    false || (E = F.Field("Key", R.m_Key)) || (E = F.Field("Name", R.m_Name)) || (E = F.Field("Code", R.m_Code))
+                    false || (E = F.Field("Id", R.m_Key)) || (E = F.Field("Name", R.m_Name)) || (E = F.Field("Code", R.m_Code))
                           || (E = F.Field("R", R.m_R)) || (E = F.Field("G", R.m_G)) || (E = F.Field("B", R.m_B)) || (E = F.Field("A", R.m_A))
                           || (E = F.Field("Sub", R.m_Sub)) || (E = F.Field("SubType", R.m_SubType));
                 });
@@ -155,11 +155,11 @@ namespace xmaterial_graph::node_types
             xtextfile::stream F;
             if (auto Err = F.Open(true, P.wstring(), xtextfile::file_type::TEXT); Err) { Problem(P, "does not open"); continue; }
             if (auto Err = D.Serialize(F); Err) { Problem(P, std::format("not read: {}", Err.getMessage())); continue; }
-            if (D.m_Key.empty() || D.m_Name.empty()) { Problem(P, "its NodeType row needs a Key and a Name"); continue; }
+            if (D.m_Key.empty() || D.m_Name.empty() || D.m_Code.empty()) { Problem(P, "its NodeType row needs an Id, a Name and a Code file"); continue; }
             bool bOk = true;
             node N;
             N.m_Name = D.m_Name; N.m_Category = D.m_Category; N.m_Description = D.m_Description;
-            const auto Template = std::filesystem::path(P).replace_extension("").replace_extension(".glsl");     // (Float_Mix.matn.txt -> Float_Mix.glsl)
+            const auto Template = std::filesystem::path(P).parent_path() / D.m_Code;                              // (Code: the template, beside the file)
             N.m_Code = ReadAll(Template, bOk);
             if (!bOk) { Problem(P, std::format("its template {} is missing", Template.filename().string())); continue; }
             std::string Why;

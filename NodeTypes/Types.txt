@@ -1,6 +1,6 @@
-
+// The material graph's pin types. Id: never change it - node types and materials refer to the type by it (its hash is the type's id).
 [ Types : 8 ]
-{ Key:s        Name:s       Code:s       R:d  G:d  B:d  A:d  Sub:s      SubType:s }
+{ Id:s         Name:s       Code:s       R:d  G:d  B:d  A:d  Sub:s      SubType:s }
 //-----------  -----------  -----------  ---  ---  ---  ---  ---------  ---------
   "Color"      "Color"      "vec4"       235  235  235  255  "x y z w"   "float" 
   "SColor"     "SColor"     "vec4"       255  130   30  255  ""          ""      

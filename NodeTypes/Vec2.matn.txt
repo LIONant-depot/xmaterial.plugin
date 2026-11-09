@@ -1,8 +1,10 @@
 
+// A material node type: what the material editor shows (Name, Category, Description, the pins and params below) and its GLSL
+// template (Code: a file beside this one). Id: never change it - materials refer to the node by it (its hash is the type's id).
 [ NodeType ]
-{ Key:s              Name:s  Category:s  Description:s }
-//-----------------  ------  ----------  -------------
-  "Vec2 Const Node"  "Vec2"  "Constants"  "Two numbers you type in, as a Vec2."
+{ Id:s  Name:s  Category:s  Code:s  Description:s }
+//----  ------  ----------  ------  -------------
+  "Vec2 Const Node"  "Vec2"  "Constants"  "Vec2.glsl"  "Two numbers you type in, as a Vec2."
 [ Inputs : 2 ]
 { Name:s  Type:s   Param:d  Expression:s }
 //------  -------  -------  ------------

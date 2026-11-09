@@ -1,8 +1,10 @@
 
+// A material node type: what the material editor shows (Name, Category, Description, the pins and params below) and its GLSL
+// template (Code: a file beside this one). Id: never change it - materials refer to the node by it (its hash is the type's id).
 [ NodeType ]
-{ Key:s               Name:s                        Category:s  Description:s }
-//------------------  ----------------------------  ----------  -------------
-  "NormalMapPrefabs"  "Normal Map (BC5: xy in GR)"  "Textures"  "A normal map stored as BC5 (x in G, y in R) turned into a normal; Strength exaggerates the bumps (1 = as authored)."
+{ Id:s  Name:s  Category:s  Code:s  Description:s }
+//----  ------  ----------  ------  -------------
+  "NormalMapPrefabs"  "Normal Map (BC5: xy in GR)"  "Textures"  "Normal_Map_BC5_xy_in_GR.glsl"  "A normal map stored as BC5 (x in G, y in R) turned into a normal; Strength exaggerates the bumps (1 = as authored)."
 [ Inputs : 2 ]
 { Name:s         Type:s     Param:d  Expression:s }
 //-------------  ---------  -------  ------------
