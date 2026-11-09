@@ -38,7 +38,7 @@
 
 namespace xmaterial_editor
 {
-    namespace stack_style       // the old canvas's flat theme (xmaterial_graph_canvas.h): grey inputs half, black outputs half, kind headers
+    namespace stack_style       // the flat theme of the removed node canvas: grey inputs half, black outputs half, kind headers
     {
         constexpr ImU32 Canvas        = IM_COL32( 59,  59,  67, 255);     // the old canvas's: the node editor's Bg (60,60,70,200) over the window
         constexpr ImU32 Grid          = IM_COL32(120, 120, 120,  40);     // its Grid, faded by zoom squared as the node editor does

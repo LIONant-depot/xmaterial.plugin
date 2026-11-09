@@ -24,7 +24,7 @@ Check: `python source/Compiler/xmaterial_pbr_output_test.py`.
 
 ## Panels
 
-Material Stack (the stack canvas, below and documentation/stack_canvas.md), Material Graph (the old node canvas: positions from the stack layout, selection shared, no editing), Node Properties (the selected node's reflected properties), Mesh Preview, Shader (the compiler's output).
+Material Stack (the stack canvas, below and documentation/stack_canvas.md), Node Properties (the selected node's reflected properties), Mesh Preview, Shader (the compiler's output).
 
 ### The Material Stack panel
 
@@ -36,7 +36,7 @@ as the console command named in documentation/stack_canvas.md section 7.2.
 
 | Gesture | Effect |
 |---|---|
-| click a step, a route or a chip | select it (the selection is shared with the Material Graph panel); a route's (+) appears where it was clicked |
+| click a step, a route or a chip | select it; a route's (+) appears where it was clicked |
 | Ctrl+click steps | add to the selection (a group, for Collapse) |
 | edit a widget on an unconnected input | `SetNodeProperty` |
 | click the (+) of the selected route, or right click a route -> Insert step on this connection... | search of the types that fit the source and the consumer, a port chooser when several ports fit, then `InsertOnConnection`; other uses of the source are untouched. The route menu also has Go to source, Go to consumer, Disconnect |
@@ -89,7 +89,7 @@ with its ordered steps; a producer is always before its consumers, and every com
 | `ListNodeTypes`, `ListNodes`, `NodeProperties -Node [-Filter]` | what can be created, what is in the graph (with the pins' guids, each step's name and section, then the sections in order), a node's properties |
 | `CreateNode -Prefab <type hex> -Node <new guid> [-Section <s> [-After <node> \| -Before <node> \| -First 1 \| -Last 1]] [-Name]`, `DeleteNode -Node` | nodes (undoable); the pin guids of a new node are derived from its own, so undo and redo keep later commands valid. A new node is also a step: placed where asked, else at the end of the last user section (outputs: the output section), named `-Name` or its type's name made unique. `-X -Y` are accepted and ignored. `DeleteNode` also removes the step and refuses the last output node |
 | `Connect -Output <pin> -Input <pin> -Connection <new guid>`, `Disconnect -Connection` | links (undoable). `Connect` accepts the same type, or a float (also a sub-element such as `Vec2.x`) into a vec2/vec3/vec4 input (a splat, compiled as `vec4(Vec2.xxxx)`), or `Color` to and from `Vector4` (both vec4); an `SColor` only into an `SColor` input (`SColor is sRGB-encoded; convert with 'SColor To Color'`), a `Color` never into one (`Color is linear; convert with 'Color To SColor'`), material_contract.md §3; a longer vector into a shorter vector input takes its first components (truncation, compiled `vec3(Albedo.xyz)`); `-Swizzle <letters>` picks the components (as `SetInputSwizzle`); a narrower vector into a wider one, float to int and a vector into a float need a sub-element, a swizzle or a conversion and are refused (`types differ`). `Connect` refuses a cycle (`would make a cycle through <step>`); when the producer is after the consumer, the consumer and its dependents move to right after the producer, in the same undo step |
-| `MoveNode -Node -X -Y [-BeforeX -BeforeY]` | the position on the old canvas (undoable); old canvas only, the stack canvas ignores positions |
+| `MoveNode -Node -X -Y [-BeforeX -BeforeY]` | the node's saved position (undoable); no panel draws positions since the old node canvas was removed (the stack canvas lays steps out itself) |
 | `PlaceSteps -Nodes <n,n,...> -Section <s> [-After <node> \| -Before <node> \| -First 1 \| -Last 1] [-Resolve none\|dependents\|nearest]` | move steps, keeping their bindings (undoable). `none` (default) fails naming the violations; `dependents` also moves what must follow (or precede) them; `nearest` takes the closest valid spot |
 | `RenameStep -Node -Name` | a step's name: letters, digits and `_` (other characters become `_`), unique ignoring case (undoable) |
 | `CreateSection -Section <new guid> -Name [-After <s> \| -Before <s>]`, `RenameSection -Section -Name`, `DeleteSection -Section [-MergeInto <s>]`, `SetSectionCollapsed -Section -Collapsed 0\|1` | sections (undoable). A new section is empty and never after the output section; the output section cannot be deleted; a section with steps is deleted only with `-MergeInto` (refused when that breaks the order) |

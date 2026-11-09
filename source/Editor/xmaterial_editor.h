@@ -6,7 +6,6 @@
 // same document and undo: the Material Stack (sections and steps placed by the system) and the Material Graph (free nodes). Every edit is an undoable
 // command, so an AI drives it from the console; the compiled material is previewed on a mesh and the shader the compiler made is shown as text.
 // Hosts include this header and open editors through xeditor::open_resource_editors.
-#include "plugins/xmaterial.plugin/source/Editor/xmaterial_graph_canvas.h"
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_stack_canvas.h"
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_subgraph_commands.h"
 #include "source/Tools/Editor/xeditor_mesh_preview.h"
@@ -77,12 +76,11 @@ namespace xmaterial_editor
         cmds::enter_group_cmd           m_EnterGroup     { m_Undo, m_Document };
         cmds::exit_group_cmd            m_ExitGroup      { m_Undo, m_Document };
 
-        graph_canvas                    m_Canvas;
         stack_canvas                    m_StackCanvas;
         cmds::select_step_cmd           m_SelectStep;
         cmds::trace_route_cmd           m_TraceRoute;
         cmds::preview_step_cmd          m_PreviewStep;
-        std::uint64_t                   m_GraphSelected = 0, m_StackSelected = 0, m_Selected = 0;     // the canvas whose selection changed last decides what Node Properties shows
+        std::uint64_t                   m_StackSelected = 0, m_Selected = 0;     // the stack canvas's selection: what Node Properties shows
         xeditor::inspector_panel        m_NodeInspector{ "Node Properties" };
         std::uint64_t                   m_InspectedNode = 0;
         xeditor::mesh_preview           m_Preview;
@@ -108,7 +106,7 @@ namespace xmaterial_editor
             , m_FindUses(m_Undo, m_Document), m_ValidatePlacement(m_Undo, m_Document)
             , m_LayoutStats(m_Undo, m_Document, m_StackView), m_RouteInfo(m_Undo, m_Document, m_StackView)
             , m_RepackRoutes(m_Undo, m_StackView), m_StackSelfTest(m_Undo)
-            , m_Canvas(m_Document, m_Undo), m_StackCanvas(m_Document, m_Undo, m_StackView)
+            , m_StackCanvas(m_Document, m_Undo, m_StackView)
             , m_SelectStep(m_Undo, m_Document, m_StackCanvas), m_TraceRoute(m_Undo, m_Document, m_StackCanvas), m_PreviewStep(m_Undo, m_Document, m_StackCanvas)
             , m_StepPreviewsCmd(m_Undo, m_StepPreviews)
         {
@@ -120,7 +118,6 @@ namespace xmaterial_editor
             const bool bMaterial = Guid.m_Type != xmaterial_graph::subgraph_type_guid_v;     // a sub-graph compiles to no shader: no mesh, no shader text, no step renders; only the stack
             if (bMaterial) AddPanel("Mesh Preview",    dock::left,        [this] { UpdateStepPreview(); m_Preview.Render(); DrawPreviewBanner(); });
             AddPanel("Node Properties", dock::left_bottom, [this] { RenderNodeProperties(); });
-            if (bMaterial) AddPanel("Material Graph",  dock::center,      [this] { m_Canvas.Render(); });       // ponytail: still editable until the stack canvas edits everything (stack_canvas.md task 12)
             AddPanel("Material Stack",  dock::center,      [this] { m_StepPreviews.Update(m_Document); m_StackCanvas.Render(); }, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);   // after the graph: it joins the graph's dock as a tab
             if (bMaterial) AddPanel("Shader",          dock::bottom,      [this] { m_Shader.Render("Shader", ImVec2(0, 0), true, [] {}); }, ImGuiWindowFlags_HorizontalScrollbar);
 
@@ -213,7 +210,6 @@ namespace xmaterial_editor
         // The selected node's properties: an edit is a command, like everything else.
         void RenderNodeProperties() noexcept
         {
-            if (const auto S = m_Canvas.SelectedNode();      S != m_GraphSelected) m_Selected = m_GraphSelected = S;
             if (const auto S = m_StackCanvas.SelectedNode(); S != m_StackSelected) m_Selected = m_StackSelected = S;
             const std::uint64_t Selected = m_Selected && m_Document.FindNode(m_Selected) ? m_Selected : 0;
             if (Selected != m_InspectedNode)
