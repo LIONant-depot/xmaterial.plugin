@@ -1,0 +1,15 @@
+
+[ NodeType ]
+{ Key:s            Name:s                    Category:s  Description:s }
+//---------------  ------------------------  ----------  -------------
+  "vertexPrefabs"  "Input: Vertex Variants"  "Inputs"  "What the mesh gives each pixel: its vertex colour (linear) and its UV sets."
+[ Inputs : 0 ]
+
+[ Outputs : 3 ]
+{ Name:s      Type:s     Param:d  Expression:s   }
+//----------  ---------  -------  --------------
+  "Color(4)"  "Color"      -1     "In.VertColor"
+  "UV(2)"     "Vector2"    -1     "In.UV"       
+  "UV1(2)"    "Vector2"    -1     "InUV1"       
+
+[ Params : 0 ]

@@ -1,0 +1,25 @@
+
+[ NodeType ]
+{ Key:s              Name:s  Category:s  Description:s }
+//-----------------  ------  ----------  -------------
+  "Vec4 Const Node"  "Vec4"  "Constants"  "Four numbers you type in, as a Vec4."
+[ Inputs : 4 ]
+{ Name:s  Type:s   Param:d  Expression:s }
+//------  -------  -------  ------------
+  "X(1)"  "float"     0          ""     
+  "Y(1)"  "float"     1          ""     
+  "Z(1)"  "float"     2          ""     
+  "W(1)"  "float"     3          ""     
+
+[ Outputs : 1 ]
+{ Name:s  Type:s     Param:d  Expression:s }
+//------  ---------  -------  ------------
+  "Vec4"  "Vector4"    -1          ""     
+
+[ Params : 4 ]
+{ Name:s  Type:s   Value:s  CanExpose:c }
+//------  -------  -------  -----------
+   "x"    "float"    "0"         0     
+   "y"    "float"    "0"         0     
+   "z"    "float"    "0"         0     
+   "w"    "float"    "0"         0     

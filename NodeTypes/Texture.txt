@@ -1,0 +1,17 @@
+
+[ NodeType ]
+{ Key:s             Name:s     Category:s  Description:s }
+//----------------  ---------  ----------  -------------
+  "texturePrefabs"  "Texture"  "Textures"  "The colour of a texture at a UV."
+[ Inputs : 2 ]
+{ Name:s         Type:s       Param:d  Expression:s }
+//-------------  -----------  -------  ------------
+  "Texture(2D)"  "Sampler2D"    -1          ""     
+  "UV(2)"        "Vector2"      -1          ""     
+
+[ Outputs : 1 ]
+{ Name:s  Type:s     Param:d  Expression:s }
+//------  ---------  -------  ------------
+  "Vec4"  "Vector4"    -1          ""     
+
+[ Params : 0 ]

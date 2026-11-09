@@ -1,0 +1,21 @@
+
+[ NodeType ]
+{ Key:s              Name:s  Category:s  Description:s }
+//-----------------  ------  ----------  -------------
+  "Vec2 Const Node"  "Vec2"  "Constants"  "Two numbers you type in, as a Vec2."
+[ Inputs : 2 ]
+{ Name:s  Type:s   Param:d  Expression:s }
+//------  -------  -------  ------------
+  "X(1)"  "float"     0          ""     
+  "Y(1)"  "float"     1          ""     
+
+[ Outputs : 1 ]
+{ Name:s  Type:s     Param:d  Expression:s }
+//------  ---------  -------  ------------
+  "Vec2"  "Vector2"    -1          ""     
+
+[ Params : 2 ]
+{ Name:s  Type:s   Value:s  CanExpose:c }
+//------  -------  -------  -----------
+   "x"    "float"    "0"         0     
+   "y"    "float"    "0"         0     

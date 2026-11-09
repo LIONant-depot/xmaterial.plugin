@@ -1,0 +1,16 @@
+
+[ NodeType ]
+{ Key:s                Name:s          Category:s  Description:s }
+//-------------------  --------------  ----------  -------------
+  "Vec4toVec3prefabs"  "Vec4 To Vec3"  "Convert"  "The first three components (x, y, z) of a Vec4."
+[ Inputs : 1 ]
+{ Name:s  Type:s     Param:d  Expression:s }
+//------  ---------  -------  ------------
+  "A(4)"  "Vector4"    -1          ""     
+
+[ Outputs : 1 ]
+{ Name:s  Type:s     Param:d  Expression:s }
+//------  ---------  -------  ------------
+  "Vec3"  "Vector3"    -1          ""     
+
+[ Params : 0 ]

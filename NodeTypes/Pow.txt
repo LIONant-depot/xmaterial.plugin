@@ -1,0 +1,17 @@
+
+[ NodeType ]
+{ Key:s           Name:s  Category:s  Description:s }
+//--------------  ------  ----------  -------------
+  "powerprefabs"  "Pow"  "Math"  "A raised to the power B, each component."
+[ Inputs : 2 ]
+{ Name:s  Type:s     Param:d  Expression:s }
+//------  ---------  -------  ------------
+  "A(3)"  "Vector3"    -1          ""     
+  "B(3)"  "Vector3"    -1          ""     
+
+[ Outputs : 1 ]
+{ Name:s  Type:s     Param:d  Expression:s }
+//------  ---------  -------  ------------
+  "Vec3"  "Vector3"    -1          ""     
+
+[ Params : 0 ]

@@ -346,14 +346,14 @@ namespace xmaterial_editor
     inline const xeditor::auto_register_resource_editor g_Registration
     { xrsc::material_type_guid_v
     , [](xresource::full_guid Guid, xresource_editor::library::guid LibraryGuid, xgpu::device* pDevice) -> std::unique_ptr<xeditor::resource_editor>
-      { return std::make_unique<session>(Guid, LibraryGuid, pDevice); }
+      { xmaterial_graph::SetNodeTypesFolderFromProject(xresource_editor::g_LibMgr.m_ProjectPath); return std::make_unique<session>(Guid, LibraryGuid, pDevice); }
     };
 
     // A sub-graph is edited by the same editor: the same graph file, its interface instead of material outputs
     inline const xeditor::auto_register_resource_editor g_SubgraphRegistration
     { xmaterial_graph::subgraph_type_guid_v
     , [](xresource::full_guid Guid, xresource_editor::library::guid LibraryGuid, xgpu::device* pDevice) -> std::unique_ptr<xeditor::resource_editor>
-      { return std::make_unique<session>(Guid, LibraryGuid, pDevice); }
+      { xmaterial_graph::SetNodeTypesFolderFromProject(xresource_editor::g_LibMgr.m_ProjectPath); return std::make_unique<session>(Guid, LibraryGuid, pDevice); }
     };
 }
 

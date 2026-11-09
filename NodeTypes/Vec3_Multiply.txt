@@ -1,0 +1,17 @@
+
+[ NodeType ]
+{ Key:s                  Name:s           Category:s  Description:s }
+//---------------------  ---------------  ----------  -------------
+  "MultiplyVec3Prefabs"  "Vec3 Multiply"  "Math"  "A times B, component by component."
+[ Inputs : 2 ]
+{ Name:s  Type:s     Param:d  Expression:s }
+//------  ---------  -------  ------------
+  "A(3)"  "Vector3"    -1          ""     
+  "B(3)"  "Vector3"    -1          ""     
+
+[ Outputs : 1 ]
+{ Name:s  Type:s     Param:d  Expression:s }
+//------  ---------  -------  ------------
+  "Vec3"  "Vector3"    -1          ""     
+
+[ Params : 0 ]

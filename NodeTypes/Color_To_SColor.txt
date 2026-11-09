@@ -1,0 +1,16 @@
+
+[ NodeType ]
+{ Key:s                   Name:s             Category:s  Description:s }
+//----------------------  -----------------  ----------  -------------
+  "ColorToSColorPrefabs"  "Color To SColor"  "Convert"  "A linear colour to sRGB-encoded (the exact sRGB curve); alpha kept."
+[ Inputs : 1 ]
+{ Name:s  Type:s   Param:d  Expression:s }
+//------  -------  -------  ------------
+  "A(4)"  "Color"    -1          ""     
+
+[ Outputs : 1 ]
+{ Name:s    Type:s    Param:d  Expression:s }
+//--------  --------  -------  ------------
+  "SColor"  "SColor"    -1          ""     
+
+[ Params : 0 ]

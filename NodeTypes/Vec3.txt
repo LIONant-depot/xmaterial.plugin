@@ -1,0 +1,23 @@
+
+[ NodeType ]
+{ Key:s              Name:s  Category:s  Description:s }
+//-----------------  ------  ----------  -------------
+  "Vec3 Const Node"  "Vec3"  "Constants"  "Three numbers you type in, as a Vec3."
+[ Inputs : 3 ]
+{ Name:s  Type:s   Param:d  Expression:s }
+//------  -------  -------  ------------
+  "X(1)"  "float"     0          ""     
+  "Y(1)"  "float"     1          ""     
+  "Z(1)"  "float"     2          ""     
+
+[ Outputs : 1 ]
+{ Name:s  Type:s     Param:d  Expression:s }
+//------  ---------  -------  ------------
+  "Vec3"  "Vector3"    -1          ""     
+
+[ Params : 3 ]
+{ Name:s  Type:s   Value:s  CanExpose:c }
+//------  -------  -------  -----------
+   "x"    "float"    "0"         0     
+   "y"    "float"    "0"         0     
+   "z"    "float"    "0"         0     

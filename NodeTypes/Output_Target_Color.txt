@@ -1,0 +1,17 @@
+
+[ NodeType ]
+{ Key:s             Name:s                  Category:s  Description:s }
+//----------------  ----------------------  ----------  -------------
+  "fragoutprefabs"  "Output: Target Color"  "Outputs"  "The material's colour as is (unlit), with alpha."
+[ Inputs : 2 ]
+{ Name:s      Type:s     Param:d  Expression:s }
+//----------  ---------  -------  ------------
+  "Color(3)"  "Vector3"    -1          ""     
+  "A(1)"      "float"       0          ""     
+
+[ Outputs : 0 ]
+
+[ Params : 1 ]
+{ Name:s  Type:s   Value:s  CanExpose:c }
+//------  -------  -------  -----------
+   "a"    "float"    "1"         0     

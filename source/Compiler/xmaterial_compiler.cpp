@@ -694,6 +694,7 @@ namespace xmaterial_compiler
             //
             auto DescriptorFileName = std::format( L"{}/{}/Descriptor.txt", m_ProjectPaths.m_Project, m_InputSrcDescriptorPath);
 
+            xmaterial_graph::SetNodeTypesFolderFromProject(m_ProjectPaths.m_Project);
             graph Graph;
             Graph.CreateGraph(Graph);
             Graph.serialize(Graph, true, DescriptorFileName);

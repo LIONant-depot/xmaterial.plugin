@@ -1,0 +1,19 @@
+
+[ NodeType ]
+{ Key:s             Name:s        Category:s  Description:s }
+//----------------  ------------  ----------  -------------
+  "samplerPrefabs"  "Sampler 2D"  "Textures"  "A texture resource of the project, ready to be sampled."
+[ Inputs : 1 ]
+{ Name:s        Type:s     Param:d  Expression:s }
+//------------  ---------  -------  ------------
+  "TextureRsc"  "texture"     0          ""     
+
+[ Outputs : 1 ]
+{ Name:s         Type:s       Param:d  Expression:s }
+//-------------  -----------  -------  ------------
+  "Texture(2D)"  "Sampler2D"    -1          ""     
+
+[ Params : 1 ]
+{ Name:s             Type:s     Value:s  CanExpose:c }
+//-----------------  ---------  -------  -----------
+  "Default Texture"  "texture"    ""          1     

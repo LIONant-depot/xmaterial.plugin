@@ -298,6 +298,8 @@ namespace xmaterial_graph
         std::string                     m_Name              = {};
         std::string                     m_StepName          = {};  // unique in the graph; chips, console symbols, GLSL names
         std::string                     m_Code              = {};
+        std::string                     m_Category          = {};  // a node type's group and one-line description (its NodeTypes file): the search popup,
+        std::string                     m_Description       = {};  //   its hints, ListNodeTypes - never saved with a material
         std::vector<input_pin>          m_InputPins         = {};
         std::vector<output_pin>         m_OutputPins        = {};
         xmath::fvec2                    m_Pos               = {};

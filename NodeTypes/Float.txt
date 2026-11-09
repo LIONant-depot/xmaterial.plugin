@@ -1,0 +1,19 @@
+
+[ NodeType ]
+{ Key:s                    Name:s   Category:s  Description:s }
+//-----------------------  -------  ----------  -------------
+  "FloatConstructPrefabs"  "Float"  "Constants"  "A number you type in (it can be exposed as a material parameter)."
+[ Inputs : 1 ]
+{ Name:s  Type:s   Param:d  Expression:s }
+//------  -------  -------  ------------
+  "A(1)"  "float"     0          ""     
+
+[ Outputs : 1 ]
+{ Name:s  Type:s   Param:d  Expression:s }
+//------  -------  -------  ------------
+  "A(1)"  "float"    -1          ""     
+
+[ Params : 1 ]
+{ Name:s  Type:s   Value:s  CanExpose:c }
+//------  -------  -------  -----------
+   "x"    "float"    "0"         0     

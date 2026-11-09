@@ -1,0 +1,16 @@
+
+[ NodeType ]
+{ Key:s          Name:s                 Category:s  Description:s }
+//-------------  ---------------------  ----------  -------------
+  "frag_shader"  "Output: Shader File"  "Outputs"  "The whole material from one GLSL file of the project instead of the graph."
+[ Inputs : 1 ]
+{ Name:s         Type:s     Param:d  Expression:s }
+//-------------  ---------  -------  ------------
+  "Shader File"  "Vector3"     0          ""     
+
+[ Outputs : 0 ]
+
+[ Params : 1 ]
+{ Name:s         Type:s  Value:s  CanExpose:c }
+//-------------  ------  -------  -----------
+  "Shader File"  "file"    ""          0     

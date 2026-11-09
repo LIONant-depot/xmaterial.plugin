@@ -1469,6 +1469,7 @@ namespace xmaterial_editor
             std::vector<std::pair<int,int>> m_Ports;                        // the new step's (input, output) that fit; -1 = none needed
             std::uint64_t                   m_Subgraph = 0;                 // a group node of this sub-graph (m_Prefab: the Group type)
             std::shared_ptr<const node>     m_pType;                        // its pins: the sub-graph's interface
+            std::string                     m_Hint;                         // a type's category and what it does (shown when hovered)
         };
 
         // The step type an entry makes: a node type, or a group node with its sub-graph's pins
@@ -1571,8 +1572,9 @@ namespace xmaterial_editor
             if (m_Search.m_Kind != k::INSERT) for (auto& [Sub, pT] : m_SubgraphTypes) Types.push_back(pT.get());          // InsertOnConnection makes a type's step: not a group's
             for (auto* pT : Types)
             {
-                if (!Keep(pT->m_Name)) continue;
+                if (!Keep(pT->m_Name) && !Keep(pT->m_Category) && !Keep(pT->m_Description)) continue;      // (found by what it does too: "blend" finds Float Mix)
                 entry E{ pT->m_Name, pT->m_Guid.m_Value, 0, {} };
+                E.m_Hint = pT->m_Description.empty() ? std::string() : (pT->m_Category.empty() ? "" : pT->m_Category + ": ") + pT->m_Description;
                 for (auto& [Sub, pS] : m_SubgraphTypes) if (pS.get() == pT) { E.m_Subgraph = Sub; E.m_pType = pS; E.m_Label += "  (sub-graph)"; }
                 const int nI = static_cast<int>(pT->m_InputPins.size()), nO = static_cast<int>(pT->m_OutputPins.size());
                 switch (m_Search.m_Kind)
@@ -1776,7 +1778,7 @@ namespace xmaterial_editor
                     if (E.m_Prefab && !bNew)      { bNew = true;      ImGui::SeparatorText("New step"); }
                     ImGui::PushID(i);
                     if (ImGui::Selectable(E.m_Label.c_str(), false, ImGuiSelectableFlags_NoAutoClosePopups)) Pick = i;
-                    if (ImGui::IsItemHovered()) m_HoverEntry = i;
+                    if (ImGui::IsItemHovered()) { m_HoverEntry = i; if (!E.m_Hint.empty()) xeditor::hint::Text("%s", E.m_Hint.c_str()); }
                     ImGui::PopID();
                 }
                 if (m_Entries.empty()) ImGui::TextDisabled("nothing fits");

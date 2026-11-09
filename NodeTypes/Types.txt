@@ -1,0 +1,12 @@
+
+[ Types : 8 ]
+{ Key:s        Name:s       Code:s       R:d  G:d  B:d  A:d  Sub:s      SubType:s }
+//-----------  -----------  -----------  ---  ---  ---  ---  ---------  ---------
+  "Color"      "Color"      "vec4"       235  235  235  255  "x y z w"   "float" 
+  "SColor"     "SColor"     "vec4"       255  130   30  255  ""          ""      
+  "Sampler2D"  "Sampler2D"  "sampler2D"  240   80   80  255  ""          ""      
+  "Vector2"    "Vector2"    "vec2"        80  180  250  255  "x y"       "float" 
+  "Vector3"    "Vector3"    "vec3"        80  220  120  255  "x y z"     "float" 
+  "Vector4"    "Vector4"    "vec4"       180   80  220  255  "x y z w"   "float" 
+  "float"      "float"      "float"      240  200   50  255  ""          ""      
+  "texture"    "Texture"    "texture"    200  180   80  255  ""          ""      

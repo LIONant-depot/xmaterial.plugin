@@ -60,6 +60,11 @@ namespace xmaterial_graph
 
     xerr RefreshShaderOnlyNode(std::wstring ShaderFileName, node& Node, std::string& Shader);
 
+    // Where the pin and node types' files are (the plugin's NodeTypes folder): the compiler and the editor say it once, before any
+    // graph::CreateGraph (they know the project: <project>/Cache/Plugins/xmaterial.plugin/NodeTypes)
+    inline std::wstring& NodeTypesFolder() noexcept { static std::wstring s_Folder; return s_Folder; }
+    inline void SetNodeTypesFolderFromProject(std::wstring_view Project) noexcept { NodeTypesFolder() = std::wstring(Project) + L"/Cache/Plugins/xmaterial.plugin/NodeTypes"; }
+
     struct graph
     {
         sType&              CreateType              (type_guid Guid = type_guid{ xresource::guid_generator::Type64() });

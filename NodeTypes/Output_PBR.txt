@@ -1,0 +1,25 @@
+
+[ NodeType ]
+{ Key:s            Name:s         Category:s  Description:s }
+//---------------  -------------  ----------  -------------
+  "pbroutprefabs"  "Output: PBR"  "Outputs"  "The material's surface: albedo, roughness, metallic, normal, AO, emissive and alpha, lit by the renderer."
+[ Inputs : 7 ]
+{ Name:s          Type:s     Param:d  Expression:s          }
+//--------------  ---------  -------  ---------------------
+  "Albedo(3)"     "Vector3"    -1     ""                   
+  "Roughness(1)"  "float"       0     ""                   
+  "Metallic(1)"   "float"       1     ""                   
+  "Normal(3)"     "Vector3"    -1     "vec3(0.0, 0.0, 1.0)"
+  "AO(1)"         "float"       2     ""                   
+  "Emissive(3)"   "Vector3"    -1     "vec3(0.0)"          
+  "A(1)"          "float"       3     ""                   
+
+[ Outputs : 0 ]
+
+[ Params : 4 ]
+{ Name:s       Type:s   Value:s  CanExpose:c }
+//-----------  -------  -------  -----------
+  "roughness"  "float"   "0.5"        0     
+  "metallic"   "float"   "0"          0     
+  "ao"         "float"   "1"          0     
+  "a"          "float"   "1"          0     

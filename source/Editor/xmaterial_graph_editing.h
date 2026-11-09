@@ -1308,12 +1308,13 @@ namespace xmaterial_editor
         {
             graph_document& m_Doc;
             list_node_types_cmd(xundo::system& System, graph_document& Doc) noexcept : query_command_base(System, "ListNodeTypes", nullptr), m_Doc(Doc) {}
-            const char* getCommandHelp() const noexcept override { return "Lists the node types CreateNode takes: guid and name. Usage: ListNodeTypes"; }
+            const char* getCommandHelp() const noexcept override { return "Lists the node types CreateNode takes: guid, name, [category] and what it does. Usage: ListNodeTypes"; }
             void RegisterArguments() noexcept override {}
             std::string Query() noexcept override
             {
                 std::string Out;
-                for (auto& [Guid, N] : m_Doc.m_Graph.m_PrefabNodes) Out += std::format("{:016X}  {}\n", Guid.m_Value, N->m_Name);
+                for (auto& [Guid, N] : m_Doc.m_Graph.m_PrefabNodes)
+                    Out += std::format("{:016X}  {}{}{}\n", Guid.m_Value, N->m_Name, N->m_Category.empty() ? "" : "  [" + N->m_Category + "]", N->m_Description.empty() ? "" : "  " + N->m_Description);
                 return Out.empty() ? "(no node types)" : Out;
             }
         };
