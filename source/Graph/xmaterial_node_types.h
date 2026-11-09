@@ -3,7 +3,7 @@
 #pragma once
 
 // The material graph's pin types and node types as data (xLION_Docs material_pipeline_for_render_graph section 9, Tomas 2026-11-09):
-// <plugin>/NodeTypes/Types.txt (the pin types) and one <Name>.txt per node type (its name, category, description, pins, params) with its
+// <plugin>/NodeTypes/Types.txt (the pin types) and one <Name>.matn.txt per node type (Tomas: the double extension says it is a material node) (its name, category, description, pins, params) with its
 // GLSL template beside it in <Name>.glsl (the template exactly: $var, $input[n], [TOP]<!..!> ...). A key names each (the id is the hash of
 // the key, as xresource::type_guid{"key"} - so existing materials keep their ids). The structural nodes (Group Input/Output, Group,
 // Comment) stay in C++ (graph::CreateGraph). A file that does not load is said (its path and why) and skipped; the others load.
@@ -147,7 +147,7 @@ namespace xmaterial_graph::node_types
         }
         const auto TypeKnown = [&](std::string_view Key) { return std::ranges::any_of(L.m_Types, [&](auto& E) { return E.first == KeyGuid(Key); }); };
         std::vector<std::filesystem::path> Files;
-        for (auto& E : std::filesystem::directory_iterator(Folder)) if (E.path().extension() == ".txt" && E.path().filename() != "Types.txt") Files.push_back(E.path());
+        for (auto& E : std::filesystem::directory_iterator(Folder)) if (E.path().filename().string().ends_with(".matn.txt")) Files.push_back(E.path());      // (a material node: <Name>.matn.txt)
         std::ranges::sort(Files);
         for (auto& P : Files)
         {
@@ -159,8 +159,9 @@ namespace xmaterial_graph::node_types
             bool bOk = true;
             node N;
             N.m_Name = D.m_Name; N.m_Category = D.m_Category; N.m_Description = D.m_Description;
-            N.m_Code = ReadAll(std::filesystem::path(P).replace_extension(".glsl"), bOk);
-            if (!bOk) { Problem(P, std::format("its template {} is missing", std::filesystem::path(P).replace_extension(".glsl").filename().string())); continue; }
+            const auto Template = std::filesystem::path(P).replace_extension("").replace_extension(".glsl");     // (Float_Mix.matn.txt -> Float_Mix.glsl)
+            N.m_Code = ReadAll(Template, bOk);
+            if (!bOk) { Problem(P, std::format("its template {} is missing", Template.filename().string())); continue; }
             std::string Why;
             for (auto& R : D.m_Inputs)  { if (!TypeKnown(R.m_Type)) Why = std::format("input '{}' has the unknown type '{}'", R.m_Name, R.m_Type);  auto& I = N.m_InputPins.emplace_back();  I.m_Name = R.m_Name; I.m_TypeGUID = type_guid{ KeyGuid(R.m_Type) }; I.m_ParamIndex = R.m_Param; I.m_DefaultExpr = R.m_Expression; }
             for (auto& R : D.m_Outputs) { if (!TypeKnown(R.m_Type)) Why = std::format("output '{}' has the unknown type '{}'", R.m_Name, R.m_Type); auto& O = N.m_OutputPins.emplace_back(); O.m_Name = R.m_Name; O.m_TypeGUID = type_guid{ KeyGuid(R.m_Type) }; O.m_ParamIndex = R.m_Param; O.m_DefaultExpr = R.m_Expression; }
