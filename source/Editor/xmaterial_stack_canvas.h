@@ -27,6 +27,7 @@
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_graph_widgets.h"
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_stack_commands.h"
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_stack_routes.h"
+#include "dependencies/xgraph/source/xgraph_view.h"           // (the frame: view transform, grid, wires - shared with the Render Graph editor)
 #include "plugins/xmaterial.plugin/source/Editor/xmaterial_subgraph_commands.h"
 #include "dependencies/xeditor/include/xeditor/hint.h"
 #include "source/Tools/Editor/xeditor_camera_toolbar.h"
@@ -471,8 +472,14 @@ namespace xmaterial_editor
         //------------------------------------------------------------------------------------------
         // View transform (E27 ToScreen/ToScreenLen, NodeOS_UI_Canvas.h:552-553, anchored at the left of column 0)
         //------------------------------------------------------------------------------------------
-        ImVec2 ToScreen(float x, float y) const noexcept { return { m_Origin.x + m_Pan.x + x * m_Zoom, m_Origin.y + m_Pan.y + y * m_Zoom }; }
-        ImVec2 ToWorld(ImVec2 p) const noexcept { return { (p.x - m_Origin.x - m_Pan.x) / m_Zoom, (p.y - m_Origin.y - m_Pan.y) / m_Zoom }; }
+        ImVec2 ToScreen(float x, float y) const noexcept { return m_Frame.ToScreen(x, y); }
+        ImVec2 ToWorld(ImVec2 p) const noexcept { return m_Frame.ToWorld(p); }
+        // The frame's look: the stack style's (xgraph::view draws it)
+        static const xgraph::view::style& FrameStyle() noexcept
+        {
+            static const xgraph::view::style S{ stack_style::Canvas, stack_style::Grid, 32.0f, stack_style::DIM, stack_style::DIM_TRACE, stack_style::WIRE_W, stack_style::LIT_W, stack_style::ZOOM_MIN, stack_style::ZOOM_MAX, stack_style::PICK };
+            return S;
+        }
         float  Len(float l) const noexcept { return l * m_Zoom; }
         float  FontPx() const noexcept { return m_FontSize * m_Zoom; }
         static float Snap(float v) noexcept { return std::floor(v) + 0.5f; }       // a thin line on a pixel centre reads crisp
@@ -483,24 +490,7 @@ namespace xmaterial_editor
         //------------------------------------------------------------------------------------------
         // Drawing
         //------------------------------------------------------------------------------------------
-        void DrawBackground(ImDrawList* D, ImVec2 Max) const noexcept
-        {
-            namespace st = stack_style;
-            D->AddRectFilled(m_Origin, Max, st::Canvas);
-            constexpr float Step = 32.0f;                                               // world units, the node editor's grid
-            const ImU32 Grid = Alpha(st::Grid, std::min(1.0f, m_Zoom * m_Zoom));
-            const ImVec2 W0 = ToWorld(m_Origin), W1 = ToWorld(Max);
-            for (int i = static_cast<int>(std::floor(W0.x / Step)); i <= static_cast<int>(std::ceil(W1.x / Step)); ++i)
-            {
-                const float x = Snap(ToScreen(i * Step, 0).x);
-                D->AddLine({ x, m_Origin.y }, { x, Max.y }, Grid);
-            }
-            for (int i = static_cast<int>(std::floor(W0.y / Step)); i <= static_cast<int>(std::ceil(W1.y / Step)); ++i)
-            {
-                const float y = Snap(ToScreen(0, i * Step).y);
-                D->AddLine({ m_Origin.x, y }, { Max.x, y }, Grid);
-            }
-        }
+        void DrawBackground(ImDrawList* D, ImVec2 Max) noexcept { m_Frame.m_Max = Max; m_Frame.DrawBackground(D, FrameStyle()); }
 
         // Per edge: 0 = dimmed, else the alpha it is lit with (5.6)
         std::vector<float> Lighting() noexcept
@@ -541,70 +531,10 @@ namespace xmaterial_editor
             return Lit;
         }
 
-        // An axis aligned world segment in screen space: on a pixel centre, the ends pushed out half the width so corners close
-        void Line(ImDrawList* D, float x0, float y0, float x1, float y1, ImU32 C, float Th) const noexcept
-        {
-            ImVec2 a = ToScreen(std::min(x0, x1), std::min(y0, y1)), b = ToScreen(std::max(x0, x1), std::max(y0, y1));
-            const float e = Th * 0.5f;
-            if (y0 == y1) { a.x -= e; b.x += e; a.y = b.y = Snap(a.y); }
-            else          { a.y -= e; b.y += e; a.x = b.x = Snap(a.x); }
-            D->AddLine(a, b, C, Th);
-        }
-
-        // One route's path, drawn from its output's wires so the crossing gaps stay
-        void DrawPath(ImDrawList* D, int e, ImU32 C, float Th) const noexcept
-        {
-            const auto& P = m_R.m_Routes[e].m_Points;
-            for (std::size_t k = 0; k + 1 < P.size(); ++k)
-            {
-                const auto s = stack_routes::Seg(P[k].m_X, P[k].m_Y, P[k + 1].m_X, P[k + 1].m_Y, 0);
-                const bool bH = s.m_Y0 == s.m_Y1;
-                for (int w : m_SourceWires[m_R.m_RouteSource[e]])
-                {
-                    const auto& W = m_R.m_Wires[w];
-                    if (bH != (W.m_Y0 == W.m_Y1)) continue;
-                    if (bH  && W.m_Y0 == s.m_Y0) if (const float a = std::max(W.m_X0, s.m_X0), b = std::min(W.m_X1, s.m_X1); a < b) Line(D, a, s.m_Y0, b, s.m_Y0, C, Th);
-                    if (!bH && W.m_X0 == s.m_X0) if (const float a = std::max(W.m_Y0, s.m_Y0), b = std::min(W.m_Y1, s.m_Y1); a < b) Line(D, s.m_X0, a, s.m_X0, b, C, Th);
-                }
-            }
-        }
-
-        void DrawRoutes(ImDrawList* D, const std::vector<float>& Lit) const noexcept
-        {
-            namespace st = stack_style;
-            const float Dim = m_InTrace.empty() ? st::DIM : st::DIM_TRACE;
-            for (auto& W : m_R.m_Wires) Line(D, W.m_X0, W.m_Y0, W.m_X1, W.m_Y1, Alpha(m_SourceColor[W.m_Source], Dim), st::WIRE_W);
-            for (auto& J : m_R.m_Junctions) D->AddCircleFilled(ToScreen(J.m_X, J.m_Y), 2.5f, Alpha(m_SourceColor[J.m_Source], Dim));
-
-            for (float Level : { st::SIBLING, st::HOVER, 1.0f })                       // brightest on top
-                for (int e = 0; e < static_cast<int>(Lit.size()); ++e)
-                {
-                    if (Lit[e] != Level || m_R.m_Routes[e].m_Points.empty()) continue;
-                    const ImU32 C = Alpha(m_SourceColor[m_R.m_RouteSource[e]], Level);
-                    DrawPath(D, e, C, Level == 1.0f ? st::LIT_W : st::WIRE_W + 0.5f);
-                    for (auto& J : m_R.m_Junctions)
-                        if (J.m_Source == m_R.m_RouteSource[e] && stack_routes::OnPolyline(m_R.m_Routes[e].m_Points, J.m_X, J.m_Y)) D->AddCircleFilled(ToScreen(J.m_X, J.m_Y), 3.5f, C);
-                }
-        }
-
-        // The route under the mouse: the nearest drawn segment within PICK screen pixels
-        int RouteAt(ImVec2 Mouse) const noexcept
-        {
-            int Best = -1;
-            float BestD = stack_style::PICK;
-            for (int e = 0; e < static_cast<int>(m_R.m_Routes.size()); ++e)
-            {
-                const auto& P = m_R.m_Routes[e].m_Points;
-                for (std::size_t k = 0; k + 1 < P.size(); ++k)
-                {
-                    const ImVec2 a = ToScreen(P[k].m_X, P[k].m_Y), b = ToScreen(P[k + 1].m_X, P[k + 1].m_Y);
-                    const float dx = std::max({ std::min(a.x, b.x) - Mouse.x, 0.0f, Mouse.x - std::max(a.x, b.x) });
-                    const float dy = std::max({ std::min(a.y, b.y) - Mouse.y, 0.0f, Mouse.y - std::max(a.y, b.y) });
-                    if (const float d = std::max(dx, dy); d < BestD) { BestD = d; Best = e; }
-                }
-            }
-            return Best;
-        }
+        // Wires: the view's (crisp on pixel centres, crossings kept, lit levels brightest on top)
+        void Line(ImDrawList* D, float x0, float y0, float x1, float y1, ImU32 C, float Th) const noexcept { m_Frame.Line(D, x0, y0, x1, y1, C, Th); }
+        void DrawRoutes(ImDrawList* D, const std::vector<float>& Lit) const noexcept { m_Frame.DrawRoutes(D, FrameStyle(), m_R, m_SourceColor, Lit, !m_InTrace.empty()); }
+        int RouteAt(ImVec2 Mouse) const noexcept { return m_Frame.RouteAt(FrameStyle(), m_R, Mouse); }
 
         void Pin(ImDrawList* D, ImVec2 C, ImU32 Color, bool bConnected) const noexcept      // the old canvas's: filled when connected
         {
@@ -1996,9 +1926,10 @@ namespace xmaterial_editor
         // view state
         ImFont*                                     m_pFont    = nullptr;
         float                                       m_FontSize = 13.0f;
-        ImVec2                                      m_Origin   = {};
-        ImVec2                                      m_Pan      = {};
-        float                                       m_Zoom     = 1.0f;
+        xgraph::view::view                          m_Frame;                // the frame (origin, pan, zoom): xgraph's
+        ImVec2&                                     m_Origin   = m_Frame.m_Origin;
+        ImVec2&                                     m_Pan      = m_Frame.m_Pan;
+        float&                                      m_Zoom     = m_Frame.m_Zoom;
         bool                                        m_bPanning = false;
         float                                       m_PanTravel = 0;
         std::uint64_t                               m_SelStep  = 0, m_SelConn = 0, m_HoverStep = 0;
