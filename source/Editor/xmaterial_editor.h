@@ -326,6 +326,20 @@ namespace xmaterial_editor
             if (!In.is_open()) return;
             std::stringstream Text; Text << In.rdbuf();
             m_Shader.SetText(Text.str());
+
+            // The compiler's story at the top of its shader (Shader.txt): "// Drawn by: ..." and "// Not drawn by: ..." - the toolbar's line after
+            // Compile, and on hover what is left out and why
+            m_ToolbarStatus.clear(); m_ToolbarStatusHint.clear();
+            Text.clear(); Text.seekg(0);
+            for (std::string Line; std::getline(Text, Line) && Line.starts_with("// "); )
+            {
+                if (Line.starts_with("// Drawn by: "))          m_ToolbarStatus     = Line.substr(3);
+                else if (Line.starts_with("// Not drawn by: ")) m_ToolbarStatusHint = Line.substr(3);
+            }
+            if (!m_ToolbarStatus.empty())
+                m_ToolbarStatusHint = (m_ToolbarStatusHint.empty() ? std::string("Every pass of the renderer that draws materials draws this one.") : m_ToolbarStatusHint)
+                                    + "\n\nThe renderer's passes that draw materials: the forward pass (every material), the G-buffer prepass (lit materials: the"
+                                      " screen-space effects read it), the tile pass (lit materials with textures: shaded from the prepass's G-buffer).";
         }
     };
 
