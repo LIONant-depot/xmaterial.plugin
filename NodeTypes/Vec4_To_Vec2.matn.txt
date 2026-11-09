@@ -1,10 +1,10 @@
 
 // A material node type: what the material editor shows (Name, Category, Description, the pins and params below) and its GLSL
-// template (Code: a file beside this one). Id: never change it - materials refer to the node by it (its hash is the type's id).
+// template (Code: a file beside this one). Id: never change it - materials refer to the node by it; a new node type takes a new guid.
 [ NodeType ]
-{ Id:s  Name:s  Category:s  Code:s  Description:s }
+{ Id:G  Name:s  Category:s  Code:s  Description:s }
 //----  ------  ----------  ------  -------------
-  "Vec4toVec2prefabs"  "Vec4 To Vec2"  "Convert"  "Vec4_To_Vec2.glsl"  "The first two components (x, y) of a Vec4."
+  #BCC9FC0D97D985BA  "Vec4 To Vec2"  "Convert"  "Vec4_To_Vec2.glsl"  "The first two components (x, y) of a Vec4."
 [ Inputs : 1 ]
 { Name:s  Type:s     Param:d  Expression:s }
 //------  ---------  -------  ------------

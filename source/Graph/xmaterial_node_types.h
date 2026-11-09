@@ -4,8 +4,8 @@
 
 // The material graph's pin types and node types as data (xLION_Docs material_pipeline_for_render_graph section 9, Tomas 2026-11-09):
 // <plugin>/NodeTypes/Types.txt (the pin types) and one <Name>.matn.txt per node type (Tomas: the double extension says it is a material node) (its name, category, description, pins, params) with its
-// GLSL template in the file its Code column names (beside it) (the template exactly: $var, $input[n], [TOP]<!..!> ...). A key names each (the id is the hash of
-// the key, as xresource::type_guid{"key"} - so existing materials keep their ids). The structural nodes (Group Input/Output, Group,
+// GLSL template in the file its Code column names (beside it) (the template exactly: $var, $input[n], [TOP]<!..!> ...). Each has an Id (a guid: materials refer to
+// it - never changed; a new type takes a new one); pins name their type as Types.txt does ("Vector4"). The structural nodes (Group Input/Output, Group,
 // Comment) stay in C++ (graph::CreateGraph). A file that does not load is said (its path and why) and skipped; the others load.
 #include "xmaterial_graph.h"
 #include "dependencies/xtextfile/source/xtextfile.h"
@@ -20,17 +20,6 @@
 
 namespace xmaterial_graph::node_types
 {
-    // xresource::type_guid{"key"} at run time (the same hash; checked against the compile time one by Load)
-    inline std::uint64_t KeyGuid(std::string_view Key) noexcept
-    {
-        std::uint64_t Hash = 0x548c9decbce65297ULL;
-        constexpr std::uint64_t m = 0xc6a4a7935bd1e995ULL;
-        for (char c : Key) Hash = (Hash ^ static_cast<std::uint64_t>(c)) * m;
-        Hash ^= static_cast<std::uint64_t>(Key.size());
-        Hash ^= Hash >> 33; Hash *= 0x85ebca6b; Hash ^= Hash >> 13; Hash *= 0xc2b2ae35; Hash ^= Hash >> 16;
-        return Hash;
-    }
-
     inline const char* ParamTypeName(node_param::type T) noexcept
     {
         switch (T)
@@ -56,7 +45,8 @@ namespace xmaterial_graph::node_types
     {
         struct pin_row   { std::string m_Name, m_Type, m_Expression; int m_Param = -1; };
         struct param_row { std::string m_Name, m_Type, m_Value; bool m_bCanExpose = false; };
-        std::string             m_Key, m_Name, m_Category, m_Code, m_Description;      // (m_Key: the file's Id)
+        std::uint64_t           m_Id = 0;                                                // the node type's guid (materials refer to it)
+        std::string             m_Name, m_Category, m_Code, m_Description;
         std::vector<pin_row>    m_Inputs, m_Outputs;
         std::vector<param_row>  m_Params;
 
@@ -64,7 +54,7 @@ namespace xmaterial_graph::node_types
         {
             xerr Err;
             if ((Err = F.Record("NodeType", [&](xerr& E)
-                { false || (E = F.Field("Id", m_Key)) || (E = F.Field("Name", m_Name)) || (E = F.Field("Category", m_Category)) || (E = F.Field("Code", m_Code)) || (E = F.Field("Description", m_Description)); }))) return Err;
+                { false || (E = F.Field("Id", m_Id)) || (E = F.Field("Name", m_Name)) || (E = F.Field("Category", m_Category)) || (E = F.Field("Code", m_Code)) || (E = F.Field("Description", m_Description)); }))) return Err;
             const auto PinRow = [&](std::vector<pin_row>& Rows, std::size_t i, xerr& E) { false || (E = F.Field("Name", Rows[i].m_Name)) || (E = F.Field("Type", Rows[i].m_Type)) || (E = F.Field("Param", Rows[i].m_Param)) || (E = F.Field("Expression", Rows[i].m_Expression)); };
             if ((Err = F.Record("Inputs"
                 , [&](std::size_t& Count, xerr&) { if (F.isReading()) m_Inputs.resize(Count); else Count = m_Inputs.size(); }
@@ -82,7 +72,7 @@ namespace xmaterial_graph::node_types
     // The pin types' file: a row each
     struct types_file
     {
-        struct row { std::string m_Key, m_Name, m_Code, m_Sub, m_SubType; int m_R = 0, m_G = 0, m_B = 0, m_A = 255; };
+        struct row { std::uint64_t m_Id = 0, m_SubType = 0; std::string m_Name, m_Code, m_Sub; int m_R = 0, m_G = 0, m_B = 0, m_A = 255; };
         std::vector<row> m_Rows;
         xerr Serialize(xtextfile::stream& F) noexcept
         {
@@ -91,7 +81,7 @@ namespace xmaterial_graph::node_types
                 , [&](std::size_t i, xerr& E)
                 {
                     auto& R = m_Rows[i];
-                    false || (E = F.Field("Id", R.m_Key)) || (E = F.Field("Name", R.m_Name)) || (E = F.Field("Code", R.m_Code))
+                    false || (E = F.Field("Id", R.m_Id)) || (E = F.Field("Name", R.m_Name)) || (E = F.Field("Code", R.m_Code))
                           || (E = F.Field("R", R.m_R)) || (E = F.Field("G", R.m_G)) || (E = F.Field("B", R.m_B)) || (E = F.Field("A", R.m_A))
                           || (E = F.Field("Sub", R.m_Sub)) || (E = F.Field("SubType", R.m_SubType));
                 });
@@ -135,17 +125,18 @@ namespace xmaterial_graph::node_types
         for (auto& R : T.m_Rows)
         {
             sType S;
-            S.m_GUID = type_guid{ KeyGuid(R.m_Key) }; S.m_Name = R.m_Name; S.m_CodeString = R.m_Code;
+            S.m_GUID = type_guid{ R.m_Id }; S.m_Name = R.m_Name; S.m_CodeString = R.m_Code;
             S.m_Color = FromRGB(R.m_R, R.m_G, R.m_B, R.m_A);
             for (std::size_t b = 0; b < R.m_Sub.size(); )
             {
                 std::size_t e = R.m_Sub.find(' ', b); if (e == std::string::npos) e = R.m_Sub.size();
-                if (e > b) { auto& V = S.m_Sub.emplace_back(); V.m_TypeGUID = type_guid{ KeyGuid(R.m_SubType) }; V.m_Name = R.m_Sub.substr(b, e - b); }
+                if (e > b) { auto& V = S.m_Sub.emplace_back(); V.m_TypeGUID = type_guid{ R.m_SubType }; V.m_Name = R.m_Sub.substr(b, e - b); }
                 b = e + 1;
             }
             L.m_Types.emplace_back(S.m_GUID.m_Value, std::move(S));
         }
-        const auto TypeKnown = [&](std::string_view Key) { return std::ranges::any_of(L.m_Types, [&](auto& E) { return E.first == KeyGuid(Key); }); };
+        // A pin's type by its name in Types.txt (readable: "Vector4"); 0: no such type
+        const auto TypeOf = [&](std::string_view Name) -> std::uint64_t { for (auto& [Id, S] : L.m_Types) if (S.m_Name == Name) return Id; return 0; };
         std::vector<std::filesystem::path> Files;
         for (auto& E : std::filesystem::directory_iterator(Folder)) if (E.path().filename().string().ends_with(".matn.txt")) Files.push_back(E.path());      // (a material node: <Name>.matn.txt)
         std::ranges::sort(Files);
@@ -155,7 +146,7 @@ namespace xmaterial_graph::node_types
             xtextfile::stream F;
             if (auto Err = F.Open(true, P.wstring(), xtextfile::file_type::TEXT); Err) { Problem(P, "does not open"); continue; }
             if (auto Err = D.Serialize(F); Err) { Problem(P, std::format("not read: {}", Err.getMessage())); continue; }
-            if (D.m_Key.empty() || D.m_Name.empty() || D.m_Code.empty()) { Problem(P, "its NodeType row needs an Id, a Name and a Code file"); continue; }
+            if (D.m_Id == 0 || D.m_Name.empty() || D.m_Code.empty()) { Problem(P, "its NodeType row needs an Id, a Name and a Code file"); continue; }
             bool bOk = true;
             node N;
             N.m_Name = D.m_Name; N.m_Category = D.m_Category; N.m_Description = D.m_Description;
@@ -163,8 +154,8 @@ namespace xmaterial_graph::node_types
             N.m_Code = ReadAll(Template, bOk);
             if (!bOk) { Problem(P, std::format("its template {} is missing", Template.filename().string())); continue; }
             std::string Why;
-            for (auto& R : D.m_Inputs)  { if (!TypeKnown(R.m_Type)) Why = std::format("input '{}' has the unknown type '{}'", R.m_Name, R.m_Type);  auto& I = N.m_InputPins.emplace_back();  I.m_Name = R.m_Name; I.m_TypeGUID = type_guid{ KeyGuid(R.m_Type) }; I.m_ParamIndex = R.m_Param; I.m_DefaultExpr = R.m_Expression; }
-            for (auto& R : D.m_Outputs) { if (!TypeKnown(R.m_Type)) Why = std::format("output '{}' has the unknown type '{}'", R.m_Name, R.m_Type); auto& O = N.m_OutputPins.emplace_back(); O.m_Name = R.m_Name; O.m_TypeGUID = type_guid{ KeyGuid(R.m_Type) }; O.m_ParamIndex = R.m_Param; O.m_DefaultExpr = R.m_Expression; }
+            for (auto& R : D.m_Inputs)  { if (!TypeOf(R.m_Type)) Why = std::format("input '{}' has the unknown type '{}' (Types.txt names them)", R.m_Name, R.m_Type);  auto& I = N.m_InputPins.emplace_back();  I.m_Name = R.m_Name; I.m_TypeGUID = type_guid{ TypeOf(R.m_Type) }; I.m_ParamIndex = R.m_Param; I.m_DefaultExpr = R.m_Expression; }
+            for (auto& R : D.m_Outputs) { if (!TypeOf(R.m_Type)) Why = std::format("output '{}' has the unknown type '{}' (Types.txt names them)", R.m_Name, R.m_Type); auto& O = N.m_OutputPins.emplace_back(); O.m_Name = R.m_Name; O.m_TypeGUID = type_guid{ TypeOf(R.m_Type) }; O.m_ParamIndex = R.m_Param; O.m_DefaultExpr = R.m_Expression; }
             for (auto& R : D.m_Params)
             {
                 const auto T2 = ParamTypeOf(R.m_Type);
@@ -181,7 +172,8 @@ namespace xmaterial_graph::node_types
             }
             for (auto& I : N.m_InputPins) if (I.m_ParamIndex >= static_cast<int>(N.m_Params.size())) Why = std::format("input '{}' reads param {} of {}", I.m_Name, I.m_ParamIndex, N.m_Params.size());
             if (!Why.empty()) { Problem(P, Why); continue; }
-            L.m_Nodes.emplace_back(KeyGuid(D.m_Key), std::move(N));
+            if (std::ranges::any_of(L.m_Nodes, [&](auto& E) { return E.first == D.m_Id; })) { Problem(P, std::format("its Id #{:016X} is another node type's too", D.m_Id)); continue; }
+            L.m_Nodes.emplace_back(D.m_Id, std::move(N));
         }
         return L;
     }
@@ -196,7 +188,6 @@ namespace xmaterial_graph::node_types
         if (bNew)
         {
             It->second = Read(Folder);
-            if (KeyGuid("Color") != color_type_guid_v.m_Value) It->second.m_Problems += "KeyGuid differs from xresource::type_guid: every id would be wrong\n";
             if (!It->second.m_Problems.empty()) { std::fprintf(stderr, "Material node types (%ls):\n%s", Folder.c_str(), It->second.m_Problems.c_str()); std::fflush(stderr); }
         }
         return It->second;

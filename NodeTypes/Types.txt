@@ -1,12 +1,12 @@
-// The material graph's pin types. Id: never change it - node types and materials refer to the type by it (its hash is the type's id).
+// The material graph's pin types. Id: never change it - node types and materials refer to the type by it; a new type takes a new guid.
 [ Types : 8 ]
-{ Id:s         Name:s       Code:s       R:d  G:d  B:d  A:d  Sub:s      SubType:s }
+{ Id:G         Name:s       Code:s       R:d  G:d  B:d  A:d  Sub:s      SubType:G }
 //-----------  -----------  -----------  ---  ---  ---  ---  ---------  ---------
-  "Color"      "Color"      "vec4"       235  235  235  255  "x y z w"   "float" 
-  "SColor"     "SColor"     "vec4"       255  130   30  255  ""          ""      
-  "Sampler2D"  "Sampler2D"  "sampler2D"  240   80   80  255  ""          ""      
-  "Vector2"    "Vector2"    "vec2"        80  180  250  255  "x y"       "float" 
-  "Vector3"    "Vector3"    "vec3"        80  220  120  255  "x y z"     "float" 
-  "Vector4"    "Vector4"    "vec4"       180   80  220  255  "x y z w"   "float" 
-  "float"      "float"      "float"      240  200   50  255  ""          ""      
-  "texture"    "Texture"    "texture"    200  180   80  255  ""          ""      
+  #FA00EFBCE10F630B      "Color"      "vec4"       235  235  235  255  "x y z w"   #254786A97C52EF15
+  #771306F68D652D19     "SColor"     "vec4"       255  130   30  255  ""          #0
+  #C5429828688F99B1  "Sampler2D"  "sampler2D"  240   80   80  255  ""          #0
+  #722EA6EABC1ECBBC    "Vector2"    "vec2"        80  180  250  255  "x y"       #254786A97C52EF15
+  #6D3F16FEEBDA4452    "Vector3"    "vec3"        80  220  120  255  "x y z"     #254786A97C52EF15
+  #940688F48A9C32B4    "Vector4"    "vec4"       180   80  220  255  "x y z w"   #254786A97C52EF15
+  #254786A97C52EF15      "float"      "float"      240  200   50  255  ""          #0
+  #3380EA40A8C5EC19    "Texture"    "texture"    200  180   80  255  ""          #0

@@ -1,10 +1,11 @@
 
 // A material node type: what the material editor shows (Name, Category, Description, the pins and params below) and its GLSL
-// template (Code: a file beside this one). Id: never change it - materials refer to the node by it (its hash is the type's id).
+// template (Code: a file beside this one). Id: never change it - materials refer to the node by it; a new node type takes a new guid.
 [ NodeType ]
-{ Id:s  Name:s  Category:s  Code:s  Description:s }
+{ Id:G  Name:s  Category:s  Code:s  Description:s }
 //----  ------  ----------  ------  -------------
-  "FloatMixPrefabs"  "Float Mix"  "Math"  "Float_Mix.glsl"  "A blended towards B by T (0 = A, 1 = B)."
+  #80CEB2774D2FC71C  "Float Mix"  "Math"  "Float_Mix.glsl"  "A blended towards B by T (0 = A, 1 = B)."
+
 [ Inputs : 3 ]
 { Name:s  Type:s   Param:d  Expression:s }
 //------  -------  -------  ------------

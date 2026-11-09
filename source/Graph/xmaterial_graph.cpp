@@ -45,12 +45,17 @@ namespace xmaterial_graph
     node& graph::CreateNode(node_guid PrefabGuid, node_guid Guid)
     {
         auto it = m_PrefabNodes.find(PrefabGuid);
-        assert(it != m_PrefabNodes.end());
 
         auto Node = std::make_unique<node>();
         assert(m_InstanceNodes.find(Guid) == m_InstanceNodes.end());
 
-        *Node = *it->second;
+        if (it != m_PrefabNodes.end()) *Node = *it->second;
+        else            // a node type no NodeTypes file defines (deleted, or its file did not load): the step stays, said in red, and nothing compiles it
+        {
+            Node->m_Name      = std::format("Unknown node type #{:016X}", PrefabGuid.m_Value);
+            Node->m_HasErrMsg = true;
+            Node->m_ErrMsg    = std::format("No file in the plugin's NodeTypes folder defines this node type (#{:016X}): it was removed, or its file did not load (the log says why). The material does not compile until it is back or this step is replaced.", PrefabGuid.m_Value);
+        }
         Node->m_Guid = Guid;
         Node->m_PrefabGuid = PrefabGuid;
 
@@ -342,9 +347,9 @@ namespace xmaterial_graph
                 graph.RebuildPinGuidForNode(Entry);
 
                 // outputs take their types from the node's definition, not the file (old files' vertex colour: Vector4 -> Color)
-                const auto& Prefab = *graph.m_PrefabNodes[PrefabGuid];
-                for (std::size_t o = 0; o < std::min(Prefab.m_OutputPins.size(), Entry.m_OutputPins.size()); ++o)
-                    Entry.m_OutputPins[o].m_TypeGUID = Prefab.m_OutputPins[o].m_TypeGUID;
+                if (auto It = graph.m_PrefabNodes.find(PrefabGuid); It != graph.m_PrefabNodes.end())      // (an unknown node type keeps the file's: CreateNode)
+                    for (std::size_t o = 0; o < std::min(It->second->m_OutputPins.size(), Entry.m_OutputPins.size()); ++o)
+                        Entry.m_OutputPins[o].m_TypeGUID = It->second->m_OutputPins[o].m_TypeGUID;
             }
         }
 

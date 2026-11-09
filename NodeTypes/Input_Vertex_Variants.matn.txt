@@ -1,10 +1,10 @@
 
 // A material node type: what the material editor shows (Name, Category, Description, the pins and params below) and its GLSL
-// template (Code: a file beside this one). Id: never change it - materials refer to the node by it (its hash is the type's id).
+// template (Code: a file beside this one). Id: never change it - materials refer to the node by it; a new node type takes a new guid.
 [ NodeType ]
-{ Id:s  Name:s  Category:s  Code:s  Description:s }
+{ Id:G  Name:s  Category:s  Code:s  Description:s }
 //----  ------  ----------  ------  -------------
-  "vertexPrefabs"  "Input: Vertex Variants"  "Inputs"  "Input_Vertex_Variants.glsl"  "What the mesh gives each pixel: its vertex colour (linear) and its UV sets."
+  #CBC82A6D82A1C031  "Input: Vertex Variants"  "Inputs"  "Input_Vertex_Variants.glsl"  "What the mesh gives each pixel: its vertex colour (linear) and its UV sets."
 [ Inputs : 0 ]
 
 [ Outputs : 3 ]

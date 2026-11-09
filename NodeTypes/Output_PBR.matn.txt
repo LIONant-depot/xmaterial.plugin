@@ -1,10 +1,10 @@
 
 // A material node type: what the material editor shows (Name, Category, Description, the pins and params below) and its GLSL
-// template (Code: a file beside this one). Id: never change it - materials refer to the node by it (its hash is the type's id).
+// template (Code: a file beside this one). Id: never change it - materials refer to the node by it; a new node type takes a new guid.
 [ NodeType ]
-{ Id:s  Name:s  Category:s  Code:s  Description:s }
+{ Id:G  Name:s  Category:s  Code:s  Description:s }
 //----  ------  ----------  ------  -------------
-  "pbroutprefabs"  "Output: PBR"  "Outputs"  "Output_PBR.glsl"  "The material's surface: albedo, roughness, metallic, normal, AO, emissive and alpha, lit by the renderer."
+  #8AB3C006E6A91F69  "Output: PBR"  "Outputs"  "Output_PBR.glsl"  "The material's surface: albedo, roughness, metallic, normal, AO, emissive and alpha, lit by the renderer."
 [ Inputs : 7 ]
 { Name:s          Type:s     Param:d  Expression:s          }
 //--------------  ---------  -------  ---------------------

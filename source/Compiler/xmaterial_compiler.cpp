@@ -21,6 +21,7 @@
 #include "source/xmaterial_data_file.h"
 #include "source/Graph/xmaterial_step_names.h"
 #include "source/Graph/xmaterial_subgraph.h"
+#include "source/Graph/xmaterial_node_types.h"
 #include "dependencies/xtextfile/source/xtextfile.h"
 #include "dependencies/xproperty/source/sprop/property_sprop_xtextfile_serializer.h"
 
@@ -695,9 +696,16 @@ namespace xmaterial_compiler
             auto DescriptorFileName = std::format( L"{}/{}/Descriptor.txt", m_ProjectPaths.m_Project, m_InputSrcDescriptorPath);
 
             xmaterial_graph::SetNodeTypesFolderFromProject(m_ProjectPaths.m_Project);
+            if (const auto& Problems = xmaterial_graph::node_types::Cached(xmaterial_graph::NodeTypesFolder()).m_Problems; !Problems.empty())
+                LogMessage(xresource_pipeline::msg_type::WARNING, "Material node types that did not load:\n" + Problems);
             graph Graph;
             Graph.CreateGraph(Graph);
             Graph.serialize(Graph, true, DescriptorFileName);
+            // A step of a node type no file defines (CreateNode kept it, named "Unknown node type"): said, and nothing compiled
+            for (auto& [Id, pN] : Graph.m_InstanceNodes)
+                if (!Graph.m_PrefabNodes.contains(pN->m_PrefabGuid))
+                    Fail(std::format("E_NODE_TYPE: step '{}' is of the node type #{:016X}, which no file in the plugin's NodeTypes folder defines (removed, or it did not load: see the warning above)", pN->m_StepName, pN->m_PrefabGuid.m_Value));
+            if (m_bFailed) return xerr::create_f<state, "The material uses a node type that is not defined (see the log for E_NODE_TYPE)">();
 
             // Group nodes: each is replaced by a copy of its sub-graph's steps (nested ones too), before anything reads the graph. A sub-graph is
             // looked for in this project or library first, then in the libraries it uses. Their files are dependencies: editing one compiles every
