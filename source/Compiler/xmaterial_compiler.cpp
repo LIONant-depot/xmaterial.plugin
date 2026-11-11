@@ -296,7 +296,8 @@ namespace xmaterial_compiler
                    "    layout(push_constant) uniform XMatPush { uint Cluster; uint Instance; layout(offset = 16) uint MaterialBase; } g_XMatPush;\n"
                    "    #define XMAT_BASE g_XMatPush.MaterialBase\n"
                    "    #define XMAT_PUSH_CLUSTER  g_XMatPush.Cluster\n"
-                   "    #define XMAT_PUSH_INSTANCE g_XMatPush.Instance\n"
+                   "    layout(location = 8) flat in uint InInstance;\n"      // (the instance slot from the vertex shader: the push constants' second word is the bone count on the skin path)
+                   "    #define XMAT_PUSH_INSTANCE InInstance\n"
                    "#endif\n";
         }
 
@@ -314,7 +315,6 @@ namespace xmaterial_compiler
             if (bEntity)
                 S += "    struct XMatEntity { uvec4 H; vec4 Tint; vec4 P0; vec4 P1; };\n"
                      "    layout(std430, set = 1, binding = 10) readonly buffer EntityParamsBuf { XMatEntity E[]; } g_Ent;\n"
-                     "    #ifndef XLION_TILE_PIXEL\n    layout(location = 8) flat in uint InInstance;\n    #endif\n"
                      "    #define XMAT_ENT(Bit, Field, Swz, Mat) ((g_Ent.E[InInstance].H.x & Bit) != 0u ? g_Ent.E[InInstance].Field.Swz : (Mat))\n";
             S += "#endif\n";
             return S;
