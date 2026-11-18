@@ -84,6 +84,25 @@ namespace xmaterial_compiler
 #include <string>
 #include <array>  // Or use struct for container
 
+#include <algorithm>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+// std::getenv / std::fopen / std::sscanf are the standard's and safe as used here (switches read once; numbers only); MSVC deprecates them
+// (C4996, its own _s forms), so the warning is answered once, here (the same answer as xlionrender_env.h; Q1: zero warnings in our code)
+namespace xmaterial_env
+{
+#if defined(_MSC_VER)
+    #define xmaterial_env_ENV_PUSH __pragma(warning(push)) __pragma(warning(disable: 4996))
+    #define xmaterial_env_ENV_POP  __pragma(warning(pop))
+#else
+    #define xmaterial_env_ENV_PUSH
+    #define xmaterial_env_ENV_POP
+#endif
+    inline const char* Env(const char* pName) noexcept { xmaterial_env_ENV_PUSH return std::getenv(pName); xmaterial_env_ENV_POP }
+}
+
+
     // Resolves #include relative to the including file (or the working path: the project) and records every file it opens,
     // so the compiler can make them dependencies: a material recompiles when any shader it includes changes (the renderer's
     // shader library included).
@@ -785,7 +804,7 @@ namespace xmaterial_compiler
                 options.SetIncluder(std::make_unique<CustomIncluder>(&Includes));
                 options.SetOptimizationLevel(shaderc_optimization_level_performance);
                 options.SetTargetSpirv(shaderc_spirv_version_1_0);
-                if (std::getenv("XMATERIAL_SHADER_DEBUG")) options.SetGenerateDebugInfo();      // (profiling: Nsight's GLSL lines - the editor's environment reaches the compiler)
+                if (xmaterial_env::Env("XMATERIAL_SHADER_DEBUG")) options.SetGenerateDebugInfo();      // (profiling: Nsight's GLSL lines - the editor's environment reaches the compiler)
                 if (bLDR) options.AddMacroDefinition("XLION_LDR_OUTPUT");
                 if (bBindless) options.AddMacroDefinition("XGPU_BINDLESS");
                 if (bGBuffer)  options.AddMacroDefinition("XLION_GBUFFER_OUTPUT");     // (xLIONRender's thin G-buffer: mb_standard_pbr.frag PBRLighting)
@@ -945,7 +964,7 @@ namespace xmaterial_compiler
                 P.m_Slot        = E.m_Type == xmaterial::param_type::TEXTURE && E.m_Sampler ? std::uint8_t(E.m_Sampler - 1) : 0;
                 P.m_EntityField = std::uint8_t(E.m_EntityField);
                 if (const auto D = std::ranges::find(m_Manifest.m_Decls, E.m_ID, &xmaterial::param_decl::m_ID); D != m_Manifest.m_Decls.end())
-                    std::strncpy(P.m_Name, D->m_Name.c_str(), sizeof(P.m_Name) - 1);
+                    { const auto n = std::min(D->m_Name.size(), sizeof(P.m_Name) - 1); std::memcpy(P.m_Name, D->m_Name.data(), n); P.m_Name[n] = 0; }      // (strncpy: C4996; this also always terminates)
             }
             MaterialDataFile.m_pParamInfo = ParamInfo.empty() ? nullptr : ParamInfo.data();
             MaterialDataFile.m_nParamInfo = std::uint16_t(ParamInfo.size());
