@@ -3,15 +3,16 @@
 [ NodeType ]
 { Id:G  Name:s  Category:s  Code:s  Description:s }
 //----  ------  ----------  ------  -------------
-  #358C0A477FC35884  "Input: Wear Masks"  "Inputs"  "Input_Wear_Masks.glsl"  "The wear masks the mesh compiler baked into the vertex colour (GeomStatic HardSurface/BakeMasks): AO (1 open, 0 enclosed), Cavity (1 open, 0 in a crevice), Height within the model (0 bottom, 1 top) and Grime (1 - Cavity: where dirt and rust gather). A mesh without them reads white: AO and Cavity 1, no grime."
+  #358C0A477FC35884  "Input: Wear Masks"  "Inputs"  "Input_Wear_Masks.glsl"  "The wear masks the mesh compiler baked into the vertex colour (GeomStatic HardSurface/BakeMasks): AO (1 open, 0 enclosed), Cavity (1 open, 0 in a crevice), Height within the model (0 bottom, 1 top) and Grime (1 - Cavity: where dirt and rust gather) and Runs (semantic grime: rust rings and runs below the parts named bolt, nut, rivet, screw, weld, flange, fitting, valve; HardSurface/GrimeRunLength). A mesh without them reads white: AO and Cavity 1, no grime."
 [ Inputs : 0 ]
 
-[ Outputs : 4 ]
+[ Outputs : 5 ]
 { Name:s  Type:s  Param:d  Expression:s }
 //------  ------  -------  ------------
   "AO(1)"  "float"  -1  "In.VertColor.x"
   "Cavity(1)"  "float"  -1  "In.VertColor.y"
   "Height(1)"  "float"  -1  "In.VertColor.z"
   "Grime(1)"  "float"  -1  "(1.0 - In.VertColor.y)"
+  "Runs(1)"  "float"  -1  "(1.0 - In.VertColor.w)"
 
 [ Params : 0 ]
