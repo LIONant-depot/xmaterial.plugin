@@ -1,0 +1,23 @@
+// A material node type: what the material editor shows (Name, Category, Description, the pins and params below) and its GLSL
+// template (Code: a file beside this one). Id: never change it - materials refer to the node by it; a new node type takes a new guid.
+[ NodeType ]
+{ Id:G  Name:s  Category:s  Code:s  Description:s }
+//----  ------  ----------  ------  -------------
+  #11C256CAD454887D  "Noise 3D"  "Wear"  "Noise_3D.glsl"  "Smooth value noise (3 octaves, 0..1) at a position (default: the pixel's world position). Seed shifts the pattern: expose it as an entity field (PARAM0) and every copy of a prop wears differently."
+[ Inputs : 3 ]
+{ Name:s  Type:s  Param:d  Expression:s }
+//------  ------  -------  ------------
+  "P(3)"  "Vector3"  -1  "XMAT_WORLD_POS"
+  "Scale(1)"  "float"  0  ""
+  "Seed(1)"  "float"  1  ""
+
+[ Outputs : 1 ]
+{ Name:s  Type:s  Param:d  Expression:s }
+//------  ------  -------  ------------
+  "A(1)"  "float"  -1  ""
+
+[ Params : 2 ]
+{ Name:s  Type:s  Value:s  CanExpose:c  Min:f  Max:f }
+//------  ------  -------  -----------  -----  -----
+  "scale"  "float"  "4"  1  0.01  100
+  "seed"  "float"  "0"  1  0  1000

@@ -1,0 +1,20 @@
+// A material node type: what the material editor shows (Name, Category, Description, the pins and params below) and its GLSL
+// template (Code: a file beside this one). Id: never change it - materials refer to the node by it; a new node type takes a new guid.
+[ NodeType ]
+{ Id:G  Name:s  Category:s  Code:s  Description:s }
+//----  ------  ----------  ------  -------------
+  #D3C235B3318E3B98  "Wear: Edge Curvature"  "Wear"  "Wear_Edge_Curvature.glsl"  "How sharply the surface bends at the pixel, from the screen derivatives of the world normal: + on convex edges (chips, worn paint), - in concave corners (dirt). Radius (meters) scales it: about 1 on a bevel of that size. No bake needed: the weighted-normal bevels are exactly where it is high."
+[ Inputs : 1 ]
+{ Name:s  Type:s  Param:d  Expression:s }
+//------  ------  -------  ------------
+  "Radius(1)"  "float"  0  ""
+
+[ Outputs : 1 ]
+{ Name:s  Type:s  Param:d  Expression:s }
+//------  ------  -------  ------------
+  "A(1)"  "float"  -1  ""
+
+[ Params : 1 ]
+{ Name:s  Type:s  Value:s  CanExpose:c  Min:f  Max:f }
+//------  ------  -------  -----------  -----  -----
+  "radius"  "float"  "0.02"  1  0.0005  1

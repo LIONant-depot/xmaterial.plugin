@@ -1,0 +1,26 @@
+// A material node type: what the material editor shows (Name, Category, Description, the pins and params below) and its GLSL
+// template (Code: a file beside this one). Id: never change it - materials refer to the node by it; a new node type takes a new guid.
+[ NodeType ]
+{ Id:G  Name:s  Category:s  Code:s  Description:s }
+//----  ------  ----------  ------  -------------
+  #F6777B8B4A9B2811  "Wear: Streaks"  "Wear"  "Wear_Streaks.glsl"  "Vertical weeping streaks: noise stretched along the world's up axis (Stretch times), only on upright faces (none on tops and bottoms). 0..1."
+[ Inputs : 5 ]
+{ Name:s  Type:s  Param:d  Expression:s }
+//------  ------  -------  ------------
+  "P(3)"  "Vector3"  -1  "XMAT_WORLD_POS"
+  "N(3)"  "Vector3"  -1  "XMAT_WORLD_N"
+  "Scale(1)"  "float"  0  ""
+  "Stretch(1)"  "float"  1  ""
+  "Seed(1)"  "float"  2  ""
+
+[ Outputs : 1 ]
+{ Name:s  Type:s  Param:d  Expression:s }
+//------  ------  -------  ------------
+  "A(1)"  "float"  -1  ""
+
+[ Params : 3 ]
+{ Name:s  Type:s  Value:s  CanExpose:c  Min:f  Max:f }
+//------  ------  -------  -----------  -----  -----
+  "scale"  "float"  "6"  1  0.01  100
+  "stretch"  "float"  "30"  1  1  200
+  "seed"  "float"  "0"  1  0  1000

@@ -1,0 +1,16 @@
+// A material node type: what the material editor shows (Name, Category, Description, the pins and params below) and its GLSL
+// template (Code: a file beside this one). Id: never change it - materials refer to the node by it; a new node type takes a new guid.
+[ NodeType ]
+{ Id:G  Name:s  Category:s  Code:s  Description:s }
+//----  ------  ----------  ------  -------------
+  #0484793B58DCA631  "Input: World"  "Inputs"  "Input_World.glsl"  "The pixel's world position (meters), its world normal and how much it faces up (the normal's y: 1 up, 0 a wall, -1 down)."
+[ Inputs : 0 ]
+
+[ Outputs : 3 ]
+{ Name:s  Type:s  Param:d  Expression:s }
+//------  ------  -------  ------------
+  "Position(3)"  "Vector3"  -1  "XMAT_WORLD_POS"
+  "Normal(3)"  "Vector3"  -1  "XMAT_WORLD_N"
+  "Up(1)"  "float"  -1  "XMAT_WORLD_N.y"
+
+[ Params : 0 ]

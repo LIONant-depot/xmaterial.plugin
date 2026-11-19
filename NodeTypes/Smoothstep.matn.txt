@@ -1,0 +1,23 @@
+// A material node type: what the material editor shows (Name, Category, Description, the pins and params below) and its GLSL
+// template (Code: a file beside this one). Id: never change it - materials refer to the node by it; a new node type takes a new guid.
+[ NodeType ]
+{ Id:G  Name:s  Category:s  Code:s  Description:s }
+//----  ------  ----------  ------  -------------
+  #BFDD6610E626EC1B  "Smoothstep"  "Math"  "Smoothstep.glsl"  "0 below Edge0, 1 above Edge1, a smooth ramp between: turns a mask into a sharp edge (chips: a narrow ramp) or a soft halo (a wide one)."
+[ Inputs : 3 ]
+{ Name:s  Type:s  Param:d  Expression:s }
+//------  ------  -------  ------------
+  "A(1)"  "float"  -1  ""
+  "Edge0(1)"  "float"  0  ""
+  "Edge1(1)"  "float"  1  ""
+
+[ Outputs : 1 ]
+{ Name:s  Type:s  Param:d  Expression:s }
+//------  ------  -------  ------------
+  "A(1)"  "float"  -1  ""
+
+[ Params : 2 ]
+{ Name:s  Type:s  Value:s  CanExpose:c  Min:f  Max:f }
+//------  ------  -------  -----------  -----  -----
+  "edge0"  "float"  "0.4"  1  -10  10
+  "edge1"  "float"  "0.6"  1  -10  10
